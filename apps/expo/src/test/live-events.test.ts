@@ -88,7 +88,7 @@ describe("decodeLiveEvent", () => {
     });
     const amuxEnvelope = create(AmuxEnvelopeSchema, {
       runtimeId: "runtime-1",
-      deviceId: "device-1",
+      actorId: "actor-1",
       sequence: BigInt(7),
       timestamp: BigInt(1_747_642_000),
       payload: {

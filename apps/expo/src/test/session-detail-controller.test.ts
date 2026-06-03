@@ -94,7 +94,7 @@ function createAcpOutputPayload(input: {
   });
   const amuxEnvelope = create(AmuxEnvelopeSchema, {
     runtimeId: "runtime-1",
-    deviceId: "device-1",
+    actorId: "actor-1",
     sequence: input.sequence ?? BigInt(1),
     timestamp: BigInt(1_747_642_000),
     payload: {
@@ -132,7 +132,7 @@ function createAcpThinkingPayload(input: {
   });
   const amuxEnvelope = create(AmuxEnvelopeSchema, {
     runtimeId: "runtime-1",
-    deviceId: "device-1",
+    actorId: "actor-1",
     sequence: input.sequence ?? BigInt(1),
     timestamp: BigInt(1_747_642_000),
     payload: {

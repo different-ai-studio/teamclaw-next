@@ -43,7 +43,7 @@ describe("createActorsApi", () => {
     expect(url).toBe("https://cloud.test/v1/teams/team-1/actors?limit=500");
     expect(init.method).toBe("GET");
     expect(init.headers.Authorization).toBe("Bearer tok");
-    // Directory drops ownerMemberId/deviceId — both null.
+    // Directory drops ownerMemberId — null. Daemon routing uses the actor id.
     expect(rows[0]).toEqual({
       actorId: "agent-1",
       teamId: "team-1",
@@ -57,7 +57,6 @@ describe("createActorsApi", () => {
       defaultWorkspaceId: "ws-1",
       ownerMemberId: null,
       visibility: "team",
-      deviceId: null,
       agentKind: "claude",
     });
   });

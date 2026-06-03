@@ -24,7 +24,7 @@ function fakeMqtt(): TeamMqttClient & { fire: (topic: string, payload: Uint8Arra
 }
 
 describe("RuntimeStateSubscriber", () => {
-  it("watchDevice subscribes to the device-scoped wildcard", () => {
+  it("watchActor subscribes to the actor-scoped wildcard", () => {
     const mqtt = fakeMqtt();
     const subscribeSpy = vi.spyOn(mqtt, "subscribe");
     const sub = createRuntimeStateSubscriber({
@@ -39,14 +39,14 @@ describe("RuntimeStateSubscriber", () => {
       }),
       onRuntimeInfo: () => {},
     });
-    sub.watchDevice("dev1");
+    sub.watchActor("actor1");
     expect(subscribeSpy).toHaveBeenCalledWith(
-      "amux/team1/device/dev1/runtime/+/state",
+      "amux/team1/actor1/runtime/+/state",
       expect.any(Function),
     );
   });
 
-  it("invokes onRuntimeInfo with (deviceId, runtimeId, info) extracted from the topic", () => {
+  it("invokes onRuntimeInfo with (actorId, runtimeId, info) extracted from the topic", () => {
     const mqtt = fakeMqtt();
     const cb = vi.fn();
     const decodedInfo = {
@@ -62,8 +62,8 @@ describe("RuntimeStateSubscriber", () => {
       decode: () => decodedInfo,
       onRuntimeInfo: cb,
     });
-    sub.watchDevice("dev1");
-    mqtt.fire("amux/team1/device/dev1/runtime/r-topic/state", new Uint8Array([1, 2]));
-    expect(cb).toHaveBeenCalledWith("dev1", "r-topic", decodedInfo);
+    sub.watchActor("actor1");
+    mqtt.fire("amux/team1/actor1/runtime/r-topic/state", new Uint8Array([1, 2]));
+    expect(cb).toHaveBeenCalledWith("actor1", "r-topic", decodedInfo);
   });
 });

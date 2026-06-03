@@ -38,13 +38,13 @@ describe("TeamMqttClient", () => {
 
     const aHandler = vi.fn();
     const bHandler = vi.fn();
-    client.subscribe("amux/t/device/+/runtime/+/state", aHandler);
+    client.subscribe("amux/t/+/runtime/+/state", aHandler);
     client.subscribe("amux/t/session/s/live", bHandler);
 
     const payload = new Uint8Array([1, 2, 3]);
-    adapter.emitMessage({ topic: "amux/t/device/d/runtime/r/state", payload });
+    adapter.emitMessage({ topic: "amux/t/actor-a/runtime/r/state", payload });
 
-    expect(aHandler).toHaveBeenCalledWith(payload, "amux/t/device/d/runtime/r/state");
+    expect(aHandler).toHaveBeenCalledWith(payload, "amux/t/actor-a/runtime/r/state");
     expect(bHandler).not.toHaveBeenCalled();
   });
 

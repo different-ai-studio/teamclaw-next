@@ -110,18 +110,15 @@ export default function ActorDetailRoute() {
       setAllActors(rows);
       const found = rows.find((row) => row.actorId === actorId) ?? null;
       if (found?.actorType === "agent") {
-        // Directory drops deviceId/owner; re-hydrate from agent-access so
-        // RPC routing and owner-gating survive a refresh.
-        const [deviceId, owner] = await Promise.all([
-          agentAccessApi.getAgentDeviceId(actorId).catch(() => null),
-          state.currentMemberActorId
-            ? agentAccessApi
-                .canManageAgent(actorId, state.currentMemberActorId)
-                .catch(() => false)
-            : Promise.resolve(false),
-        ]);
+        // Directory drops owner; re-hydrate owner-gating from agent-access so it
+        // survives a refresh. Daemon routing uses the actor id directly.
+        const owner = state.currentMemberActorId
+          ? await agentAccessApi
+              .canManageAgent(actorId, state.currentMemberActorId)
+              .catch(() => false)
+          : false;
         setAgentIsOwner(owner);
-        setActor({ ...found, deviceId });
+        setActor(found);
       } else {
         setAgentIsOwner(false);
         setActor(found);
@@ -149,9 +146,8 @@ export default function ActorDetailRoute() {
 
         if (nextActor?.actorType === "agent") {
           setIsLoadingAuthorizedHumans(true);
-          const [authorizedRows, deviceId, owner, workspaceRows] = await Promise.all([
+          const [authorizedRows, owner, workspaceRows] = await Promise.all([
             agentAccessApi.listAuthorizedHumans(actorId),
-            agentAccessApi.getAgentDeviceId(actorId).catch(() => null),
             state.currentMemberActorId
               ? agentAccessApi
                   .canManageAgent(actorId, state.currentMemberActorId)
@@ -162,11 +158,7 @@ export default function ActorDetailRoute() {
           if (cancelled) return;
           setAuthorizedHumans(authorizedRows);
           setAgentIsOwner(owner);
-          // Merge the on-demand deviceId back onto the directory actor so the
-          // agent-management RPC paths and ActorDetailScreen keep working.
-          setActor((prev) =>
-            prev?.actorId === actorId ? { ...prev, deviceId } : prev,
-          );
+          // Daemon routing uses the agent's actor id directly; no device-id merge.
           setAgentWorkspaces(
             workspaceRows
               .filter((w) => !w.archived)
@@ -386,7 +378,7 @@ export default function ActorDetailRoute() {
 
   const addAgentWorkspace = useCallback(
     async (path: string) => {
-      if (!actor?.deviceId || !teamMqtt || !teamId || !state.currentMemberActorId) {
+      if (actor?.actorType !== "agent" || !actor?.actorId || !teamMqtt || !teamId || !state.currentMemberActorId) {
         showToast("error", "Daemon routing is unavailable.");
         return;
       }
@@ -399,7 +391,7 @@ export default function ActorDetailRoute() {
           requesterActorId: state.currentMemberActorId,
         });
         await rpc.addWorkspace({
-          targetDeviceId: actor.deviceId,
+          targetActorId: actor.actorId,
           path,
           timeoutMs: 25_000,
         });
@@ -415,7 +407,8 @@ export default function ActorDetailRoute() {
       }
     },
     [
-      actor?.deviceId,
+      actor?.actorType,
+      actor?.actorId,
       isAddingAgentWorkspace,
       reloadAgentWorkspaces,
       refresh,
@@ -427,7 +420,7 @@ export default function ActorDetailRoute() {
 
   const removeAgentWorkspace = useCallback(
     async (workspaceId: string) => {
-      if (!actor?.deviceId || !teamMqtt || !teamId || !state.currentMemberActorId) {
+      if (actor?.actorType !== "agent" || !actor?.actorId || !teamMqtt || !teamId || !state.currentMemberActorId) {
         showToast("error", "Daemon routing is unavailable.");
         return;
       }
@@ -440,7 +433,7 @@ export default function ActorDetailRoute() {
           requesterActorId: state.currentMemberActorId,
         });
         await rpc.removeWorkspace({
-          targetDeviceId: actor.deviceId,
+          targetActorId: actor.actorId,
           workspaceId,
           timeoutMs: 25_000,
         });
@@ -456,7 +449,8 @@ export default function ActorDetailRoute() {
       }
     },
     [
-      actor?.deviceId,
+      actor?.actorType,
+      actor?.actorId,
       isRemovingAgentWorkspace,
       reloadAgentWorkspaces,
       refresh,

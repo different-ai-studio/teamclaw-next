@@ -6,7 +6,6 @@ export type ConnectedAgent = {
   permissionLevel: string;
   visibility: "team" | "personal";
   isOwner: boolean;
-  deviceId: string | null;
   lastActiveAt: string | null;
 };
 

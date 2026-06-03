@@ -5,11 +5,10 @@ import type { Actor, ActorType } from "./actor-types";
  * Cloud-only actors provider. Mirrors the iOS CloudAPIActorRepository: the team
  * directory (GET /v1/teams/:id/actors) is the single source for actor rows.
  *
- * NOTE — the directory does NOT carry `ownerMemberId` or `deviceId` (they live
- * on the agents table, not the actor_directory view). Like iOS, owner-gating
- * moves to GET /v1/agents/:id/permission and device routing to
- * GET /v1/agents/:id/device-id (see agent-access-api). Actors surfaced here
- * therefore expose null for both; consumers that need them fetch on demand.
+ * NOTE — the directory does NOT carry `ownerMemberId` (it lives on the agents
+ * table, not the actor_directory view). Like iOS, owner-gating moves to
+ * GET /v1/agents/:id/permission (see agent-access-api). Daemon routing uses the
+ * agent's actor id (== actorId) directly — there is no separate device id.
  */
 
 // FC mapDirectoryActor camelCase shape.
@@ -64,7 +63,6 @@ function toActor(row: CloudActor): Actor {
     ownerMemberId: null,
     visibility:
       row.visibility === "personal" ? "personal" : row.visibility === "team" ? "team" : null,
-    deviceId: null,
     agentKind: row.agentKind ?? defaultAgentType ?? agentTypes[0] ?? null,
   };
 }

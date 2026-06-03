@@ -22,7 +22,7 @@ type RuntimeCommandSenderDeps = {
 };
 
 export type RuntimePermissionResponseInput = {
-  targetDeviceId: string;
+  targetActorId: string;
   runtimeId: string;
   requestId: string;
   granted: boolean;
@@ -34,7 +34,7 @@ export type RuntimeCommandSender = {
 
 export type PermissionRuntimeTarget = {
   agentId: string;
-  deviceId: string;
+  actorId: string;
   runtimeId: string;
 };
 
@@ -49,8 +49,8 @@ function required(value: string | null | undefined, label: string): string {
   return trimmed;
 }
 
-export function runtimeCommandsTopic(teamId: string, deviceId: string, runtimeId: string): string {
-  return `amux/${teamId}/device/${deviceId}/runtime/${runtimeId}/commands`;
+export function runtimeCommandsTopic(teamId: string, actorId: string, runtimeId: string): string {
+  return `amux/${teamId}/${actorId}/runtime/${runtimeId}/commands`;
 }
 
 export function createRuntimeCommandSender(
@@ -59,7 +59,7 @@ export function createRuntimeCommandSender(
   return {
     async sendPermissionResponse(input) {
       const teamId = required(deps.teamId, "team id");
-      const targetDeviceId = required(input.targetDeviceId, "target device id");
+      const targetActorId = required(input.targetActorId, "target actor id");
       const runtimeId = required(input.runtimeId, "runtime id");
       const requestId = required(input.requestId, "request id");
       const peerId = required(deps.peerId, "peer id");
@@ -79,7 +79,7 @@ export function createRuntimeCommandSender(
       const senderActorId = deps.senderActorId?.trim() ?? "";
       const envelope = create(RuntimeCommandEnvelopeSchema, {
         runtimeId,
-        deviceId: targetDeviceId,
+        actorId: targetActorId,
         peerId,
         commandId: deps.commandId?.() ?? uuidV4(),
         timestamp: BigInt(Math.floor(deps.nowSeconds?.() ?? Date.now() / 1000)),
@@ -88,7 +88,7 @@ export function createRuntimeCommandSender(
       });
 
       await deps.mqtt.publish(
-        runtimeCommandsTopic(teamId, targetDeviceId, runtimeId),
+        runtimeCommandsTopic(teamId, targetActorId, runtimeId),
         toBinary(RuntimeCommandEnvelopeSchema, envelope),
         false,
       );
@@ -122,7 +122,7 @@ function fallbackRuntimeForAgent(
 export function resolvePermissionRuntimeTarget(args: {
   requestingActorId?: string | null;
   agentParticipantIds: ReadonlyArray<string>;
-  connectedAgents: ReadonlyArray<Pick<ConnectedAgent, "agentId" | "deviceId">>;
+  connectedAgents: ReadonlyArray<Pick<ConnectedAgent, "agentId">>;
   runtimeInfoByAgentId: ReadonlyMap<string, Pick<RuntimeInfo, "runtimeId">>;
   fallbackRuntime: PermissionRuntimeFallback;
 }): PermissionRuntimeTarget | null {
@@ -139,21 +139,23 @@ export function resolvePermissionRuntimeTarget(args: {
     ...agentParticipantIds,
   ].filter((id) => id && participantSet.has(id)));
 
-  const connectedByAgentId = new Map<string, Pick<ConnectedAgent, "agentId" | "deviceId">>();
+  // An agent's routing actor id IS its agentId (== actor_id); the directory no
+  // longer carries a separate deviceId. Only consider agents we know are
+  // connected so we don't route to an offline daemon.
+  const connectedAgentIds = new Set<string>();
   for (const agent of args.connectedAgents) {
-    if (agent.agentId) connectedByAgentId.set(agent.agentId, agent);
+    if (agent.agentId) connectedAgentIds.add(agent.agentId);
   }
 
   for (const agentId of candidates) {
-    const deviceId = connectedByAgentId.get(agentId)?.deviceId?.trim() ?? "";
-    if (!deviceId) continue;
+    if (!connectedAgentIds.has(agentId)) continue;
 
     const runtimeId =
       args.runtimeInfoByAgentId.get(agentId)?.runtimeId?.trim() ||
       fallbackRuntimeForAgent(args.fallbackRuntime, agentId, agentParticipantIds.length);
     if (!runtimeId) continue;
 
-    return { agentId, deviceId, runtimeId };
+    return { agentId, actorId: agentId, runtimeId };
   }
 
   return null;

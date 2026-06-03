@@ -24,7 +24,6 @@ describe("createAgentAccessApi", () => {
               permissionLevel: "team",
               visibility: "team",
               isOwner: true,
-              deviceId: "dev1",
               lastActiveAt: "2026-05-20T10:00:00.000Z",
             },
           ],
@@ -43,7 +42,6 @@ describe("createAgentAccessApi", () => {
       permissionLevel: "team",
       visibility: "team",
       isOwner: true,
-      deviceId: "dev1",
       lastActiveAt: "2026-05-20T10:00:00.000Z",
     });
   });
@@ -105,14 +103,6 @@ describe("createAgentAccessApi", () => {
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toBe("https://cloud.test/v1/agents/agent-1/access/m2");
     expect(init.method).toBe("DELETE");
-  });
-
-  it("getAgentDeviceId GETs the device id", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ deviceId: "dev9" }), { status: 200 }),
-    );
-    await expect(api(fetchImpl).getAgentDeviceId("agent-1")).resolves.toBe("dev9");
-    expect(fetchImpl.mock.calls[0][0]).toBe("https://cloud.test/v1/agents/agent-1/device-id");
   });
 
   it("canManageAgent is true only when the permission role is owner", async () => {

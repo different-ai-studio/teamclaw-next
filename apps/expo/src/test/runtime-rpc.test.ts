@@ -27,7 +27,7 @@ function createFakeMqtt() {
 }
 
 describe("runtime rpc client", () => {
-  it("publishes runtime_start to the target device and resolves the matching response", async () => {
+  it("publishes runtime_start to the target actor and listens on the requester's reply topic", async () => {
     const mqtt = createFakeMqtt();
     const rpc = createRuntimeRpcClient({
       mqtt,
@@ -38,7 +38,7 @@ describe("runtime rpc client", () => {
     });
 
     const promise = rpc.runtimeStart({
-      targetDeviceId: "device-1",
+      targetActorId: "actor-1",
       workspaceId: "workspace-1",
       worktree: "/tmp/repo",
       sessionId: "session-1",
@@ -46,8 +46,9 @@ describe("runtime rpc client", () => {
       initialPrompt: "",
     });
 
+    // The daemon replies on the requester's actor namespace, not the target's.
     expect(mqtt.subscribe).toHaveBeenCalledWith(
-      "amux/team-1/device/device-1/rpc/res",
+      "amux/team-1/member-1/rpc/res",
       expect.any(Function),
     );
     expect(mqtt.publish).toHaveBeenCalledTimes(1);
@@ -57,14 +58,13 @@ describe("runtime rpc client", () => {
       Uint8Array,
       boolean,
     ];
-    expect(topic).toBe("amux/team-1/device/device-1/rpc/req");
+    expect(topic).toBe("amux/team-1/actor-1/rpc/req");
     expect(retain).toBe(false);
 
     const request = fromBinary(RpcRequestSchema, bytes);
     expect(request.requestId).toBe("request-1");
     expect(request.requesterActorId).toBe("member-1");
     expect(request.requesterClientId).toBe("client-1");
-    expect(request.senderDeviceId).toBe("client-1");
     expect(request.method.case).toBe("runtimeStart");
     if (request.method.case !== "runtimeStart") {
       throw new Error("expected runtimeStart request");
@@ -87,7 +87,7 @@ describe("runtime rpc client", () => {
       result: { case: "runtimeStartResult", value: result },
     });
     mqtt.emit(
-      "amux/team-1/device/device-1/rpc/res",
+      "amux/team-1/member-1/rpc/res",
       toBinary(RpcResponseSchema, response),
     );
 
@@ -109,7 +109,7 @@ describe("runtime rpc client", () => {
     });
 
     const promise = rpc.runtimeStart({
-      targetDeviceId: "device-1",
+      targetActorId: "actor-1",
       workspaceId: "workspace-1",
       worktree: "/tmp/repo",
       sessionId: "session-1",
@@ -126,14 +126,14 @@ describe("runtime rpc client", () => {
       result: { case: "runtimeStartResult", value: result },
     });
     mqtt.emit(
-      "amux/team-1/device/device-1/rpc/res",
+      "amux/team-1/member-1/rpc/res",
       toBinary(RpcResponseSchema, response),
     );
 
     await expect(promise).rejects.toThrow("workspace missing");
   });
 
-  it("publishes runtime_stop to the target device and resolves the matching response", async () => {
+  it("publishes runtime_stop to the target actor and resolves the matching response", async () => {
     const mqtt = createFakeMqtt();
     const rpc = createRuntimeRpcClient({
       mqtt,
@@ -144,12 +144,12 @@ describe("runtime rpc client", () => {
     });
 
     const promise = rpc.runtimeStop({
-      targetDeviceId: "device-1",
+      targetActorId: "actor-1",
       runtimeId: "rt-abcd",
     });
 
     expect(mqtt.subscribe).toHaveBeenCalledWith(
-      "amux/team-1/device/device-1/rpc/res",
+      "amux/team-1/member-1/rpc/res",
       expect.any(Function),
     );
     expect(mqtt.publish).toHaveBeenCalledTimes(1);
@@ -159,7 +159,7 @@ describe("runtime rpc client", () => {
       Uint8Array,
       boolean,
     ];
-    expect(topic).toBe("amux/team-1/device/device-1/rpc/req");
+    expect(topic).toBe("amux/team-1/actor-1/rpc/req");
     expect(retain).toBe(false);
 
     const request = fromBinary(RpcRequestSchema, bytes);
@@ -177,14 +177,14 @@ describe("runtime rpc client", () => {
       result: { case: "runtimeStopResult", value: result },
     });
     mqtt.emit(
-      "amux/team-1/device/device-1/rpc/res",
+      "amux/team-1/member-1/rpc/res",
       toBinary(RpcResponseSchema, response),
     );
 
     await expect(promise).resolves.toMatchObject({ accepted: true });
   });
 
-  it("publishes add_workspace to the target device and resolves the matching response", async () => {
+  it("publishes add_workspace to the target actor and resolves the matching response", async () => {
     const mqtt = createFakeMqtt();
     const rpc = createRuntimeRpcClient({
       mqtt,
@@ -195,7 +195,7 @@ describe("runtime rpc client", () => {
     });
 
     const promise = rpc.addWorkspace({
-      targetDeviceId: "device-1",
+      targetActorId: "actor-1",
       path: "/tmp/repo",
     });
 
@@ -204,7 +204,7 @@ describe("runtime rpc client", () => {
       Uint8Array,
       boolean,
     ];
-    expect(topic).toBe("amux/team-1/device/device-1/rpc/req");
+    expect(topic).toBe("amux/team-1/actor-1/rpc/req");
     expect(retain).toBe(false);
 
     const request = fromBinary(RpcRequestSchema, bytes);
@@ -222,7 +222,7 @@ describe("runtime rpc client", () => {
       result: { case: "addWorkspaceResult", value: result },
     });
     mqtt.emit(
-      "amux/team-1/device/device-1/rpc/res",
+      "amux/team-1/member-1/rpc/res",
       toBinary(RpcResponseSchema, response),
     );
 
@@ -240,7 +240,7 @@ describe("runtime rpc client", () => {
     });
 
     const promise = rpc.removeWorkspace({
-      targetDeviceId: "device-1",
+      targetActorId: "actor-1",
       workspaceId: "workspace-1",
     });
 
@@ -254,7 +254,7 @@ describe("runtime rpc client", () => {
       result: { case: "removeWorkspaceResult", value: result },
     });
     mqtt.emit(
-      "amux/team-1/device/device-1/rpc/res",
+      "amux/team-1/member-1/rpc/res",
       toBinary(RpcResponseSchema, response),
     );
 

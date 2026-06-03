@@ -19,7 +19,7 @@ describe("runtime start planning", () => {
           defaultWorkspaceId: "workspace-default",
         },
       ],
-      connectedAgents: [{ agentId: "agent-1", deviceId: "device-1" }],
+      connectedAgents: [{ agentId: "agent-1" }],
       workspaces: [
         { id: "workspace-other", path: "/tmp/other", agentId: "agent-1" },
         { id: "workspace-default", path: "/tmp/default", agentId: null },
@@ -29,7 +29,7 @@ describe("runtime start planning", () => {
     expect(plans).toEqual([
       {
         agentActorId: "agent-1",
-        targetDeviceId: "device-1",
+        targetActorId: "agent-1",
         workspaceId: "workspace-default",
         worktree: "/tmp/default",
         agentType: AgentType.OPENCODE,
@@ -48,7 +48,7 @@ describe("runtime start planning", () => {
           defaultWorkspaceId: null,
         },
       ],
-      connectedAgents: [{ agentId: "agent-1", deviceId: "device-1" }],
+      connectedAgents: [{ agentId: "agent-1" }],
       workspaces: [
         { id: "workspace-team", path: "/tmp/team", agentId: null },
         { id: "workspace-owned", path: "/tmp/owned", agentId: "agent-1" },
@@ -70,7 +70,7 @@ describe("runtime start planning", () => {
           defaultWorkspaceId: "workspace-default",
         },
       ],
-      connectedAgents: [{ agentId: "agent-1", deviceId: "device-1" }],
+      connectedAgents: [{ agentId: "agent-1" }],
       explicitSelection: { workspaceId: "workspace-picked", agentType: "codex" },
       workspaces: [
         { id: "workspace-default", path: "/tmp/default", agentId: null },
@@ -85,7 +85,7 @@ describe("runtime start planning", () => {
     });
   });
 
-  it("throws when an agent has no daemon device id", () => {
+  it("throws when an agent's daemon is not connected", () => {
     expect(() =>
       resolveAgentRuntimeStartPlans({
         agents: [
@@ -97,7 +97,7 @@ describe("runtime start planning", () => {
             defaultWorkspaceId: null,
           },
         ],
-        connectedAgents: [{ agentId: "agent-1", deviceId: null }],
+        connectedAgents: [],
         workspaces: [{ id: "workspace-1", path: "/tmp/repo", agentId: null }],
       }),
     ).toThrow(/daemon is offline/i);
@@ -125,7 +125,7 @@ describe("runtime start planning", () => {
         workspaceId: "workspace-current",
         backendType: "codex",
       },
-      connectedAgents: [{ agentId: "agent-1", deviceId: "device-1" }],
+      connectedAgents: [{ agentId: "agent-1" }],
       workspaces: [
         { id: "workspace-default", path: "/tmp/default", agentId: null },
         { id: "workspace-current", path: "/tmp/current", agentId: "agent-1" },
@@ -134,7 +134,7 @@ describe("runtime start planning", () => {
 
     expect(plan).toEqual({
       agentActorId: "agent-1",
-      targetDeviceId: "device-1",
+      targetActorId: "agent-1",
       runtimeIdToStop: "rt-old",
       workspaceId: "workspace-current",
       worktree: "/tmp/current",

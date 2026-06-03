@@ -19,7 +19,7 @@ import { uuidV4 } from "../uuid";
 export type RuntimeRpcMqtt = Pick<TeamMqttClient, "publish" | "subscribe">;
 
 export type RuntimeStartArgs = {
-  targetDeviceId: string;
+  targetActorId: string;
   workspaceId: string;
   worktree: string;
   sessionId: string;
@@ -30,19 +30,19 @@ export type RuntimeStartArgs = {
 };
 
 export type RuntimeStopArgs = {
-  targetDeviceId: string;
+  targetActorId: string;
   runtimeId: string;
   timeoutMs?: number;
 };
 
 export type AddWorkspaceArgs = {
-  targetDeviceId: string;
+  targetActorId: string;
   path: string;
   timeoutMs?: number;
 };
 
 export type RemoveWorkspaceArgs = {
-  targetDeviceId: string;
+  targetActorId: string;
   workspaceId: string;
   timeoutMs?: number;
 };
@@ -127,9 +127,9 @@ export function createRuntimeRpcClient(deps: RuntimeRpcClientDeps): RuntimeRpcCl
       const teamId = deps.teamId.trim();
       if (!teamId) return Promise.reject(new Error("team id is required"));
 
-      const targetDeviceId = args.targetDeviceId.trim();
-      if (!targetDeviceId) {
-        return Promise.reject(new Error("target device id is required"));
+      const targetActorId = args.targetActorId.trim();
+      if (!targetActorId) {
+        return Promise.reject(new Error("target actor id is required"));
       }
 
       const requestId = deps.requestId?.() ?? uuidV4();
@@ -146,14 +146,15 @@ export function createRuntimeRpcClient(deps: RuntimeRpcClientDeps): RuntimeRpcCl
       });
       const request = create(RpcRequestSchema, {
         requestId,
-        senderDeviceId: requesterClientId,
         requesterClientId,
         requesterActorId: deps.requesterActorId,
-        requesterDeviceId: "",
         method: { case: "runtimeStart", value: start },
       });
-      const requestTopic = `amux/${teamId}/device/${targetDeviceId}/rpc/req`;
-      const responseTopic = `amux/${teamId}/device/${targetDeviceId}/rpc/res`;
+      const requestTopic = `amux/${teamId}/${targetActorId}/rpc/req`;
+      // The daemon replies on the REQUESTER's actor namespace (see
+      // apps/daemon/src/teamclaw/rpc.rs:50-53), not the target's, so subscribe
+      // there. Fall back to the target actor when we have no requester actor id.
+      const responseTopic = `amux/${teamId}/${deps.requesterActorId.trim() || targetActorId}/rpc/res`;
 
       return new Promise<RuntimeStartResult>((resolve, reject) => {
         let settled = false;
@@ -211,9 +212,9 @@ export function createRuntimeRpcClient(deps: RuntimeRpcClientDeps): RuntimeRpcCl
       const teamId = deps.teamId.trim();
       if (!teamId) return Promise.reject(new Error("team id is required"));
 
-      const targetDeviceId = args.targetDeviceId.trim();
-      if (!targetDeviceId) {
-        return Promise.reject(new Error("target device id is required"));
+      const targetActorId = args.targetActorId.trim();
+      if (!targetActorId) {
+        return Promise.reject(new Error("target actor id is required"));
       }
       const runtimeId = args.runtimeId.trim();
       if (!runtimeId) {
@@ -227,14 +228,13 @@ export function createRuntimeRpcClient(deps: RuntimeRpcClientDeps): RuntimeRpcCl
       const stop = create(RuntimeStopRequestSchema, { runtimeId });
       const request = create(RpcRequestSchema, {
         requestId,
-        senderDeviceId: requesterClientId,
         requesterClientId,
         requesterActorId: deps.requesterActorId,
-        requesterDeviceId: "",
         method: { case: "runtimeStop", value: stop },
       });
-      const requestTopic = `amux/${teamId}/device/${targetDeviceId}/rpc/req`;
-      const responseTopic = `amux/${teamId}/device/${targetDeviceId}/rpc/res`;
+      const requestTopic = `amux/${teamId}/${targetActorId}/rpc/req`;
+      // Daemon replies on the requester's actor namespace (rpc.rs:50-53).
+      const responseTopic = `amux/${teamId}/${deps.requesterActorId.trim() || targetActorId}/rpc/res`;
 
       return new Promise<RuntimeStopResult>((resolve, reject) => {
         let settled = false;
@@ -292,9 +292,9 @@ export function createRuntimeRpcClient(deps: RuntimeRpcClientDeps): RuntimeRpcCl
       const teamId = deps.teamId.trim();
       if (!teamId) return Promise.reject(new Error("team id is required"));
 
-      const targetDeviceId = args.targetDeviceId.trim();
-      if (!targetDeviceId) {
-        return Promise.reject(new Error("target device id is required"));
+      const targetActorId = args.targetActorId.trim();
+      if (!targetActorId) {
+        return Promise.reject(new Error("target actor id is required"));
       }
       const path = args.path.trim();
       if (!path) {
@@ -308,14 +308,13 @@ export function createRuntimeRpcClient(deps: RuntimeRpcClientDeps): RuntimeRpcCl
       const add = create(AddWorkspaceRequestSchema, { path });
       const request = create(RpcRequestSchema, {
         requestId,
-        senderDeviceId: requesterClientId,
         requesterClientId,
         requesterActorId: deps.requesterActorId,
-        requesterDeviceId: "",
         method: { case: "addWorkspace", value: add },
       });
-      const requestTopic = `amux/${teamId}/device/${targetDeviceId}/rpc/req`;
-      const responseTopic = `amux/${teamId}/device/${targetDeviceId}/rpc/res`;
+      const requestTopic = `amux/${teamId}/${targetActorId}/rpc/req`;
+      // Daemon replies on the requester's actor namespace (rpc.rs:50-53).
+      const responseTopic = `amux/${teamId}/${deps.requesterActorId.trim() || targetActorId}/rpc/res`;
 
       return new Promise<AddWorkspaceResult>((resolve, reject) => {
         let settled = false;
@@ -373,9 +372,9 @@ export function createRuntimeRpcClient(deps: RuntimeRpcClientDeps): RuntimeRpcCl
       const teamId = deps.teamId.trim();
       if (!teamId) return Promise.reject(new Error("team id is required"));
 
-      const targetDeviceId = args.targetDeviceId.trim();
-      if (!targetDeviceId) {
-        return Promise.reject(new Error("target device id is required"));
+      const targetActorId = args.targetActorId.trim();
+      if (!targetActorId) {
+        return Promise.reject(new Error("target actor id is required"));
       }
       const workspaceId = args.workspaceId.trim();
       if (!workspaceId) {
@@ -389,14 +388,13 @@ export function createRuntimeRpcClient(deps: RuntimeRpcClientDeps): RuntimeRpcCl
       const remove = create(RemoveWorkspaceRequestSchema, { workspaceId });
       const request = create(RpcRequestSchema, {
         requestId,
-        senderDeviceId: requesterClientId,
         requesterClientId,
         requesterActorId: deps.requesterActorId,
-        requesterDeviceId: "",
         method: { case: "removeWorkspace", value: remove },
       });
-      const requestTopic = `amux/${teamId}/device/${targetDeviceId}/rpc/req`;
-      const responseTopic = `amux/${teamId}/device/${targetDeviceId}/rpc/res`;
+      const requestTopic = `amux/${teamId}/${targetActorId}/rpc/req`;
+      // Daemon replies on the requester's actor namespace (rpc.rs:50-53).
+      const responseTopic = `amux/${teamId}/${deps.requesterActorId.trim() || targetActorId}/rpc/res`;
 
       return new Promise<RemoveWorkspaceResult>((resolve, reject) => {
         let settled = false;

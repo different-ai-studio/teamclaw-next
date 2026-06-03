@@ -20,7 +20,7 @@ describe("runtime command sender", () => {
     });
 
     await sender.sendPermissionResponse({
-      targetDeviceId: "device-1",
+      targetActorId: "actor-1",
       runtimeId: "rt-abcd",
       requestId: "perm-1",
       granted: true,
@@ -32,12 +32,12 @@ describe("runtime command sender", () => {
       Uint8Array,
       boolean,
     ];
-    expect(topic).toBe("amux/team-1/device/device-1/runtime/rt-abcd/commands");
+    expect(topic).toBe("amux/team-1/actor-1/runtime/rt-abcd/commands");
     expect(retain).toBe(false);
 
     const envelope = fromBinary(RuntimeCommandEnvelopeSchema, bytes);
     expect(envelope.runtimeId).toBe("rt-abcd");
-    expect(envelope.deviceId).toBe("device-1");
+    expect(envelope.actorId).toBe("actor-1");
     expect(envelope.peerId).toBe("teamclaw-expo-member-1");
     expect(envelope.commandId).toBe("command-1");
     expect(envelope.timestamp).toBe(1_779_430_400n);
@@ -61,7 +61,7 @@ describe("runtime command sender", () => {
     });
 
     await sender.sendPermissionResponse({
-      targetDeviceId: "device-1",
+      targetActorId: "actor-1",
       runtimeId: "rt-abcd",
       requestId: "perm-2",
       granted: false,
@@ -87,7 +87,7 @@ describe("runtime command sender", () => {
 
     await expect(
       sender.sendPermissionResponse({
-        targetDeviceId: "device-1",
+        targetActorId: "actor-1",
         runtimeId: "",
         requestId: "perm-1",
         granted: true,
@@ -98,14 +98,11 @@ describe("runtime command sender", () => {
 });
 
 describe("resolvePermissionRuntimeTarget", () => {
-  it("chooses the requesting agent's live runtime and device when available", () => {
+  it("chooses the requesting agent's live runtime, routing by its actor id", () => {
     const target = resolvePermissionRuntimeTarget({
       requestingActorId: "agent-2",
       agentParticipantIds: ["agent-1", "agent-2"],
-      connectedAgents: [
-        { agentId: "agent-1", deviceId: "device-1" },
-        { agentId: "agent-2", deviceId: "device-2" },
-      ],
+      connectedAgents: [{ agentId: "agent-1" }, { agentId: "agent-2" }],
       runtimeInfoByAgentId: new Map([
         ["agent-1", { runtimeId: "rt-1" }],
         ["agent-2", { runtimeId: "rt-2" }],
@@ -115,7 +112,7 @@ describe("resolvePermissionRuntimeTarget", () => {
 
     expect(target).toEqual({
       agentId: "agent-2",
-      deviceId: "device-2",
+      actorId: "agent-2",
       runtimeId: "rt-2",
     });
   });
@@ -124,24 +121,24 @@ describe("resolvePermissionRuntimeTarget", () => {
     const target = resolvePermissionRuntimeTarget({
       requestingActorId: "agent-1",
       agentParticipantIds: ["agent-1"],
-      connectedAgents: [{ agentId: "agent-1", deviceId: "device-1" }],
+      connectedAgents: [{ agentId: "agent-1" }],
       runtimeInfoByAgentId: new Map(),
       fallbackRuntime: { agentId: "agent-1", runtimeId: "rt-db" },
     });
 
     expect(target).toEqual({
       agentId: "agent-1",
-      deviceId: "device-1",
+      actorId: "agent-1",
       runtimeId: "rt-db",
     });
   });
 
-  it("returns null when the agent device or runtime cannot be resolved", () => {
+  it("returns null when the agent is not connected", () => {
     expect(
       resolvePermissionRuntimeTarget({
         requestingActorId: "agent-1",
         agentParticipantIds: ["agent-1"],
-        connectedAgents: [{ agentId: "agent-1", deviceId: null }],
+        connectedAgents: [],
         runtimeInfoByAgentId: new Map([["agent-1", { runtimeId: "rt-1" }]]),
         fallbackRuntime: null,
       }),

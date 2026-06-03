@@ -13,9 +13,9 @@ export type ConnectedAgentsStoreState = {
 };
 
 type Subscriber = {
-  watchDevice: (deviceId: string) => void;
-  unwatchDevice: (deviceId: string) => void;
-  watchedDevices: () => Set<string>;
+  watchActor: (actorId: string) => void;
+  unwatchActor: (actorId: string) => void;
+  watchedActors: () => Set<string>;
   dispose: () => void;
 };
 
@@ -32,7 +32,7 @@ export type ConnectedAgentsStore = {
   reload: () => Promise<void>;
   shareToTeam: (agentId: string) => Promise<boolean>;
   makePersonal: (agentId: string) => Promise<boolean>;
-  handleRuntimeInfo: (deviceId: string, runtimeId: string, info: RuntimeInfo) => void;
+  handleRuntimeInfo: (actorId: string, runtimeId: string, info: RuntimeInfo) => void;
   dispose: () => Promise<void>;
 };
 
@@ -53,10 +53,11 @@ export function createConnectedAgentsStore(deps: Deps): ConnectedAgentsStore {
   }
 
   function diffWatches(prev: ConnectedAgent[], next: ConnectedAgent[]) {
-    const prevDevices = new Set(prev.map((a) => a.deviceId).filter(Boolean) as string[]);
-    const nextDevices = new Set(next.map((a) => a.deviceId).filter(Boolean) as string[]);
-    for (const id of prevDevices) if (!nextDevices.has(id)) deps.subscriber.unwatchDevice(id);
-    for (const id of nextDevices) if (!prevDevices.has(id)) deps.subscriber.watchDevice(id);
+    // An agent's runtime-state topic is keyed by its actor id (== agentId).
+    const prevActors = new Set(prev.map((a) => a.agentId).filter(Boolean) as string[]);
+    const nextActors = new Set(next.map((a) => a.agentId).filter(Boolean) as string[]);
+    for (const id of prevActors) if (!nextActors.has(id)) deps.subscriber.unwatchActor(id);
+    for (const id of nextActors) if (!prevActors.has(id)) deps.subscriber.watchActor(id);
   }
 
   const store: ConnectedAgentsStore = {
@@ -100,8 +101,8 @@ export function createConnectedAgentsStore(deps: Deps): ConnectedAgentsStore {
         return false;
       }
     },
-    handleRuntimeInfo(deviceId: string, _runtimeId: string, info: RuntimeInfo) {
-      const agentIdx = state.agents.findIndex((a) => a.deviceId === deviceId);
+    handleRuntimeInfo(actorId: string, _runtimeId: string, info: RuntimeInfo) {
+      const agentIdx = state.agents.findIndex((a) => a.agentId === actorId);
       if (agentIdx < 0) return;
       const next = state.agents.slice();
       next[agentIdx] = { ...next[agentIdx], lastActiveAt: new Date().toISOString() };
