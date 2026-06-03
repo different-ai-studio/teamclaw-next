@@ -62,10 +62,7 @@ struct StartRuntimeError {
     failed_stage: String,
 }
 
-fn load_team_runtime_env(
-    workspace_root: &Path,
-    team_id: Option<&str>,
-) -> HashMap<String, String> {
+fn load_team_runtime_env(workspace_root: &Path, team_id: Option<&str>) -> HashMap<String, String> {
     crate::team_shared_env::load_team_env_for_workspace(workspace_root, team_id)
 }
 
@@ -983,7 +980,11 @@ impl DaemonServer {
                 crate::config::OpenCodeCompatStore::new(),
             ));
             let opencode_binary = crate::opencode_install::resolve_binary(
-                self.config.agents.opencode.as_ref().map(|c| c.binary.as_str()),
+                self.config
+                    .agents
+                    .opencode
+                    .as_ref()
+                    .map(|c| c.binary.as_str()),
             );
             let opencode_settings = Some(std::sync::Arc::new(
                 crate::opencode_settings::OpenCodeSettingsService::new(opencode_binary),
@@ -3284,10 +3285,9 @@ impl DaemonServer {
                                 (!w.remote_workspace_id.is_empty())
                                     .then_some(w.remote_workspace_id.clone())
                             });
-                        let runtime_env = match self.assemble_spawn_runtime_env_for_worktree(
-                            &worktree,
-                            &ws_id,
-                        ) {
+                        let runtime_env = match self
+                            .assemble_spawn_runtime_env_for_worktree(&worktree, &ws_id)
+                        {
                             Ok(env) => env,
                             Err(e) => {
                                 warn!(
@@ -4298,6 +4298,36 @@ impl DaemonServer {
             // runtimes that were reused without a live subscription, so
             // @-mention prompts published to MQTT never reached send_prompt.
             self.ensure_collab_session_registered(session_id).await?;
+            if let Some(desired_model) = initial_model_override
+                .as_deref()
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+            {
+                let current = self
+                    .agents
+                    .lock()
+                    .await
+                    .current_model(&existing)
+                    .cloned()
+                    .unwrap_or_default();
+                if desired_model != current {
+                    let mut agents = self.agents.lock().await;
+                    match agents.send_set_model(&existing, desired_model).await {
+                        Ok(()) => {
+                            agents.set_current_model(&existing, desired_model);
+                        }
+                        Err(e) => {
+                            warn!(
+                                runtime_id = %existing,
+                                session_id,
+                                model_id = %desired_model,
+                                err = %e,
+                                "apply_start_runtime: dedup reuse send_set_model failed"
+                            );
+                        }
+                    }
+                }
+            }
             if !initial_prompt.trim().is_empty() {
                 if let Err(e) = self
                     .agents
@@ -4453,9 +4483,7 @@ impl DaemonServer {
             crate::team_link::ensure_team_link(team_id, &resolved_worktree);
         }
 
-        if let Some(config) =
-            load_team_shared_config_for_workspace(Path::new(&resolved_worktree))
-        {
+        if let Some(config) = load_team_shared_config_for_workspace(Path::new(&resolved_worktree)) {
             sync_team_shared_dir_for_workspace(Path::new(&resolved_worktree), &config);
         }
 

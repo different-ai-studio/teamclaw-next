@@ -10,6 +10,7 @@ import {
   normalizeToolResultEvent,
   normalizeToolUseEvent,
   rememberLiveEventId,
+  streamEntryHasVisibleContent,
   shouldFlushPendingAgentReplyFallback,
 } from "@/lib/live-agent-stream";
 
@@ -191,5 +192,41 @@ describe("live agent stream event helpers", () => {
     expect(mergePendingAgentReplies(pending)?.content).toBe(
       "CPU Top 3\n\nMemory Top 3",
     );
+  });
+
+  it("treats parked empty agent replies as no reply", () => {
+    const pending = [
+      { messageId: "m1", content: "" },
+      { messageId: "m2", content: "   " },
+    ] as TeamclawMessage[];
+    expect(mergePendingAgentReplies(pending)).toBeNull();
+  });
+
+  it("detects when a stream ended without any visible content", () => {
+    expect(streamEntryHasVisibleContent(undefined)).toBe(false);
+    expect(
+      streamEntryHasVisibleContent({
+        outputText: " ",
+        thinkingText: "",
+        toolCalls: [],
+        parts: [],
+      }),
+    ).toBe(false);
+    expect(
+      streamEntryHasVisibleContent({
+        outputText: "",
+        thinkingText: "",
+        toolCalls: [{ id: "tool-1" }],
+        parts: [],
+      }),
+    ).toBe(true);
+    expect(
+      streamEntryHasVisibleContent({
+        outputText: "answer",
+        thinkingText: "",
+        toolCalls: [],
+        parts: [],
+      }),
+    ).toBe(true);
   });
 });

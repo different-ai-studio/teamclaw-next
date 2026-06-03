@@ -3153,7 +3153,8 @@
       "notStartedDesc": "Agent {{shortId}} 的 daemon 未响应 runtimeStart（可能未在线或未加入团队）。",
       "rpcNotReadyTitle": "MQTT/RPC 未就绪",
       "rpcNotReadyDesc": "无法向 daemon 发送 runtimeStart。请检查 MQTT 连接与团队登录状态。",
-      "startFailedTitle": "启动 Agent runtime 失败"
+      "startFailedTitle": "启动 Agent runtime 失败",
+      "emptyReply": "Agent 没有返回任何内容，所选模型可能不可用或配置异常。"
     },
     "workspace": {
       "labeledMessage": "{{agentLabel}}：{{message}}",
