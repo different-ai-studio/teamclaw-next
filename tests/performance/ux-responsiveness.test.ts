@@ -20,6 +20,7 @@ import {
   createSession,
   archiveSession,
 } from '../stress/stress-helpers';
+import { v2Call } from '../v2-e2e/_utils/v2-app';
 
 const REPORT_DIR = join(process.cwd(), 'tests/performance/reports');
 
@@ -36,6 +37,42 @@ function percentile(arr: number[], p: number): number {
 function mean(arr: number[]): number {
   if (arr.length === 0) return 0;
   return Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 100) / 100;
+}
+
+// ── Deterministic session seeding via the V2 E2E control surface ──────────
+// HOT-01/SESSION-01 need real sessions to render. The real `createSession()`
+// path requires an FC-provisioned team (currentTeam.id), which is absent in a
+// plain dev run, so those scenarios would skip. When the app is built/run with
+// VITE_TEAMCLAW_E2E=true, `window.__TEAMCLAW_V2_E2E__.seedConversation` installs
+// a synthetic team + sessions directly into the stores — no backend, no agent
+// runtime — which is exactly the right substrate for a render micro-benchmark.
+async function e2eControlAvailable(): Promise<boolean> {
+  try {
+    return (await executeJs('String(Boolean(window.__TEAMCLAW_V2_E2E__))')) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+let seedCounter = 0;
+
+// Seed `ids` as sessions in a synthetic team; `activeId` becomes the rendered
+// session (pass a non-target id to leave the target idle for a cold-ish switch).
+async function seedSessions(ids: string[], activeId: string | null): Promise<void> {
+  seedCounter += 1;
+  const runId = `perf-${Date.now()}-${seedCounter}`;
+  const memberId = `${runId}-member`;
+  const agentId = `${runId}-agent`;
+  await v2Call('seedConversation', {
+    runId,
+    teamId: 'perf-e2e-team',
+    actors: [
+      { id: memberId, actorType: 'member', displayName: 'Perf Member' },
+      { id: agentId, actorType: 'agent', displayName: 'Perf Agent' },
+    ],
+    sessions: ids.map((sid) => ({ id: sid, title: sid, participants: [memberId, agentId] })),
+    activeSessionId: activeId,
+  });
 }
 
 async function measureRenderMs(htmlContent: string, trials = 5): Promise<number[]> {
@@ -150,6 +187,10 @@ describe('UX Responsiveness', () => {
     for (const id of createdSessions) {
       try { await archiveSession(id); } catch { /* ok */ }
     }
+    // Tear down any sessions seeded via the V2 E2E control surface.
+    try {
+      if (await e2eControlAvailable()) await v2Call('cleanup');
+    } catch { /* ok */ }
     try {
       mkdirSync(REPORT_DIR, { recursive: true });
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -173,13 +214,23 @@ describe('UX Responsiveness', () => {
   });
 
   it('HOT-01: hot render FCP/TTI', async () => {
-    const sessionId = await createSession();
+    let sessionId: string | null;
+    if (await e2eControlAvailable()) {
+      // Seed a warm-up session (kept active) + an idle target; we then switch
+      // to the target below and measure its first render.
+      const warm = `hot-warm-${Date.now()}`;
+      const target = `hot-target-${Date.now()}`;
+      await seedSessions([warm, target], warm);
+      sessionId = target;
+    } else {
+      sessionId = await createSession();
+      if (sessionId) createdSessions.push(sessionId);
+    }
     if (!sessionId) {
       console.warn('[ux-perf] HOT-01: could not create session, skipping');
-      report.hotRender = { valueMs: null, note: 'session creation failed' };
+      report.hotRender = { valueMs: null, note: 'session creation failed (no team context and no E2E control surface)' };
       return;
     }
-    createdSessions.push(sessionId);
 
     await executeJs(`
       window.__perf_hot = null;
@@ -216,14 +267,22 @@ describe('UX Responsiveness', () => {
   }, 30_000);
 
   it('SESSION-01: session switch latency', async () => {
-    const sessionA = await createSession();
-    const sessionB = await createSession();
+    let sessionA: string | null;
+    let sessionB: string | null;
+    if (await e2eControlAvailable()) {
+      sessionA = `sw-a-${Date.now()}`;
+      sessionB = `sw-b-${Date.now()}`;
+      await seedSessions([sessionA, sessionB], sessionA);
+    } else {
+      sessionA = await createSession();
+      sessionB = await createSession();
+      if (sessionA && sessionB) createdSessions.push(sessionA, sessionB);
+    }
     if (!sessionA || !sessionB) {
       console.warn('[ux-perf] SESSION-01: session creation failed, skipping');
       report.sessionSwitch = { skipped: true };
       return;
     }
-    createdSessions.push(sessionA, sessionB);
 
     const targets = [sessionB, sessionA, sessionB, sessionA, sessionB];
     const times: number[] = [];
