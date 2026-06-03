@@ -31,7 +31,7 @@ pub use join::{team_share_join_existing, team_share_join_existing_impl, JoinExis
 use serde::{Deserialize, Serialize};
 
 use crate::commands::oss_sync::fc_client::FcClient;
-use crate::commands::oss_sync::get_fc_endpoint_and_jwt;
+use crate::commands::oss_sync::get_fc_endpoint;
 
 /// Result of the slim `team_share::create_team` Tauri command.
 ///
@@ -55,14 +55,21 @@ pub struct CreateTeamResult {
 pub async fn team_share_create(
     name: String,
     workspace_path: String,
+    access_token: String,
 ) -> Result<CreateTeamResult, String> {
-    create_team(name, workspace_path).await
+    create_team(name, workspace_path, access_token).await
 }
 
 /// Library entry point (also called from integration tests).
-pub async fn create_team(name: String, workspace_path: String) -> Result<CreateTeamResult, String> {
-    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
-    let fc = FcClient::new(base_url, jwt);
+///
+/// `access_token` is the caller's own fresh user session JWT (Design 2); it is
+/// passed straight to `FcClient` instead of reading a stale cached token.
+pub async fn create_team(
+    name: String,
+    workspace_path: String,
+    access_token: String,
+) -> Result<CreateTeamResult, String> {
+    let fc = FcClient::new(get_fc_endpoint(&workspace_path), access_token);
     let row = fc
         .create_team(&name, None)
         .await

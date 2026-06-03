@@ -10,7 +10,7 @@ use serde_json::json;
 
 use crate::commands::env_vars;
 use crate::commands::oss_sync::fc_client::FcClient;
-use crate::commands::oss_sync::get_fc_endpoint_and_jwt;
+use crate::commands::oss_sync::get_fc_endpoint;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,9 +23,9 @@ pub struct LiteLlmSetupResult {
 pub async fn setup_impl(
     team_id: String,
     workspace_path: String,
+    access_token: String,
 ) -> Result<LiteLlmSetupResult, String> {
-    let (base_url, jwt) = get_fc_endpoint_and_jwt(&workspace_path)?;
-    let fc = FcClient::new(base_url, jwt);
+    let fc = FcClient::new(get_fc_endpoint(&workspace_path), access_token);
     let path = format!("/v1/teams/{}/litellm/setup", team_id);
     let resp = fc
         .post_json(&path, &json!({}))
@@ -68,6 +68,7 @@ pub async fn setup_impl(
 pub async fn team_litellm_setup(
     team_id: String,
     workspace_path: String,
+    access_token: String,
 ) -> Result<LiteLlmSetupResult, String> {
-    setup_impl(team_id, workspace_path).await
+    setup_impl(team_id, workspace_path, access_token).await
 }

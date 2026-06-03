@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react'
 
 import { TeamSecretEntry } from '@/components/settings/team/TeamSecretEntry'
 import { linkDaemonTeamWorkspace } from '@/lib/daemon-local-client'
+import { getFreshAccessToken } from '@/lib/auth/session-store'
 
 type Phase = 'loading' | 'not_opened' | 'initializing' | 'secret_prompt' | 'error'
 
@@ -47,9 +48,11 @@ export function JoinTeamFlow({ teamId, workspacePath, onDone }: Props) {
     let cancelled = false
     ;(async () => {
       try {
+        const accessToken = await getFreshAccessToken()
         const status = await invoke<StatusResponse>('team_share_get_status', {
           teamId,
           workspacePath,
+          accessToken,
         })
         if (cancelled) return
         if (status?.mode == null) {
@@ -60,6 +63,7 @@ export function JoinTeamFlow({ teamId, workspacePath, onDone }: Props) {
         const res = await invoke<JoinResult>('team_share_join_existing', {
           teamId,
           workspacePath,
+          accessToken,
         })
         if (cancelled) return
         if (!res.initialized) {
