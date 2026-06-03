@@ -10,17 +10,17 @@ pub fn merge_env_maps(
     let mut merged = personal;
     merged.extend(team);
 
-    if !system.device_id.is_empty() {
-        merged.insert("device_id".to_string(), system.device_id.clone());
-        let id = &system.device_id;
+    if !system.actor_id.is_empty() {
+        merged.insert("actor_id".to_string(), system.actor_id.clone());
+        let id = &system.actor_id;
         let prefix_len = id.len().min(40);
         merged.insert(
             "tc_api_key".to_string(),
             format!("sk-tc-{}", &id[..prefix_len]),
         );
     }
-    if !system.device_name.is_empty() {
-        merged.insert("device_name".to_string(), system.device_name.clone());
+    if !system.display_name.is_empty() {
+        merged.insert("display_name".to_string(), system.display_name.clone());
     }
 
     normalize_env_map(merged)
@@ -70,10 +70,10 @@ fn normalize_env_map(input: HashMap<String, String>) -> HashMap<String, String> 
 mod tests {
     use super::*;
 
-    fn ctx(device_id: &str, device_name: &str) -> SystemEnvContext {
+    fn ctx(actor_id: &str, display_name: &str) -> SystemEnvContext {
         SystemEnvContext {
-            device_id: device_id.to_string(),
-            device_name: device_name.to_string(),
+            actor_id: actor_id.to_string(),
+            display_name: display_name.to_string(),
         }
     }
 
@@ -90,35 +90,35 @@ mod tests {
     }
 
     #[test]
-    fn tc_api_key_from_device_id() {
-        let device_id = "a".repeat(50);
-        let out = merge_env_maps(HashMap::new(), HashMap::new(), &ctx(&device_id, ""));
+    fn tc_api_key_from_actor_id() {
+        let actor_id = "a".repeat(50);
+        let out = merge_env_maps(HashMap::new(), HashMap::new(), &ctx(&actor_id, ""));
 
-        assert_eq!(out.get("device_id").map(String::as_str), Some(device_id.as_str()));
-        let expected_key = format!("sk-tc-{}", &device_id[..40]);
+        assert_eq!(out.get("actor_id").map(String::as_str), Some(actor_id.as_str()));
+        let expected_key = format!("sk-tc-{}", &actor_id[..40]);
         assert_eq!(out.get("tc_api_key").map(String::as_str), Some(expected_key.as_str()));
     }
 
     #[test]
-    fn skips_tc_api_key_when_device_id_empty() {
+    fn skips_tc_api_key_when_actor_id_empty() {
         let out = merge_env_maps(HashMap::new(), HashMap::new(), &ctx("", "host"));
 
-        assert!(!out.contains_key("device_id"));
+        assert!(!out.contains_key("actor_id"));
         assert!(!out.contains_key("tc_api_key"));
-        assert_eq!(out.get("device_name").map(String::as_str), Some("host"));
+        assert_eq!(out.get("display_name").map(String::as_str), Some("host"));
     }
 
     #[test]
-    fn injects_device_id_and_device_name() {
+    fn injects_actor_id_and_display_name() {
         let out = merge_env_maps(
             HashMap::new(),
             HashMap::new(),
-            &ctx("dev-123", "My Mac"),
+            &ctx("actor-123", "My Mac"),
         );
 
-        assert_eq!(out.get("device_id").map(String::as_str), Some("dev-123"));
-        assert_eq!(out.get("device_name").map(String::as_str), Some("My Mac"));
-        assert_eq!(out.get("tc_api_key").map(String::as_str), Some("sk-tc-dev-123"));
+        assert_eq!(out.get("actor_id").map(String::as_str), Some("actor-123"));
+        assert_eq!(out.get("display_name").map(String::as_str), Some("My Mac"));
+        assert_eq!(out.get("tc_api_key").map(String::as_str), Some("sk-tc-actor-123"));
     }
 
     #[test]

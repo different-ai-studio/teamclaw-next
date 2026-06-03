@@ -26,7 +26,7 @@ async fn nats_pub_sub_roundtrip_translates_mqtt_topics() {
         .expect("connect to nats-server");
     let (client, mut rx) = NatsClient::new(raw);
 
-    let topic = "amux/team1/device/dev-a/runtime/r1/state".to_string();
+    let topic = "amux/team1/actor-a/runtime/r1/state".to_string();
     client
         .subscribe(topic.clone(), DeliveryGuarantee::AtLeastOnce)
         .await
@@ -68,7 +68,7 @@ async fn nats_wildcard_subscription_receives_matching_subjects() {
 
     client
         .subscribe(
-            "amux/team1/device/dev-a/runtime/+/commands".to_string(),
+            "amux/team1/actor-a/runtime/+/commands".to_string(),
             DeliveryGuarantee::AtLeastOnce,
         )
         .await
@@ -77,7 +77,7 @@ async fn nats_wildcard_subscription_receives_matching_subjects() {
 
     client
         .publish(TransportMessage {
-            topic: "amux/team1/device/dev-a/runtime/rt-xyz/commands".to_string(),
+            topic: "amux/team1/actor-a/runtime/rt-xyz/commands".to_string(),
             payload: b"cmd".to_vec(),
             retain: false,
             delivery: DeliveryGuarantee::AtLeastOnce,
@@ -91,6 +91,6 @@ async fn nats_wildcard_subscription_receives_matching_subjects() {
         .expect("frame present");
     assert_eq!(
         frame.topic,
-        "amux/team1/device/dev-a/runtime/rt-xyz/commands"
+        "amux/team1/actor-a/runtime/rt-xyz/commands"
     );
 }

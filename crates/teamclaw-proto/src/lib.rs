@@ -24,7 +24,7 @@ macro_rules! impl_encode {
 
 impl_encode!(
     amux::Envelope,
-    amux::DeviceState,
+    amux::ActorPresence,
     amux::AgentList,
     amux::RuntimeInfo,
     amux::PeerList,
