@@ -40,6 +40,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 const daemonMocks = vi.hoisted(() => ({
   deleteDaemonProviderAuth: vi.fn(),
+  putDaemonProviderAuth: vi.fn(),
 }))
 
 vi.mock('@/lib/daemon-local-client', () => ({
@@ -49,7 +50,7 @@ vi.mock('@/lib/daemon-local-client', () => ({
   postDaemonProviderOAuthAuthorize: mocks.postDaemonProviderOAuthAuthorize,
   postDaemonProviderOAuthCallback: mocks.postDaemonProviderOAuthCallback,
   reloadDaemonRuntime: mocks.reloadDaemonRuntime,
-  putDaemonProviderAuth: vi.fn(),
+  putDaemonProviderAuth: daemonMocks.putDaemonProviderAuth,
   deleteDaemonProviderAuth: daemonMocks.deleteDaemonProviderAuth,
 }))
 
@@ -83,6 +84,8 @@ describe('provider store initAll', () => {
     })
     daemonMocks.deleteDaemonProviderAuth.mockReset()
     daemonMocks.deleteDaemonProviderAuth.mockResolvedValue('restart_required')
+    daemonMocks.putDaemonProviderAuth.mockReset()
+    daemonMocks.putDaemonProviderAuth.mockResolvedValue('restart_required')
   })
 
   it('surfaces OpenCode runtime-advertised models in model settings', async () => {
@@ -353,5 +356,77 @@ describe('provider store initAll', () => {
       currentModelKey: 'openai/gpt-4o',
     })
     expect(filtered).toEqual([{ id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' }])
+  })
+
+  it('does not re-merge stale runtime models for a custom provider immediately after update', async () => {
+    mocks.getDaemonProviders.mockResolvedValue([
+      {
+        id: 'custom-openai',
+        display_name: 'Custom OpenAI',
+        authenticated: true,
+        models: ['fresh-model'],
+      },
+    ])
+    mocks.runtimeById = {
+      'runtime-1': {
+        info: {
+          agentType: 2,
+          availableModels: [
+            { id: 'custom-openai/stale-model', displayName: 'Stale Model' },
+          ],
+          currentModel: 'custom-openai/stale-model',
+        },
+      },
+    }
+
+    const { useProviderStore } = await import('../provider')
+    const ok = await useProviderStore.getState().updateCustomProvider('/workspace/demo', 'custom-openai', {
+      name: 'Custom OpenAI',
+      baseURL: 'https://api.example.test',
+      models: [{ modelId: 'fresh-model', modelName: 'Fresh Model' }],
+    })
+
+    expect(ok).toBe(true)
+    expect(daemonMocks.putDaemonProviderAuth).toHaveBeenCalled()
+    expect(useProviderStore.getState().configuredProviders).toEqual([
+      {
+        id: 'custom-openai',
+        name: 'Custom OpenAI',
+        models: [{ id: 'fresh-model', name: 'fresh-model' }],
+      },
+    ])
+    expect(useProviderStore.getState().models).toEqual([
+      { provider: 'custom-openai', id: 'fresh-model', name: 'fresh-model' },
+    ])
+  })
+
+  it('does not re-merge stale runtime models for a custom provider immediately after remove', async () => {
+    mocks.getDaemonProviders.mockResolvedValue([])
+    mocks.runtimeById = {
+      'runtime-1': {
+        info: {
+          agentType: 2,
+          availableModels: [
+            { id: 'custom-openai/stale-model', displayName: 'Stale Model' },
+          ],
+          currentModel: 'custom-openai/stale-model',
+        },
+      },
+    }
+
+    const { useProviderStore } = await import('../provider')
+    useProviderStore.setState({
+      providers: [{ id: 'custom-openai', name: 'Custom OpenAI', configured: true }],
+      configuredProviders: [{ id: 'custom-openai', name: 'Custom OpenAI', models: [{ id: 'fresh-model', name: 'Fresh Model' }] }],
+      models: [{ id: 'fresh-model', name: 'Fresh Model', provider: 'custom-openai' }],
+    })
+
+    const ok = await useProviderStore.getState().removeCustomProvider('/workspace/demo', 'custom-openai')
+
+    expect(ok).toBe(true)
+    expect(daemonMocks.deleteDaemonProviderAuth).toHaveBeenCalledWith('/workspace/demo', 'custom-openai')
+    expect(useProviderStore.getState().configuredProviders).toEqual([])
+    expect(useProviderStore.getState().models).toEqual([])
+    expect(useProviderStore.getState().providers.some((provider) => provider.id === 'custom-openai')).toBe(false)
   })
 })

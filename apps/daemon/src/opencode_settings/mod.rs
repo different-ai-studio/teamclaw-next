@@ -76,6 +76,14 @@ impl OpenCodeSettingsService {
         method_index: u32,
         code: Option<&str>,
     ) -> Result<(), OpenCodeSettingsError> {
+        #[cfg(test)]
+        if workspace
+            .join(".teamclaw-test-oauth-callback-ok")
+            .exists()
+        {
+            return Ok(());
+        }
+
         let client = self.client_for_workspace(workspace).await?;
         client
             .oauth_callback(provider_id, method_index, code)

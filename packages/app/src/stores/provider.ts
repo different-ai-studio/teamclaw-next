@@ -127,7 +127,10 @@ function splitRuntimeModelId(agentType: AgentType, runtimeModelId: string): [str
   }
 }
 
-function runtimeModelsToConfigured(disconnectedIds: Set<string>): ConfiguredProvider[] {
+function runtimeModelsToConfigured(
+  disconnectedIds: Set<string>,
+  suppressedProviderIds: Set<string> = new Set(),
+): ConfiguredProvider[] {
   const byProvider = new Map<string, ConfiguredProvider>()
   const entries = Object.values(useRuntimeStateStore.getState().byRuntimeId)
 
@@ -140,7 +143,12 @@ function runtimeModelsToConfigured(disconnectedIds: Set<string>): ConfiguredProv
       if (!modelRef) continue
 
       const [providerId, modelId] = splitRuntimeModelId(agentType, modelRef)
-      if (!providerId || !modelId || disconnectedIds.has(providerId)) continue
+      if (
+        !providerId ||
+        !modelId ||
+        disconnectedIds.has(providerId) ||
+        suppressedProviderIds.has(providerId)
+      ) continue
 
       let provider = byProvider.get(providerId)
       if (!provider) {
@@ -236,6 +244,7 @@ async function loadDaemonProvidersForWorkspace(workspacePath: string): Promise<D
 async function loadDaemonProviderSnapshot(
   workspacePath: string,
   disconnectedIds: Set<string>,
+  runtimeSuppressedProviderIds: Set<string>,
 ): Promise<{
   configuredProviders: ConfiguredProvider[]
   providers: ProviderEntry[]
@@ -244,7 +253,7 @@ async function loadDaemonProviderSnapshot(
   const snapshot = daemonProvidersToConfigured(daemonProviders ?? [], disconnectedIds)
   const configuredProviders = mergeConfiguredProviders(
     snapshot.configuredProviders,
-    runtimeModelsToConfigured(disconnectedIds),
+    runtimeModelsToConfigured(disconnectedIds, runtimeSuppressedProviderIds),
   )
   return {
     configuredProviders,
@@ -326,6 +335,7 @@ export interface ProviderState {
   // custom providers (defined in the legacy workspace config) as "connected"
   // even after auth is removed, so we track them here and filter during refreshes.
   _disconnectedIds: Set<string>
+  _runtimeSuppressedProviderIds: Set<string>
   _workspacePath: string | null
 
   // Actions
@@ -361,6 +371,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   currentModelKey: null,
   customProviderIds: [],
   _disconnectedIds: new Set<string>(),
+  _runtimeSuppressedProviderIds: new Set<string>(),
   _workspacePath: null,
 
   refreshAuthMethods: async () => {
@@ -438,7 +449,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         set({ providersLoading: false })
         return
       }
-      const snapshot = await loadDaemonProviderSnapshot(workspacePath, get()._disconnectedIds)
+      const snapshot = await loadDaemonProviderSnapshot(
+        workspacePath,
+        get()._disconnectedIds,
+        get()._runtimeSuppressedProviderIds,
+      )
       if (!snapshot) {
         set({ providersLoading: false })
         return
@@ -458,7 +473,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         set({ configuredProvidersLoading: false })
         return
       }
-      const snapshot = await loadDaemonProviderSnapshot(workspacePath, get()._disconnectedIds)
+      const snapshot = await loadDaemonProviderSnapshot(
+        workspacePath,
+        get()._disconnectedIds,
+        get()._runtimeSuppressedProviderIds,
+      )
       if (!snapshot) {
         set({ configuredProvidersLoading: false })
         return
@@ -626,6 +645,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         display_name: config.name,
         models: config.models.map((m) => ({ model_id: m.modelId, model_name: m.modelName })),
       })
+      set((state) => {
+        const next = new Set(state._runtimeSuppressedProviderIds)
+        next.add(providerId)
+        return { _runtimeSuppressedProviderIds: next }
+      })
       await Promise.all([get().refreshProviders(), get().refreshConfiguredProviders()])
       toast.success('Custom provider updated', {
         description: `${config.name} has been updated.`,
@@ -662,6 +686,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     const wsId = encodeWorkspaceId(workspacePath)
     try {
       await deleteDaemonProviderAuth(wsId, providerId)
+      set((state) => {
+        const next = new Set(state._runtimeSuppressedProviderIds)
+        next.add(providerId)
+        return { _runtimeSuppressedProviderIds: next }
+      })
       await Promise.all([get().refreshProviders(), get().refreshConfiguredProviders()])
       toast.success('Custom provider removed', {
         description: 'Provider has been removed.',
@@ -692,7 +721,11 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
     const workspaceChanged =
       previousWorkspacePath !== null && previousWorkspacePath !== workspacePathAtStart
     if (workspaceChanged) {
-      set({ currentModelKey: null, _workspacePath: workspacePathAtStart ?? null })
+      set({
+        currentModelKey: null,
+        _runtimeSuppressedProviderIds: new Set<string>(),
+        _workspacePath: workspacePathAtStart ?? null,
+      })
     } else if (previousWorkspacePath === null) {
       set({ _workspacePath: workspacePathAtStart ?? null })
     }
@@ -707,7 +740,10 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         const baseSnapshot = daemonProvidersToConfigured(daemonProviders ?? [], get()._disconnectedIds)
         const configuredProviders = mergeConfiguredProviders(
           baseSnapshot.configuredProviders,
-          runtimeModelsToConfigured(get()._disconnectedIds),
+          runtimeModelsToConfigured(
+            get()._disconnectedIds,
+            get()._runtimeSuppressedProviderIds,
+          ),
         )
         set({
           providers: mergeProviderEntries(baseSnapshot.providers, configuredProviders),

@@ -213,12 +213,12 @@ pub async fn put_provider_auth(
 ) -> Result<(StatusCode, Json<ApplyResponse>), HttpError> {
     require_scope(&principal, "workspace:write")?;
     let store = resolve_store(&state)?;
-    store
+    let outcome = store
         .put_provider_auth(&workspace_id, &provider_id, body)
         .map_err(map_control_err)?;
     let wpath = workspace_path_or_404(&workspace_id).await?;
     record_refresh_change(&state, &workspace_id, &wpath).await?;
-    Ok((StatusCode::OK, apply_ok(ApplyOutcome::ReloadRequired)))
+    Ok((StatusCode::OK, apply_ok(outcome)))
 }
 
 /// `GET /v1/workspaces/:id/provider-auth-methods`
@@ -336,12 +336,12 @@ pub async fn delete_provider_auth(
             }
         }
     }
-    store
+    let outcome = store
         .delete_provider_auth(&workspace_id, &provider_id)
         .map_err(map_control_err)?;
     let wpath = workspace_path_or_404(&workspace_id).await?;
     record_refresh_change(&state, &workspace_id, &wpath).await?;
-    Ok((StatusCode::OK, apply_ok(ApplyOutcome::ReloadRequired)))
+    Ok((StatusCode::OK, apply_ok(outcome)))
 }
 
 // ── Model catalog ─────────────────────────────────────────────────────────────
@@ -850,6 +850,7 @@ mod tests {
 
     use crate::config::{workspace_control::OpenCodeCompatStore, HttpConfig};
     use crate::http::{routes, runtime_adapter::StubRuntimeAdapter, state::DaemonMetadata};
+    use crate::opencode_settings::OpenCodeSettingsService;
     use crate::runtime::{RuntimeManager, RuntimeSupervisor};
 
     fn provider(id: &str, models: &[&str]) -> ProviderInfo {
@@ -981,6 +982,12 @@ mod tests {
     }
 
     fn runtime_test_app_with_supervisor() -> (axum::Router, String, Arc<RuntimeSupervisor>) {
+        runtime_test_app_with_supervisor_and_settings(None)
+    }
+
+    fn runtime_test_app_with_supervisor_and_settings(
+        opencode_settings: Option<Arc<OpenCodeSettingsService>>,
+    ) -> (axum::Router, String, Arc<RuntimeSupervisor>) {
         let runtime = StubRuntimeAdapter::new(32);
         let token_dir = tempfile::tempdir().unwrap();
         let supervisor = RuntimeSupervisor::new(Arc::new(AsyncMutex::new(
@@ -993,7 +1000,7 @@ mod tests {
             runtime,
             Some(Arc::new(OpenCodeCompatStore::new())),
             Some(Arc::clone(&supervisor)),
-            None,
+            opencode_settings,
             test_dispatcher(),
         );
         let token = state
@@ -1101,7 +1108,70 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), 4096).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["outcome"], "restart_required");
+
+        let refresh = supervisor.refresh_coordinator();
+        let state = refresh.runtime_refresh_dto(&workspace_id).await;
+        assert_eq!(state.status, "pending");
+        assert_eq!(state.recommended_action, "apply_changes");
+        assert_eq!(state.change_kinds, vec!["provider_auth".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn provider_oauth_callback_records_provider_auth_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace_id = workspace_id(dir.path());
+        let settings = Arc::new(OpenCodeSettingsService::new("opencode"));
+        std::fs::write(dir.path().join(".teamclaw-test-oauth-callback-ok"), "ok").unwrap();
+        let (app, token, supervisor) =
+            runtime_test_app_with_supervisor_and_settings(Some(settings));
+
+        let response = app
+            .clone()
+            .oneshot(auth_json_request(
+                &token,
+                "POST",
+                format!("/v1/workspaces/{workspace_id}/providers/openai/oauth/callback"),
+                serde_json::json!({
+                    "method_index": 0,
+                    "code": "oa-code-123",
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["outcome"], "reload_required");
+
+        let refresh = supervisor.refresh_coordinator();
+        let state = refresh.runtime_refresh_dto(&workspace_id).await;
+        assert_eq!(state.status, "pending");
+        assert_eq!(state.recommended_action, "apply_changes");
+        assert_eq!(state.change_kinds, vec!["provider_auth".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn delete_provider_auth_records_provider_auth_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace_id = workspace_id(dir.path());
+        let (app, token, supervisor) = runtime_test_app_with_supervisor();
+
+        let response = app
+            .clone()
+            .oneshot(auth_request(
+                &token,
+                "DELETE",
+                format!("/v1/workspaces/{workspace_id}/providers/openai/auth"),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["outcome"], "restart_required");
 
         let refresh = supervisor.refresh_coordinator();
         let state = refresh.runtime_refresh_dto(&workspace_id).await;
