@@ -72,7 +72,6 @@ const localAgentSections: Section[] = [
   { id: 'llm', label: 'LLM Model', labelKey: 'settings.nav.llm', icon: Brain },
   { id: 'envVars', label: 'Env Variables', labelKey: 'settings.nav.envVars', icon: KeyRound },
   { id: 'prompt', label: 'Prompt', labelKey: 'settings.nav.prompt', icon: MessageSquareText },
-  { id: 'permissions', label: 'Permissions', labelKey: 'settings.nav.permissions', icon: Shield },
   { id: 'mcp', label: 'MCP', labelKey: 'settings.nav.mcp', icon: Plug },
   { id: 'roles', label: 'Roles', labelKey: 'settings.nav.roles', icon: UserRound },
   { id: 'rolesSkills', label: 'Role Skills', labelKey: 'settings.nav.rolesSkills', icon: Sparkles },

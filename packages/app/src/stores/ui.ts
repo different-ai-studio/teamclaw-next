@@ -48,7 +48,7 @@ interface UIState {
   ideasSectionCollapsed: boolean
   actorsSectionCollapsed: boolean
   draftIdeaId: string | null
-  /** Modal "新会话" dialog (NavRail entry + intercepted send-with-no-session). */
+  /** Modal "新会话" dialog (NavRail ▾ menu + intercepted send-with-no-session). */
   newSessionDialogOpen: boolean
   /** Message text the dialog opens with — used when the user typed in the
    * empty-session input then hit send (we redirect into the dialog so the
@@ -74,6 +74,9 @@ interface UIState {
   toggleMainContentLayout: () => void
   setFileModeRightTab: (tab: FileModeRightTab) => void
   startNewChat: () => void
+  /** Incremented to request focus on the chat composer (e.g. after quick new session). */
+  composerFocusRequestId: number
+  requestComposerFocus: () => void
   switchToSession: (sessionId: string) => Promise<void>
   enterActorDraft: (actor: DraftActor) => void
   clearActorDraft: () => void
@@ -95,6 +98,11 @@ export const useUIStore = create<UIState>((set, get) => ({
   draftIdeaId: null,
   newSessionDialogOpen: false,
   newSessionDialogInitialMessage: null,
+  composerFocusRequestId: 0,
+
+  requestComposerFocus: () => set((s) => ({
+    composerFocusRequestId: s.composerFocusRequestId + 1,
+  })),
 
   openNewSessionDialog: (initialMessage) => set({
     newSessionDialogOpen: true,

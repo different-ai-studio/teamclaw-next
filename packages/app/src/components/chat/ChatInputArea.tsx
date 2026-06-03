@@ -35,6 +35,7 @@ import { PermissionApprovalModeSelect } from "./PermissionApprovalModeSelect";
 import { type QueuedMessage, useSessionStore } from "@/stores/session";
 import { useVoiceInputStore } from "@/stores/voice-input";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { useUIStore } from "@/stores/ui";
 import { getFileName, getFileDisplayPath } from "./utils/fileUtils";
 import { LocalImage } from "@/packages/ai/message";
 
@@ -260,6 +261,17 @@ export function ChatInputArea({
   // Round to nearest integer to prevent sub-pixel oscillation feedback loops
   const rootRef = React.useRef<HTMLDivElement>(null);
   const lastReportedHeight = React.useRef(0);
+  const composerFocusRequestId = useUIStore((s) => s.composerFocusRequestId);
+  React.useEffect(() => {
+    if (composerFocusRequestId <= 0) return;
+    requestAnimationFrame(() => {
+      const editor = rootRef.current?.querySelector<HTMLElement>(
+        '[data-testid="v2-composer-editor"]',
+      );
+      editor?.focus();
+    });
+  }, [composerFocusRequestId]);
+
   React.useEffect(() => {
     const el = rootRef.current;
     if (!el || !onHeightChange) return;
