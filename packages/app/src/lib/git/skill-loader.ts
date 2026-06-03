@@ -1,9 +1,10 @@
 import { readDir, readTextFile, exists } from '@tauri-apps/plugin-fs'
+import { collectTeamSkillPaths } from '@/lib/team-skill-paths'
 import { homeDir } from '@tauri-apps/api/path'
 import type { SkillWithSource, SkillSource } from './types'
 import { INHERENT_SKILL_NAMES, shouldIncludeDesktopControlSkill } from './types'
 import type { ClawHubLockfile } from '@/lib/clawhub/types'
-import { buildConfig } from '@/lib/build-config'
+import { buildConfig, TEAM_REPO_DIR } from '@/lib/build-config'
 import i18n from '@/lib/i18n'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -128,29 +129,7 @@ async function readClawHubLockfile(workspacePath: string): Promise<Set<string>> 
 
 // ─── Multi-Source Loader ────────────────────────────────────────────────────
 
-/** Read skills.paths from teamclaw.json, resolving ~ and relative paths */
-export async function readConfigSkillPaths(workspacePath: string): Promise<string[]> {
-  try {
-    const configPath = `${workspacePath}/teamclaw.json`
-    if (!(await exists(configPath))) return []
-    const content = await readTextFile(configPath)
-    const config = JSON.parse(content)
-    const rawPaths: unknown[] = config?.skills?.paths ?? []
-    const home = await homeDir()
-    const normalizedHome = trimTrailingPathSeparators(home)
-    return rawPaths
-      .filter((p): p is string => typeof p === 'string')
-      .map((p) => {
-        if (p === '~') return normalizedHome
-        if (/^~[\\/]/.test(p)) {
-          return joinPath(normalizedHome, p.slice(2))
-        }
-        return isAbsolutePath(p) ? p : joinPath(workspacePath, p)
-      })
-  } catch {
-    return []
-  }
-}
+export { collectTeamSkillPaths, readConfigSkillPaths } from '@/lib/team-skill-paths'
 
 /** Return all known skill directories for the current workspace/user context. */
 export async function getSkillDirectories(workspacePath: string | null): Promise<string[]> {
@@ -166,7 +145,7 @@ export async function getSkillDirectories(workspacePath: string | null): Promise
     dirs.add(`${workspacePath}/.claude/skills`)
     dirs.add(`${workspacePath}/.agents/skills`)
 
-    const configPaths = await readConfigSkillPaths(workspacePath)
+    const configPaths = await collectTeamSkillPaths(workspacePath)
     for (const dirPath of configPaths) {
       dirs.add(dirPath)
     }
@@ -295,9 +274,9 @@ export async function loadAllSkills(
 
   // ============ Dynamic paths from teamclaw.json ============
 
-  // 8+. Load dynamic paths from teamclaw.json skills.paths
+  // 8+. Team-shared + configured skill paths (teamclaw.json, opencode.json, teamclaw-team/skills)
   if (workspacePath) {
-    const configPaths = await readConfigSkillPaths(workspacePath)
+    const configPaths = await collectTeamSkillPaths(workspacePath)
     for (const dirPath of configPaths) {
       const skills = await loadSkillsFromDir(dirPath, 'team')
       // Determine if path is global (starts with ~/ or absolute home path)
@@ -403,7 +382,7 @@ export function getSourceDirHint(source: SkillSource): string {
     case 'shared':
       return '.agents/skills/'
     case 'team':
-      return 'teamclaw.json → skills.paths'
+      return `${TEAM_REPO_DIR}/skills/ (team share)`
     case 'builtin':
       return i18n.t('skills.builtinPath', { app: buildConfig.app.name })
     case 'plugin':

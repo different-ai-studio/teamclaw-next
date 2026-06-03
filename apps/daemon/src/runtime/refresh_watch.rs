@@ -9,6 +9,7 @@ use tokio::time::MissedTickBehavior;
 use tracing::warn;
 use walkdir::WalkDir;
 
+use crate::config::global_team_store::TEAM_LINK_NAME;
 use crate::runtime::RuntimeSupervisor;
 
 use super::{RefreshChangeKind, RefreshSource, RuntimeRefreshCoordinator};
@@ -122,6 +123,12 @@ pub fn classify_change_path(
             || path.starts_with(workspace.workspace_path.join(".opencode/skills"))
             || path.starts_with(workspace.workspace_path.join(".claude/skills"))
             || path.starts_with(workspace.workspace_path.join(".agents/skills"))
+            || path.starts_with(
+                workspace
+                    .workspace_path
+                    .join(TEAM_LINK_NAME)
+                    .join("skills"),
+            )
             || is_global_skill_path
         {
             Some(RefreshChangeKind::Skills)
@@ -232,6 +239,11 @@ fn watch_roots(workspaces: &[WatchedWorkspace], home: Option<&Path>) -> Vec<Watc
         });
         roots.push(WatchRoot {
             path: workspace.workspace_path.join(".agents/skills"),
+            recursive: true,
+        });
+        let team_skills = workspace.workspace_path.join(TEAM_LINK_NAME).join("skills");
+        roots.push(WatchRoot {
+            path: team_skills,
             recursive: true,
         });
     }

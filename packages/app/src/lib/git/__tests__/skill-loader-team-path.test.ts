@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { TEAM_REPO_DIR } from "@/lib/build-config"
-import { buildSkillInvocationName, loadAllSkills, getSourceDirHint, readConfigSkillPaths } from "../skill-loader"
+import {
+  buildSkillInvocationName,
+  loadAllSkills,
+  getSourceDirHint,
+  readConfigSkillPaths,
+} from "../skill-loader"
+import { collectTeamSkillPaths } from "@/lib/team-skill-paths"
 
 const mockExists = vi.fn()
 const mockReadDir = vi.fn()
@@ -129,9 +135,11 @@ describe("skill-loader dynamic team paths (from teamclaw.json)", () => {
     ])
   })
 
-  it("contributes zero team skills when teamclaw.json has no skills.paths", async () => {
+  it("contributes zero team skills when no team share dir and no skills.paths", async () => {
     mockExists.mockImplementation((path: string) => {
       if (path === `${workspacePath}/teamclaw.json`) return Promise.resolve(true)
+      if (path === `${workspacePath}/opencode.json`) return Promise.resolve(false)
+      if (path === `${workspacePath}/${TEAM_REPO_DIR}/skills`) return Promise.resolve(false)
       return Promise.resolve(false)
     })
     mockReadTextFile.mockImplementation((path: string) => {
@@ -142,6 +150,31 @@ describe("skill-loader dynamic team paths (from teamclaw.json)", () => {
 
     const { skills } = await loadAllSkills(workspacePath)
     expect(skills.filter((s) => s.source === "team")).toHaveLength(0)
+  })
+
+  it("auto-loads teamclaw-team/skills without teamclaw.json skills.paths", async () => {
+    const teamDir = `${workspacePath}/${TEAM_REPO_DIR}/skills`
+
+    mockExists.mockImplementation((path: string) => {
+      if (path === teamDir) return Promise.resolve(true)
+      if (path.includes("shared-skill") && path.endsWith("SKILL.md")) return Promise.resolve(true)
+      return Promise.resolve(false)
+    })
+    mockReadDir.mockImplementation((path: string) => {
+      if (path === teamDir)
+        return Promise.resolve([{ name: "shared-skill", isDirectory: true }])
+      return Promise.resolve([])
+    })
+    mockReadTextFile.mockImplementation((path: string) => {
+      if (path.includes("shared-skill")) return Promise.resolve("# shared-skill\n")
+      return Promise.resolve("")
+    })
+
+    const paths = await collectTeamSkillPaths(workspacePath)
+    expect(paths).toContain(teamDir)
+
+    const { skills } = await loadAllSkills(workspacePath)
+    expect(skills.some((s) => s.source === "team" && s.filename === "shared-skill")).toBe(true)
   })
 
   it("loads nested skills from bundle directories", async () => {
@@ -246,8 +279,8 @@ describe("skill-loader dynamic team paths (from teamclaw.json)", () => {
     expect(buildSkillInvocationName("C:\\Users\\alice\\.agents\\skills\\superpowers", "brainstorming")).toBe("superpowers/brainstorming")
   })
 
-  it("getSourceDirHint(team) shows teamclaw.json config reference", () => {
-    expect(getSourceDirHint("team")).toBe("teamclaw.json → skills.paths")
+  it("getSourceDirHint(team) shows team share directory", () => {
+    expect(getSourceDirHint("team")).toBe(`${TEAM_REPO_DIR}/skills/ (team share)`)
   })
 })
 

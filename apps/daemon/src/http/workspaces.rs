@@ -27,7 +27,9 @@ use crate::config::workspace_control::{
 use crate::opencode_settings::LiveProviderCatalog;
 use crate::opencode_settings::OpenCodeSettingsError;
 use crate::proto::amux;
+use crate::runtime::refresh::{RefreshChangeKind, RefreshSource};
 use std::collections::HashMap;
+use std::path::Path as StdPath;
 
 use super::auth::{require_scope, Principal};
 use super::errors::HttpError;
@@ -86,6 +88,32 @@ async fn workspace_path_or_404(workspace_id: &str) -> Result<std::path::PathBuf,
         )));
     }
     Ok(wpath)
+}
+
+async fn record_skills_refresh_change(
+    state: &HttpState,
+    workspace_id: &str,
+    workspace_path: &StdPath,
+) {
+    let Some(refresh) = state.runtime_refresh.as_ref() else {
+        return;
+    };
+    if let Err(error) = refresh
+        .record_change(
+            workspace_id,
+            workspace_path,
+            RefreshChangeKind::Skills,
+            RefreshSource::UiMutation,
+        )
+        .await
+    {
+        tracing::warn!(
+            workspace_id = %workspace_id,
+            workspace_path = %workspace_path.display(),
+            error = %error,
+            "failed to record skills refresh change after workspace mutation"
+        );
+    }
 }
 
 /// Reload workspace runtimes so ACP picks up provider credential changes (OAuth / apiKey).
@@ -676,9 +704,11 @@ pub async fn put_skill(
         return Err(HttpError::validation("content must not be empty"));
     }
     let store = resolve_store(&state)?;
+    let wpath = workspace_path_or_404(&workspace_id).await?;
     let skill = store
         .put_skill(&workspace_id, &slug, body)
         .map_err(map_control_err)?;
+    record_skills_refresh_change(&state, &workspace_id, &wpath).await;
     Ok(Json(skill))
 }
 
@@ -691,9 +721,11 @@ pub async fn delete_skill(
 ) -> Result<Json<ApplyResponse>, HttpError> {
     require_scope(&principal, "workspace:write")?;
     let store = resolve_store(&state)?;
+    let wpath = workspace_path_or_404(&workspace_id).await?;
     let outcome = store
         .delete_skill(&workspace_id, &slug, query.dir_path.as_deref())
         .map_err(map_control_err)?;
+    record_skills_refresh_change(&state, &workspace_id, &wpath).await;
     Ok(apply_ok(outcome))
 }
 
