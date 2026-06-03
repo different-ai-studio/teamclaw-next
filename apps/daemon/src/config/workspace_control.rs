@@ -172,12 +172,23 @@ pub struct McpServerConfig {
 // ── Runtime status ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
+pub struct RuntimeRefreshDto {
+    pub status: String,
+    pub change_kinds: Vec<String>,
+    pub recommended_action: String,
+    pub auto_apply_blocked_by_active_runtime: bool,
+    pub last_detected_at: Option<String>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct RuntimeStatus {
     pub workspace_id: String,
     /// Whether an agent runtime is currently running for this workspace.
     pub ready: bool,
     pub backend: String,
     pub current_model: Option<String>,
+    pub refresh: Option<RuntimeRefreshDto>,
 }
 
 // ── WorkspaceControlStore trait ───────────────────────────────────────────────
@@ -673,6 +684,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
             ready: false,
             backend: "opencode".to_owned(),
             current_model: None,
+            refresh: None,
         })
     }
 

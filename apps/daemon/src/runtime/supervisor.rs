@@ -300,6 +300,7 @@ impl RuntimeSupervisor {
             ready: backend_ready,
             backend,
             current_model,
+            refresh: None,
         })
     }
 
