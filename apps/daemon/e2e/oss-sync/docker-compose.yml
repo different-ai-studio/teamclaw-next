@@ -1,0 +1,29 @@
+name: amuxd-oss-e2e
+services:
+  node-a:
+    build:
+      context: ../../../..        # 仓库根
+      dockerfile: apps/daemon/e2e/oss-sync/Dockerfile.amuxd
+    image: amuxd-oss-e2e:latest
+    environment:
+      TEAMCLAW_CLOUD_API_URL: ${CLOUD_API_URL:-https://cloud.ucar.cc}
+    ports:
+      - "${HOST_PORT_A:-18081}:8787"
+    command: ["sleep", "infinity"]
+  node-b:
+    image: amuxd-oss-e2e:latest      # 复用 node-a 构建的镜像
+    environment:
+      TEAMCLAW_CLOUD_API_URL: ${CLOUD_API_URL:-https://cloud.ucar.cc}
+    ports:
+      - "${HOST_PORT_B:-18082}:8787"
+    command: ["sleep", "infinity"]
+    depends_on: [node-a]
+  node-c:
+    image: amuxd-oss-e2e:latest
+    environment:
+      TEAMCLAW_CLOUD_API_URL: ${CLOUD_API_URL:-https://cloud.ucar.cc}
+    ports:
+      - "${HOST_PORT_C:-18083}:8787"
+    command: ["sleep", "infinity"]
+    depends_on: [node-a]
+    profiles: ["three-node"]
