@@ -79,14 +79,6 @@ describe('RightPanel interactions', () => {
       expect(screen.queryByText('No tasks yet')).toBeNull();
     });
 
-    it('shows file browser when store activeTab is files', async () => {
-      mockStoreState.activeTab = 'files';
-      const { RightPanel } = await import('@/components/panel/RightPanel');
-      render(React.createElement(RightPanel));
-      expect(screen.getByTestId('file-browser')).toBeDefined();
-      expect(screen.queryByText('No tasks yet')).toBeNull();
-    });
-
     it('shows session list when store activeTab is session', async () => {
       mockStoreState.activeTab = 'session';
       const { RightPanel } = await import('@/components/panel/RightPanel');
@@ -146,22 +138,6 @@ describe('RightPanel interactions', () => {
   });
 
   describe('compact mode', () => {
-    it('passes compact variant to FileBrowser', async () => {
-      mockStoreState.activeTab = 'files';
-      const { RightPanel } = await import('@/components/panel/RightPanel');
-      render(React.createElement(RightPanel, { compact: true }));
-      const browser = screen.getByTestId('file-browser');
-      expect(browser.getAttribute('data-variant')).toBe('panel');
-    });
-
-    it('passes default variant to FileBrowser when not compact', async () => {
-      mockStoreState.activeTab = 'files';
-      const { RightPanel } = await import('@/components/panel/RightPanel');
-      render(React.createElement(RightPanel, { compact: false }));
-      const browser = screen.getByTestId('file-browser');
-      expect(browser.getAttribute('data-variant')).toBe('default');
-    });
-
     it('applies compact padding class for tasks tab', async () => {
       const { RightPanel } = await import('@/components/panel/RightPanel');
       const { container: compactEl } = render(React.createElement(RightPanel, { compact: true }));
@@ -171,11 +147,11 @@ describe('RightPanel interactions', () => {
       expect(normalEl.firstElementChild?.className).toContain('p-2');
     });
 
-    it('removes padding for files and session tabs', async () => {
-      mockStoreState.activeTab = 'files';
+    it('removes padding for session and actors tabs', async () => {
+      mockStoreState.activeTab = 'session';
       const { RightPanel } = await import('@/components/panel/RightPanel');
       const { container } = render(React.createElement(RightPanel));
-      // files/session tabs should not have p-1 or p-2
+      // session/actors tabs should not have p-1 or p-2
       const className = container.firstElementChild?.className || '';
       expect(className).not.toContain('p-1');
       expect(className).not.toContain('p-2');
