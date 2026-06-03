@@ -267,7 +267,7 @@ export function DaemonGeneralSection() {
             <div className="space-y-5">
               <div>
                 <p className="text-[13px] font-semibold">{t('settings.daemonGeneral.basicInfo', 'Agent info')}</p>
-                <p className="mt-0.5 text-[12px] text-muted-foreground">{t('settings.daemonGeneral.basicInfoDesc', 'This is the daemon agent matched to the local device id.')}</p>
+                <p className="mt-0.5 text-[12px] text-muted-foreground">{t('settings.daemonGeneral.basicInfoDesc', 'This is the daemon agent running on this machine.')}</p>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">

@@ -60,10 +60,6 @@ vi.mock('@/components/settings/shared', () => ({
   ToggleSwitch: ({ enabled: _enabled, ...props }: any) => <button {...props} />,
 }))
 
-vi.mock('@/components/settings/DeviceIdDisplay', () => ({
-  DeviceIdDisplay: () => <div>Device ID</div>,
-}))
-
 vi.mock('@/components/ui/button', () => ({
   Button: ({ children, ...props }: any) => <button {...props}>{children}</button>,
 }))
