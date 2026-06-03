@@ -106,10 +106,9 @@ impl DaemonServer {
                 "resume_stored_collab_runtimes: resuming stored runtime with prior ACP session"
             );
 
-            let runtime_env = match self.assemble_spawn_runtime_env_for_worktree(
-                &stored.worktree,
-                &stored.workspace_id,
-            ) {
+            let runtime_env = match self
+                .assemble_spawn_runtime_env_for_worktree(&stored.worktree, &stored.workspace_id)
+            {
                 Ok(env) => env,
                 Err(e) => {
                     warn!(
@@ -204,7 +203,10 @@ impl DaemonServer {
     }
 
     /// MQTT `session/live`: no in-memory runtime — resume from disk if possible.
-    pub(super) async fn resume_historical_runtimes_for_session(&mut self, session_id: &str) -> bool {
+    pub(super) async fn resume_historical_runtimes_for_session(
+        &mut self,
+        session_id: &str,
+    ) -> bool {
         let result = self
             .resume_stored_collab_runtimes(
                 session_id,
@@ -265,9 +267,7 @@ impl DaemonServer {
             if let Err(e) = agents.send_set_model(runtime_id, model_id).await {
                 warn!(
                     runtime_id,
-                    model_id,
-                    "set_model after stored resume failed: {}",
-                    e
+                    model_id, "set_model after stored resume failed: {}", e
                 );
             } else {
                 agents.set_current_model(runtime_id, model_id);

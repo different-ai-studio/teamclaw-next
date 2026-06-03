@@ -17,17 +17,15 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::config::provider_auth::{
-    builtin_provider_auth_methods, ProviderAuthMethodsResponse,
-};
-use crate::opencode_settings::LiveProviderCatalog;
-use crate::opencode_settings::OpenCodeSettingsError;
+use crate::config::provider_auth::{builtin_provider_auth_methods, ProviderAuthMethodsResponse};
 use crate::config::workspace_control::{
     decode_workspace_path, AllowlistRule, ApplyOutcome, ManagedSkillDto, McpServerConfig,
     PermissionConfig, ProviderAuthRequest, ProviderInfo, RoleRecordDto, RolesSkillsStateDto,
     RuntimeStatus, UpsertRoleRequest, UpsertSkillRequest, WorkspaceControlError,
     WorkspaceControlStore,
 };
+use crate::opencode_settings::LiveProviderCatalog;
+use crate::opencode_settings::OpenCodeSettingsError;
 use crate::proto::amux;
 use std::collections::HashMap;
 
@@ -37,9 +35,7 @@ use super::state::HttpState;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-fn resolve_store(
-    state: &HttpState,
-) -> Result<&Arc<dyn WorkspaceControlStore>, HttpError> {
+fn resolve_store(state: &HttpState) -> Result<&Arc<dyn WorkspaceControlStore>, HttpError> {
     state
         .workspace_control
         .as_ref()
@@ -85,7 +81,9 @@ fn map_settings_err(e: OpenCodeSettingsError) -> HttpError {
 async fn workspace_path_or_404(workspace_id: &str) -> Result<std::path::PathBuf, HttpError> {
     let wpath = decode_workspace_path(workspace_id).map_err(map_control_err)?;
     if !wpath.is_dir() {
-        return Err(HttpError::not_found(format!("workspace {workspace_id} not found")));
+        return Err(HttpError::not_found(format!(
+            "workspace {workspace_id} not found"
+        )));
     }
     Ok(wpath)
 }
@@ -154,10 +152,7 @@ pub async fn get_providers(
     Ok(Json(providers))
 }
 
-fn merge_live_provider_catalog(
-    providers: &mut Vec<ProviderInfo>,
-    catalog: &LiveProviderCatalog,
-) {
+fn merge_live_provider_catalog(providers: &mut Vec<ProviderInfo>, catalog: &LiveProviderCatalog) {
     for connected_id in &catalog.connected {
         if let Some(live) = catalog.providers.get(connected_id) {
             if let Some(existing) = providers.iter_mut().find(|p| p.id == *connected_id) {
@@ -206,8 +201,7 @@ pub async fn put_provider_auth(
         .put_provider_auth(&workspace_id, &provider_id, body)
         .map_err(map_control_err)?;
     let wpath = workspace_path_or_404(&workspace_id).await?;
-    let outcome =
-        reload_runtime_after_provider_auth(&state, &workspace_id, &wpath).await;
+    let outcome = reload_runtime_after_provider_auth(&state, &workspace_id, &wpath).await;
     Ok((StatusCode::OK, apply_ok(outcome)))
 }
 
@@ -303,8 +297,7 @@ pub async fn post_provider_oauth_callback(
         )
         .await
         .map_err(map_settings_err)?;
-    let outcome =
-        reload_runtime_after_provider_auth(&state, &workspace_id, &wpath).await;
+    let outcome = reload_runtime_after_provider_auth(&state, &workspace_id, &wpath).await;
     Ok(apply_ok(outcome))
 }
 
@@ -331,8 +324,7 @@ pub async fn delete_provider_auth(
         .delete_provider_auth(&workspace_id, &provider_id)
         .map_err(map_control_err)?;
     let wpath = workspace_path_or_404(&workspace_id).await?;
-    let outcome =
-        reload_runtime_after_provider_auth(&state, &workspace_id, &wpath).await;
+    let outcome = reload_runtime_after_provider_auth(&state, &workspace_id, &wpath).await;
     Ok((StatusCode::OK, apply_ok(outcome)))
 }
 
@@ -616,7 +608,9 @@ pub async fn put_mcp(
 ) -> Result<Json<ApplyResponse>, HttpError> {
     require_scope(&principal, "workspace:write")?;
     let store = resolve_store(&state)?;
-    let outcome = store.put_mcp(&workspace_id, body).map_err(map_control_err)?;
+    let outcome = store
+        .put_mcp(&workspace_id, body)
+        .map_err(map_control_err)?;
     Ok(apply_ok(outcome))
 }
 
@@ -698,11 +692,7 @@ pub async fn delete_skill(
     require_scope(&principal, "workspace:write")?;
     let store = resolve_store(&state)?;
     let outcome = store
-        .delete_skill(
-            &workspace_id,
-            &slug,
-            query.dir_path.as_deref(),
-        )
+        .delete_skill(&workspace_id, &slug, query.dir_path.as_deref())
         .map_err(map_control_err)?;
     Ok(apply_ok(outcome))
 }
@@ -735,11 +725,7 @@ pub async fn delete_role(
     require_scope(&principal, "workspace:write")?;
     let store = resolve_store(&state)?;
     let outcome = store
-        .delete_role(
-            &workspace_id,
-            &slug,
-            query.file_path.as_deref(),
-        )
+        .delete_role(&workspace_id, &slug, query.file_path.as_deref())
         .map_err(map_control_err)?;
     Ok(apply_ok(outcome))
 }
@@ -764,9 +750,12 @@ pub async fn get_runtime(
     }
 
     let store = resolve_store(&state)?;
-    let status = store
+    let mut status = store
         .get_runtime_status(&workspace_id)
         .map_err(map_control_err)?;
+    if let Some(refresh) = state.runtime_refresh.as_ref() {
+        status.refresh = refresh.runtime_refresh_dto(&workspace_id).await;
+    }
     Ok(Json(status))
 }
 
@@ -781,16 +770,32 @@ pub async fn reload_runtime(
 
     if let Some(supervisor) = state.runtime_supervisor.as_ref() {
         let outcome = supervisor
-            .reload_workspace(&workspace_id, &workspace_path)
+            .apply_refresh(&workspace_id, &workspace_path)
             .await
             .map_err(map_control_err)?;
         return Ok(apply_ok(outcome));
     }
 
     let store = resolve_store(&state)?;
-    let outcome = store
-        .reload_runtime(&workspace_id)
-        .map_err(map_control_err)?;
+    let attempt = if let Some(refresh) = state.runtime_refresh.as_ref() {
+        Some(refresh.mark_applying(&workspace_id, &workspace_path).await)
+    } else {
+        None
+    };
+    let outcome = match store.reload_runtime(&workspace_id) {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            if let (Some(refresh), Some(attempt)) = (state.runtime_refresh.as_ref(), attempt) {
+                refresh
+                    .mark_apply_failed(&workspace_id, &workspace_path, attempt, err.to_string())
+                    .await;
+            }
+            return Err(map_control_err(err));
+        }
+    };
+    if let (Some(refresh), Some(attempt)) = (state.runtime_refresh.as_ref(), attempt) {
+        refresh.clear_applied(&workspace_id, attempt).await;
+    }
     Ok(apply_ok(outcome))
 }
 
@@ -813,7 +818,10 @@ mod tests {
         let providers = vec![provider("scnet", &["MiniMax-M2.5"])];
         let catalog = build_model_catalog(&["opencode".to_string()], None, &providers);
 
-        assert_eq!(catalog.automation_default_backend.as_deref(), Some("opencode"));
+        assert_eq!(
+            catalog.automation_default_backend.as_deref(),
+            Some("opencode")
+        );
         let oc = &catalog.backends[0];
         assert_eq!(oc.models[0].model_ref, "scnet/MiniMax-M2.5");
         assert_eq!(oc.models[0].model_id, "MiniMax-M2.5");
@@ -838,7 +846,10 @@ mod tests {
     fn claude_models_use_static_table_with_claude_code_prefix() {
         let catalog = build_model_catalog(&["claude".to_string()], None, &[]);
 
-        assert_eq!(catalog.automation_default_backend.as_deref(), Some("claude"));
+        assert_eq!(
+            catalog.automation_default_backend.as_deref(),
+            Some("claude")
+        );
         let claude = &catalog.backends[0];
         assert_eq!(claude.backend, "claude");
         assert_eq!(claude.label, "Claude Code");
@@ -849,7 +860,10 @@ mod tests {
         for m in &claude.models {
             assert_eq!(m.model_ref, format!("claude-code/{}", m.model_id));
         }
-        assert!(claude.models.iter().any(|m| m.model_id == "claude-sonnet-4-6"));
+        assert!(claude
+            .models
+            .iter()
+            .any(|m| m.model_id == "claude-sonnet-4-6"));
     }
 
     #[test]
@@ -857,7 +871,10 @@ mod tests {
         // Configured in a non-precedence order; default must still be opencode.
         let catalog =
             build_model_catalog(&["claude".to_string(), "opencode".to_string()], None, &[]);
-        assert_eq!(catalog.automation_default_backend.as_deref(), Some("opencode"));
+        assert_eq!(
+            catalog.automation_default_backend.as_deref(),
+            Some("opencode")
+        );
         // Backends keep the configured order (claude first here).
         assert_eq!(catalog.backends[0].backend, "claude");
         assert_eq!(catalog.backends[1].backend, "opencode");

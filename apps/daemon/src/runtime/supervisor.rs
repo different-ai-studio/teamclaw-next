@@ -11,11 +11,11 @@ use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::info;
 
-use crate::config::workspace_control::{
-    ApplyOutcome, RuntimeStatus, WorkspaceControlError,
-};
+use crate::config::workspace_control::{ApplyOutcome, RuntimeStatus, WorkspaceControlError};
 use crate::proto::amux;
-use crate::runtime::{acp_catalog_probe, AgentLaunchConfig, RuntimeManager};
+use crate::runtime::{
+    acp_catalog_probe, refresh::RuntimeRefreshCoordinator, AgentLaunchConfig, RuntimeManager,
+};
 
 struct InherentSkill {
     dirname: &'static str,
@@ -58,8 +58,8 @@ fn read_json_object(path: &Path) -> Result<serde_json::Value, WorkspaceControlEr
     if !path.exists() {
         return Ok(serde_json::json!({}));
     }
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
     serde_json::from_str(&content).map_err(|e| WorkspaceControlError::Parse(e.to_string()))
 }
 
@@ -76,9 +76,9 @@ fn write_json_pretty(path: &Path, value: &serde_json::Value) -> Result<(), Works
 fn ensure_default_permissions(workspace_path: &Path) -> Result<(), WorkspaceControlError> {
     let config_path = opencode_json_path(workspace_path);
     let mut config = read_json_object(&config_path)?;
-    let obj = config
-        .as_object_mut()
-        .ok_or_else(|| WorkspaceControlError::Parse("opencode.json root is not an object".into()))?;
+    let obj = config.as_object_mut().ok_or_else(|| {
+        WorkspaceControlError::Parse("opencode.json root is not an object".into())
+    })?;
 
     if obj.contains_key("permission") {
         return Ok(());
@@ -107,9 +107,9 @@ fn ensure_inherent_mcp(workspace_path: &Path) -> Result<(), WorkspaceControlErro
         serde_json::json!({ "$schema": "https://opencode.ai/config.json" })
     };
 
-    let obj = config
-        .as_object_mut()
-        .ok_or_else(|| WorkspaceControlError::Parse("opencode.json root is not an object".into()))?;
+    let obj = config.as_object_mut().ok_or_else(|| {
+        WorkspaceControlError::Parse("opencode.json root is not an object".into())
+    })?;
 
     let mcp = obj.entry("mcp").or_insert_with(|| serde_json::json!({}));
     let mcp_obj = mcp
@@ -177,8 +177,10 @@ fn ensure_inherent_skills_in_dir(skills_dir: &Path) -> Result<(), WorkspaceContr
         if skill_md.exists() {
             continue;
         }
-        std::fs::create_dir_all(&skill_dir).map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
-        std::fs::write(&skill_md, skill.content).map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
+        std::fs::create_dir_all(&skill_dir)
+            .map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
+        std::fs::write(&skill_md, skill.content)
+            .map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
     }
     Ok(())
 }
@@ -199,7 +201,9 @@ pub fn prepare_workspace(workspace_path: &Path) -> Result<(), WorkspaceControlEr
     if let Err(e) = teamclaw_runtime_env::team_provider::ensure_team_provider(workspace_path) {
         tracing::warn!(workspace = %workspace_path.display(), error = %e, "failed to ensure team provider");
     }
-    if let Ok(Some(result)) = teamclaw_runtime_env::opencode_db::maybe_migrate_legacy_opencode_db(workspace_path) {
+    if let Ok(Some(result)) =
+        teamclaw_runtime_env::opencode_db::maybe_migrate_legacy_opencode_db(workspace_path)
+    {
         if result.migrated {
             tracing::info!(workspace = %workspace_path.display(), "migrated legacy isolated OpenCode DB to global");
         }
@@ -223,7 +227,10 @@ fn binary_available(cfg: &AgentLaunchConfig) -> bool {
 }
 
 fn shell_escape(value: &str) -> String {
-    if value.chars().all(|c| c.is_ascii_alphanumeric() || "/._-:".contains(c)) {
+    if value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "/._-:".contains(c))
+    {
         value.to_string()
     } else {
         format!("'{}'", value.replace('\'', "'\\''"))
@@ -241,11 +248,19 @@ fn backend_label(agent_type: amux::AgentType) -> &'static str {
 
 pub struct RuntimeSupervisor {
     agents: Arc<AsyncMutex<RuntimeManager>>,
+    refresh: Arc<RuntimeRefreshCoordinator>,
 }
 
 impl RuntimeSupervisor {
     pub fn new(agents: Arc<AsyncMutex<RuntimeManager>>) -> Arc<Self> {
-        Arc::new(Self { agents })
+        Arc::new(Self {
+            agents,
+            refresh: RuntimeRefreshCoordinator::new(),
+        })
+    }
+
+    pub fn refresh_coordinator(&self) -> Arc<RuntimeRefreshCoordinator> {
+        Arc::clone(&self.refresh)
     }
 
     /// Models OpenCode advertises via ACP for this workspace cwd (cron catalog).
@@ -300,6 +315,7 @@ impl RuntimeSupervisor {
             ready: backend_ready,
             backend,
             current_model,
+            refresh: self.refresh.runtime_refresh_dto(workspace_id).await,
         })
     }
 
@@ -331,6 +347,29 @@ impl RuntimeSupervisor {
             Ok(ApplyOutcome::ReloadRequired)
         }
     }
+
+    pub async fn apply_refresh(
+        &self,
+        workspace_id: &str,
+        workspace_path: &Path,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        let attempt = self
+            .refresh
+            .mark_applying(workspace_id, workspace_path)
+            .await;
+        match self.reload_workspace(workspace_id, workspace_path).await {
+            Ok(outcome) => {
+                self.refresh.clear_applied(workspace_id, attempt).await;
+                Ok(outcome)
+            }
+            Err(err) => {
+                self.refresh
+                    .mark_apply_failed(workspace_id, workspace_path, attempt, err.to_string())
+                    .await;
+                Err(err)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -342,12 +381,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         prepare_workspace(dir.path()).unwrap();
 
-        let cfg: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.path().join("opencode.json")).unwrap())
-                .unwrap();
+        let cfg: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("opencode.json")).unwrap(),
+        )
+        .unwrap();
         assert!(cfg.get("permission").is_some());
 
-        assert!(dir.path().join(".teamclaw/skills/create-role/SKILL.md").is_file());
+        assert!(dir
+            .path()
+            .join(".teamclaw/skills/create-role/SKILL.md")
+            .is_file());
         assert!(!dir.path().join(".opencode/data").exists());
     }
 }

@@ -26,6 +26,7 @@ import { useShortcutsStore } from "@/stores/shortcuts";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { useCronStore } from "@/stores/cron";
 import { probeDaemonHttp } from "@/lib/daemon-local-client";
+import { useWorkspaceRuntimeRefreshStore } from "@/stores/workspace-runtime-refresh";
 import { useTeamModeStore } from "@/stores/team-mode";
 import { useOssSyncStore } from "@/stores/oss-sync";
 import { getSkillDirectories, loadAllSkills } from "@/lib/git/skill-loader";
@@ -542,6 +543,36 @@ export function useGitReposInit() {
       void useOssSyncStore.getState().refresh(workspacePath);
     }
   }, [workspacePath, teamModeType]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Workspace runtime refresh (daemon GET /runtime polling)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function useWorkspaceRuntimeRefreshPoll() {
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath);
+  const daemonHttpReady = useWorkspaceStore((s) => s.daemonHttpReady);
+  const startPolling = useWorkspaceRuntimeRefreshStore((s) => s.startPolling);
+  const stopPolling = useWorkspaceRuntimeRefreshStore((s) => s.stopPolling);
+  const refreshNow = useWorkspaceRuntimeRefreshStore((s) => s.refreshNow);
+
+  useEffect(() => {
+    if (!isTauri() || !daemonHttpReady || !workspacePath) {
+      stopPolling();
+      return;
+    }
+    startPolling(workspacePath);
+    return () => stopPolling();
+  }, [workspacePath, daemonHttpReady, startPolling, stopPolling]);
+
+  useEffect(() => {
+    const bump = () => {
+      const path = useWorkspaceStore.getState().workspacePath;
+      if (path) void refreshNow(path);
+    };
+    window.addEventListener(SKILLS_CHANGED_EVENT, bump);
+    return () => window.removeEventListener(SKILLS_CHANGED_EVENT, bump);
+  }, [refreshNow]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
