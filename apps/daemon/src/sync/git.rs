@@ -179,10 +179,19 @@ fn embed_token_in_url(url: &str, token: Option<&str>) -> String {
     let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) else {
         return url.to_string();
     };
+    // A credential that already carries a username (`user:token`, e.g. CodeUp
+    // managed-git, which authenticates as `<botUsername>:<pat>`) is embedded as
+    // the URL userinfo verbatim. A bare token falls back to the GitLab-style
+    // `oauth2:<token>` form used by generic custom-git HTTPS remotes.
+    let userinfo = if token.contains(':') {
+        token.to_string()
+    } else {
+        format!("oauth2:{token}")
+    };
     if let Some(rest) = url.strip_prefix("https://") {
-        format!("https://oauth2:{token}@{rest}")
+        format!("https://{userinfo}@{rest}")
     } else if let Some(rest) = url.strip_prefix("http://") {
-        format!("http://oauth2:{token}@{rest}")
+        format!("http://{userinfo}@{rest}")
     } else {
         url.to_string()
     }
@@ -394,6 +403,43 @@ pub fn setup_or_sync_shared_dir(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embed_token_bare_token_uses_oauth2() {
+        // Generic custom-git HTTPS remotes pass a bare token → oauth2 userinfo.
+        assert_eq!(
+            embed_token_in_url("https://example.com/repo.git", Some("tok123")),
+            "https://oauth2:tok123@example.com/repo.git"
+        );
+        assert_eq!(
+            embed_token_in_url("http://example.com/repo.git", Some("tok123")),
+            "http://oauth2:tok123@example.com/repo.git"
+        );
+    }
+
+    #[test]
+    fn embed_token_user_colon_token_is_verbatim() {
+        // Managed-git (CodeUp) delivers `<botUsername>:<pat>` → used verbatim.
+        assert_eq!(
+            embed_token_in_url(
+                "https://codeup.aliyun.com/org/tc-team.git",
+                Some("teamclaw:pt-abc")
+            ),
+            "https://teamclaw:pt-abc@codeup.aliyun.com/org/tc-team.git"
+        );
+    }
+
+    #[test]
+    fn embed_token_none_or_empty_leaves_url_untouched() {
+        assert_eq!(
+            embed_token_in_url("https://example.com/repo.git", None),
+            "https://example.com/repo.git"
+        );
+        assert_eq!(
+            embed_token_in_url("https://example.com/repo.git", Some("   ")),
+            "https://example.com/repo.git"
+        );
+    }
 
     #[test]
     fn sync_git_dir_returns_not_configured_without_url() {
