@@ -31,15 +31,15 @@ public struct SessionCreationInput: Sendable {
 
     public struct AgentSpawn: Sendable {
         public let actorID: String
-        public let routeDeviceID: String
+        public let routeActorID: String
         public let workspaceID: String
         public let workspacePath: String
         public let agentType: Amux_AgentType
 
-        public init(actorID: String, routeDeviceID: String, workspaceID: String,
+        public init(actorID: String, routeActorID: String, workspaceID: String,
                     workspacePath: String, agentType: Amux_AgentType) {
             self.actorID = actorID
-            self.routeDeviceID = routeDeviceID
+            self.routeActorID = routeActorID
             self.workspaceID = workspaceID
             self.workspacePath = workspacePath
             self.agentType = agentType
@@ -262,7 +262,7 @@ public final class SessionCreationUseCase {
         for spawn in input.agentSpawns {
             Task.detached {
                 _ = await service.runtimeStartRpc(
-                    targetDeviceID: spawn.routeDeviceID,
+                    targetActorID: spawn.routeActorID,
                     agentType: spawn.agentType,
                     workspaceId: spawn.workspaceID,
                     worktree: spawn.workspacePath,

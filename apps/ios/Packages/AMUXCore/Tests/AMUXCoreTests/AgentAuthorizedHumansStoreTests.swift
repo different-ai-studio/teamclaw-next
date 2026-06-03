@@ -80,10 +80,6 @@ private actor InMemoryAgentAccessRepository: AgentAccessRepository {
 
     func makeAgentPersonal(agentID: String) async throws {}
 
-    func deviceID(for agentID: String) async throws -> String? {
-        nil
-    }
-
     func teamAgentCount(teamID: String) async throws -> Int {
         0
     }

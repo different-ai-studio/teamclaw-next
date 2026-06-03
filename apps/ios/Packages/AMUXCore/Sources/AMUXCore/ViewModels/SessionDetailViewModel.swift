@@ -154,11 +154,11 @@ public final class SessionDetailViewModel {
     public var peerIdRef: String { peerId }
     public var teamIDRef: String { teamID }
     public var currentHumanActorIDRef: String? { teamclawService?.currentHumanActorId }
-    /// Daemon device-id resolved from session/runtime context. Empty when
+    /// Route actor id resolved from session/runtime context. Empty when
     /// no daemon mapping is available yet (e.g. ConnectedAgentsStore still
     /// loading and runtime row hasn't received state). Callers that need it
     /// for an MQTT publish should bail when empty.
-    public var daemonDeviceIdRef: String { resolveDaemonDeviceId() }
+    public var routeActorIDRef: String { resolveRouteActorID() }
 
     public var sessionTitle: String {
         if let runtime, !runtime.sessionTitle.isEmpty { return runtime.sessionTitle }
@@ -243,23 +243,23 @@ public final class SessionDetailViewModel {
         self.outboxSender = outboxSender
     }
 
-    /// Resolves the daemon's MQTT device-id for the current runtime/session.
+    /// Resolves the routing actor id for the current runtime/session.
     /// Preference order:
     ///   1. ConnectedAgentsStore lookup keyed by `session.primaryAgentId` —
     ///      authoritative when the session is iOS-Supabase-created.
-    ///   2. The runtime row's stored `daemonDeviceId` (populated by
+    ///   2. The runtime row's stored `routeActorID` (populated by
     ///      SessionListVM from the topic path it received the state on).
     /// Returns an empty string when no daemon mapping is known yet — callers
     /// should treat that as "skip publish, retry later".
-    private func resolveDaemonDeviceId() -> String {
+    private func resolveRouteActorID() -> String {
         if let primary = session?.primaryAgentId,
            !primary.isEmpty,
            let agent = connectedAgentsStore?.agents.first(where: { $0.id == primary }),
-           let id = agent.deviceID, !id.isEmpty {
-            return id
+           !agent.id.isEmpty {
+            return agent.id
         }
-        if let runtime, !runtime.daemonDeviceId.isEmpty {
-            return runtime.daemonDeviceId
+        if let runtime, !runtime.routeActorID.isEmpty {
+            return runtime.routeActorID
         }
         return ""
     }
@@ -814,11 +814,11 @@ public final class SessionDetailViewModel {
             print("[RuntimeDetailVM] addAgent: no sessions repo available")
         }
 
-        // Resolve the daemon device id for this agent actor so the
+        // Resolve the routing actor id for this agent actor so the
         // runtime-start RPC reaches the right daemon. ConnectedAgentsStore
         // is the authoritative source — same lookup NewSessionSheet uses.
-        guard let routeDevice = routeDeviceID(forAgentActorID: actorID), !routeDevice.isEmpty else {
-            print("[RuntimeDetailVM] addAgent: no device id for agent actor \(actorID)")
+        guard let routeActor = routeActorID(forAgentActorID: actorID), !routeActor.isEmpty else {
+            print("[RuntimeDetailVM] addAgent: no route actor id for agent actor \(actorID)")
             await refreshMemberSheet()
             return
         }
@@ -843,7 +843,7 @@ public final class SessionDetailViewModel {
 
         if let teamclawService {
             let outcome = await teamclawService.runtimeStartRpc(
-                targetDeviceID: routeDevice,
+                targetActorID: routeActor,
                 agentType: agentType,
                 workspaceId: workspaceID,
                 worktree: worktreePath,
@@ -896,7 +896,7 @@ public final class SessionDetailViewModel {
     /// at the end re-pulls truth so the UI catches up.
     ///
     /// Edge cases:
-    ///  - No `routeDeviceID` (agent's daemon offline): bail with a warning;
+    ///  - No `routeActorID` (agent's daemon offline): bail with a warning;
     ///    restart isn't possible without a live daemon.
     ///  - No `runtimeID` (runtime never spawned, or already stopped): skip
     ///    the Stop and go straight to Start.
@@ -910,10 +910,10 @@ public final class SessionDetailViewModel {
                   let row = self.memberSheetAgents.first(where: { $0.id == actorID })
             else { return }
 
-            guard let routeDeviceID = self.routeDeviceID(forAgentActorID: actorID),
-                  !routeDeviceID.isEmpty
+            guard let routeActorID = self.routeActorID(forAgentActorID: actorID),
+                  !routeActorID.isEmpty
             else {
-                print("[RuntimeDetailVM] restartRuntime: no device id for agent actor \(actorID); aborting")
+                print("[RuntimeDetailVM] restartRuntime: no route actor id for agent actor \(actorID); aborting")
                 return
             }
 
@@ -927,7 +927,7 @@ public final class SessionDetailViewModel {
             if let runtimeID = self.runtimeID(forAgentActorID: actorID),
                !runtimeID.isEmpty {
                 let (ok, err) = await teamclawService.runtimeStopRpc(
-                    targetDeviceID: routeDeviceID,
+                    targetActorID: routeActorID,
                     runtimeID: runtimeID
                 )
                 if !ok {
@@ -952,7 +952,7 @@ public final class SessionDetailViewModel {
             // 3. Spawn a new runtime in the same workspace + same agent type.
             let agentType = Self.amuxAgentType(forBackendType: row.backendType)
             let outcome = await teamclawService.runtimeStartRpc(
-                targetDeviceID: routeDeviceID,
+                targetActorID: routeActorID,
                 agentType: agentType,
                 workspaceId: workspaceID,
                 worktree: worktreePath,
@@ -1035,28 +1035,28 @@ public final class SessionDetailViewModel {
                 print("[RuntimeDetailVM] setModel: skipping — no runtimeID for actor=\(actorID)")
                 return
             }
-            // Resolve daemon device ID. connectedAgentsStore only contains agents
+            // Resolve route actor id. connectedAgentsStore only contains agents
             // the current user has explicit access to, so non-primary agents added
             // to a session by someone else may not be in the store. Fall back to
             // the bound runtime (primary agent) or a SwiftData fetch by runtimeId.
-            let routeDevice: String = {
-                if let id = self.routeDeviceID(forAgentActorID: actorID), !id.isEmpty { return id }
-                if let r = self.runtime, r.runtimeId == runtimeID, !r.daemonDeviceId.isEmpty {
-                    return r.daemonDeviceId
+            let routeActor: String = {
+                if let id = self.routeActorID(forAgentActorID: actorID), !id.isEmpty { return id }
+                if let r = self.runtime, r.runtimeId == runtimeID, !r.routeActorID.isEmpty {
+                    return r.routeActorID
                 }
                 if let ctx = self.startModelContext {
                     let rid = runtimeID
                     let desc = FetchDescriptor<Runtime>(predicate: #Predicate { $0.runtimeId == rid })
-                    return (try? ctx.fetch(desc).first?.daemonDeviceId) ?? ""
+                    return (try? ctx.fetch(desc).first?.routeActorID) ?? ""
                 }
                 return ""
             }()
-            guard !routeDevice.isEmpty else {
-                print("[RuntimeDetailVM] setModel: skipping — no deviceID for actor=\(actorID)")
+            guard !routeActor.isEmpty else {
+                print("[RuntimeDetailVM] setModel: skipping — no route actor id for actor=\(actorID)")
                 return
             }
             let (ok, err) = await teamclawService.setModelRpc(
-                targetDeviceID: routeDevice,
+                targetActorID: routeActor,
                 runtimeID: runtimeID,
                 modelID: model)
             if !ok {
@@ -1105,28 +1105,28 @@ public final class SessionDetailViewModel {
                   let sessionID = self.session?.sessionId,
                   !sessionID.isEmpty else { return }
 
-            let routeDevice = self.routeDeviceID(forAgentActorID: actorID)
+            let routeActor = self.routeActorID(forAgentActorID: actorID)
             let runtimeID = self.runtimeID(forAgentActorID: actorID)
 
             // 1. Stop the agent's runtime (best-effort).
-            if let routeDevice, !routeDevice.isEmpty,
+            if let routeActor, !routeActor.isEmpty,
                let runtimeID, !runtimeID.isEmpty,
                let teamclawService = self.teamclawService {
                 let (ok, err) = await teamclawService.runtimeStopRpc(
-                    targetDeviceID: routeDevice, runtimeID: runtimeID)
+                    targetActorID: routeActor, runtimeID: runtimeID)
                 if !ok {
                     print("[RuntimeDetailVM] removeAgent: runtimeStop failed: \(err)")
                 }
             } else {
-                print("[RuntimeDetailVM] removeAgent: skipping runtimeStop — routeDevice=\(routeDevice ?? "nil") runtimeID=\(runtimeID ?? "nil")")
+                print("[RuntimeDetailVM] removeAgent: skipping runtimeStop — routeActor=\(routeActor ?? "nil") runtimeID=\(runtimeID ?? "nil")")
             }
 
             // 2. Best-effort daemon-side participant removal for cache
             //    invalidation + peer notify fanout.
-            if let routeDevice, !routeDevice.isEmpty,
+            if let routeActor, !routeActor.isEmpty,
                let teamclawService = self.teamclawService {
                 let (ok, err) = await teamclawService.removeParticipantRpc(
-                    targetDeviceID: routeDevice,
+                    targetActorID: routeActor,
                     sessionID: sessionID,
                     actorID: actorID)
                 if !ok {
@@ -1150,12 +1150,12 @@ public final class SessionDetailViewModel {
         }
     }
 
-    /// Resolves the MQTT device-id of the daemon backing an agent actor,
+    /// Resolves the routing actor id of the daemon backing an agent actor,
     /// using the in-memory `ConnectedAgentsStore`. Returns nil when the store
     /// hasn't loaded the agent yet (caller should treat as "skip / log").
     /// Same lookup `addAgent` and `NewSessionSheet` use to route runtime RPCs.
-    private func routeDeviceID(forAgentActorID actorID: String) -> String? {
-        connectedAgentsStore?.agents.first(where: { $0.id == actorID })?.deviceID
+    private func routeActorID(forAgentActorID actorID: String) -> String? {
+        connectedAgentsStore?.agents.first(where: { $0.id == actorID })?.id
     }
 
     /// Looks up the daemon's 8-char runtime id for an agent actor in the
@@ -2046,7 +2046,7 @@ public final class SessionDetailViewModel {
         }
 
         // The bubble passes an actor id (route.agentID). Resolve it to
-        // the owning runtime + device id via the same helper sendCommand
+        // the owning runtime + route actor id via the same helper sendCommand
         // uses so the MQTT topic matches the daemon's subscription.
         let route = commandRoute(forAgentActorID: agentID, fallbackRuntime: runtime)
         guard !route.runtimeID.isEmpty else { return }
@@ -2058,7 +2058,7 @@ public final class SessionDetailViewModel {
         let sender = RuntimeCommandSender(mqtt: mqtt, teamID: teamID, peerID: peerId)
         try await sender.send(
             runtimeID: route.runtimeID,
-            deviceID: route.deviceID,
+            actorID: route.actorID,
             currentHumanActorID: teamclawService?.currentHumanActorId,
             makeCommand: { $0.command = .requestTurnHistory(req) }
         )
@@ -2077,13 +2077,13 @@ public final class SessionDetailViewModel {
         do {
             try await sender.send(
                 runtimeID: route.runtimeID,
-                deviceID: route.deviceID,
+                actorID: route.actorID,
                 currentHumanActorID: teamclawService?.currentHumanActorId,
                 makeCommand: makeCommand
             )
         } catch let error as SendCommandError {
-            if case .daemonDeviceIdUnresolved = error {
-                print("[RuntimeDetailVM] dropping command — daemon device-id not resolved (primaryAgentId=\(session?.primaryAgentId ?? "nil") runtimeId=\(route.runtimeID) agentActorID=\(agentActorID ?? "nil"))")
+            if case .routeActorIdUnresolved = error {
+                print("[RuntimeDetailVM] dropping command — route actor id not resolved (primaryAgentId=\(session?.primaryAgentId ?? "nil") runtimeId=\(route.runtimeID) agentActorID=\(agentActorID ?? "nil"))")
             }
             surfaceSendError(error)
             throw error
@@ -2094,7 +2094,7 @@ public final class SessionDetailViewModel {
     }
 
     private func commandRoute(forAgentActorID agentActorID: String?,
-                              fallbackRuntime: Runtime?) -> (runtimeID: String, deviceID: String) {
+                              fallbackRuntime: Runtime?) -> (runtimeID: String, actorID: String) {
         let key = agentActorID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let targetRuntimeID: String = {
             guard !key.isEmpty else { return fallbackRuntime?.runtimeId ?? "" }
@@ -2104,22 +2104,22 @@ public final class SessionDetailViewModel {
             return key
         }()
 
-        let deviceID: String = {
-            if !key.isEmpty, let id = routeDeviceID(forAgentActorID: key), !id.isEmpty { return id }
+        let actorID: String = {
+            if !key.isEmpty, let id = routeActorID(forAgentActorID: key), !id.isEmpty { return id }
             if fallbackRuntime?.runtimeId == targetRuntimeID,
-               let id = fallbackRuntime?.daemonDeviceId,
+               let id = fallbackRuntime?.routeActorID,
                !id.isEmpty {
                 return id
             }
             if let ctx = startModelContext, !targetRuntimeID.isEmpty {
                 let rid = targetRuntimeID
                 let desc = FetchDescriptor<Runtime>(predicate: #Predicate { $0.runtimeId == rid })
-                if let id = (try? ctx.fetch(desc).first?.daemonDeviceId), !id.isEmpty { return id }
+                if let id = (try? ctx.fetch(desc).first?.routeActorID), !id.isEmpty { return id }
             }
-            return resolveDaemonDeviceId()
+            return resolveRouteActorID()
         }()
 
-        return (targetRuntimeID, deviceID)
+        return (targetRuntimeID, actorID)
     }
 
     public func sendPrompt(_ text: String, modelId: String? = nil, attachmentURLs: [URL] = [], modelContext: ModelContext? = nil) async throws {

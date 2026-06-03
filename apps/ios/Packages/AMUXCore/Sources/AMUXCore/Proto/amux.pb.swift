@@ -118,7 +118,7 @@ public enum Amux_AgentStatus: SwiftProtobuf.Enum, Swift.CaseIterable {
 }
 
 /// Lifecycle state for a Claude Code runtime (subprocess).
-/// Published on device/{id}/runtime/{id}/state topic.
+/// Published on {team}/{actor}/runtime/{rid}/state topic.
 /// See spec: docs/superpowers/specs/2026-04-24-mqtt-topic-redesign-design.md#runtime-lifecycle
 public enum Amux_RuntimeLifecycle: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
@@ -208,7 +208,8 @@ public struct Amux_Envelope: Sendable {
 
   public var runtimeID: String = String()
 
-  public var deviceID: String = String()
+  /// routing identity == actor_id
+  public var actorID: String = String()
 
   /// Who triggered (empty if agent-initiated)
   public var sourcePeerID: String = String()
@@ -259,7 +260,7 @@ public struct Amux_Envelope: Sendable {
   public init() {}
 }
 
-/// Upstream: clients → daemon (sent to device/{id}/runtime/{id}/commands topic).
+/// Upstream: clients → daemon (sent to {team}/{actor}/runtime/{rid}/commands topic).
 public struct Amux_RuntimeCommandEnvelope: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -267,7 +268,7 @@ public struct Amux_RuntimeCommandEnvelope: Sendable {
 
   public var runtimeID: String = String()
 
-  public var deviceID: String = String()
+  public var actorID: String = String()
 
   public var peerID: String = String()
 
@@ -280,10 +281,10 @@ public struct Amux_RuntimeCommandEnvelope: Sendable {
   /// the legacy MQTT token-derived role.
   public var senderActorID: String = String()
 
-  /// Device-scoped reply target. When set, command results should be routed
-  /// back to this device's reply topic instead of the daemon's own device
+  /// Actor-scoped reply target. When set, command results should be routed
+  /// back to this actor's reply topic instead of the daemon's own actor
   /// namespace.
-  public var replyToDeviceID: String = String()
+  public var replyToActorID: String = String()
 
   public var acpCommand: Amux_AcpCommand {
     get {_acpCommand ?? Amux_AcpCommand()}
@@ -1002,16 +1003,16 @@ public struct Amux_RemoveMember: Sendable {
   public init() {}
 }
 
-/// Payload of device/{id}/state (retained, LWT-backed from Phase 3 onward).
+/// Payload of {team}/{actor}/state (retained, LWT-backed from Phase 3 onward).
 /// See spec: docs/superpowers/specs/2026-04-24-mqtt-topic-redesign-design.md
-public struct Amux_DeviceState: Sendable {
+public struct Amux_ActorPresence: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var online: Bool = false
 
-  public var deviceName: String = String()
+  public var displayName: String = String()
 
   public var timestamp: Int64 = 0
 
@@ -1048,7 +1049,7 @@ public struct Amux_WorkspaceList: Sendable {
   public init() {}
 }
 
-/// Payload of device/{id}/runtime/{id}/state (retained).
+/// Payload of {team}/{actor}/runtime/{rid}/state (retained).
 /// See spec: docs/superpowers/specs/2026-04-24-mqtt-topic-redesign-design.md
 public struct Amux_RuntimeInfo: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
@@ -1283,7 +1284,7 @@ extension Amux_MemberRole: SwiftProtobuf._ProtoNameProviding {
 
 extension Amux_Envelope: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Envelope"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}runtime_id\0\u{3}device_id\0\u{3}source_peer_id\0\u{1}timestamp\0\u{1}sequence\0\u{3}turn_id\0\u{4}\u{4}acp_event\0\u{3}session_event\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}runtime_id\0\u{3}actor_id\0\u{3}source_peer_id\0\u{1}timestamp\0\u{1}sequence\0\u{3}turn_id\0\u{4}\u{4}acp_event\0\u{3}session_event\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1292,7 +1293,7 @@ extension Amux_Envelope: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.runtimeID) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.deviceID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.actorID) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.sourcePeerID) }()
       case 4: try { try decoder.decodeSingularInt64Field(value: &self.timestamp) }()
       case 5: try { try decoder.decodeSingularUInt64Field(value: &self.sequence) }()
@@ -1336,8 +1337,8 @@ extension Amux_Envelope: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
     if !self.runtimeID.isEmpty {
       try visitor.visitSingularStringField(value: self.runtimeID, fieldNumber: 1)
     }
-    if !self.deviceID.isEmpty {
-      try visitor.visitSingularStringField(value: self.deviceID, fieldNumber: 2)
+    if !self.actorID.isEmpty {
+      try visitor.visitSingularStringField(value: self.actorID, fieldNumber: 2)
     }
     if !self.sourcePeerID.isEmpty {
       try visitor.visitSingularStringField(value: self.sourcePeerID, fieldNumber: 3)
@@ -1367,7 +1368,7 @@ extension Amux_Envelope: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
 
   public static func ==(lhs: Amux_Envelope, rhs: Amux_Envelope) -> Bool {
     if lhs.runtimeID != rhs.runtimeID {return false}
-    if lhs.deviceID != rhs.deviceID {return false}
+    if lhs.actorID != rhs.actorID {return false}
     if lhs.sourcePeerID != rhs.sourcePeerID {return false}
     if lhs.timestamp != rhs.timestamp {return false}
     if lhs.sequence != rhs.sequence {return false}
@@ -1380,7 +1381,7 @@ extension Amux_Envelope: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
 
 extension Amux_RuntimeCommandEnvelope: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".RuntimeCommandEnvelope"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}runtime_id\0\u{3}device_id\0\u{3}peer_id\0\u{3}command_id\0\u{1}timestamp\0\u{3}sender_actor_id\0\u{3}reply_to_device_id\0\u{4}\u{3}acp_command\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}runtime_id\0\u{3}actor_id\0\u{3}peer_id\0\u{3}command_id\0\u{1}timestamp\0\u{3}sender_actor_id\0\u{3}reply_to_actor_id\0\u{4}\u{3}acp_command\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1389,12 +1390,12 @@ extension Amux_RuntimeCommandEnvelope: SwiftProtobuf.Message, SwiftProtobuf._Mes
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.runtimeID) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.deviceID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.actorID) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.peerID) }()
       case 4: try { try decoder.decodeSingularStringField(value: &self.commandID) }()
       case 5: try { try decoder.decodeSingularInt64Field(value: &self.timestamp) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.senderActorID) }()
-      case 7: try { try decoder.decodeSingularStringField(value: &self.replyToDeviceID) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self.replyToActorID) }()
       case 10: try { try decoder.decodeSingularMessageField(value: &self._acpCommand) }()
       default: break
       }
@@ -1409,8 +1410,8 @@ extension Amux_RuntimeCommandEnvelope: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if !self.runtimeID.isEmpty {
       try visitor.visitSingularStringField(value: self.runtimeID, fieldNumber: 1)
     }
-    if !self.deviceID.isEmpty {
-      try visitor.visitSingularStringField(value: self.deviceID, fieldNumber: 2)
+    if !self.actorID.isEmpty {
+      try visitor.visitSingularStringField(value: self.actorID, fieldNumber: 2)
     }
     if !self.peerID.isEmpty {
       try visitor.visitSingularStringField(value: self.peerID, fieldNumber: 3)
@@ -1424,8 +1425,8 @@ extension Amux_RuntimeCommandEnvelope: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if !self.senderActorID.isEmpty {
       try visitor.visitSingularStringField(value: self.senderActorID, fieldNumber: 6)
     }
-    if !self.replyToDeviceID.isEmpty {
-      try visitor.visitSingularStringField(value: self.replyToDeviceID, fieldNumber: 7)
+    if !self.replyToActorID.isEmpty {
+      try visitor.visitSingularStringField(value: self.replyToActorID, fieldNumber: 7)
     }
     try { if let v = self._acpCommand {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
@@ -1435,12 +1436,12 @@ extension Amux_RuntimeCommandEnvelope: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
   public static func ==(lhs: Amux_RuntimeCommandEnvelope, rhs: Amux_RuntimeCommandEnvelope) -> Bool {
     if lhs.runtimeID != rhs.runtimeID {return false}
-    if lhs.deviceID != rhs.deviceID {return false}
+    if lhs.actorID != rhs.actorID {return false}
     if lhs.peerID != rhs.peerID {return false}
     if lhs.commandID != rhs.commandID {return false}
     if lhs.timestamp != rhs.timestamp {return false}
     if lhs.senderActorID != rhs.senderActorID {return false}
-    if lhs.replyToDeviceID != rhs.replyToDeviceID {return false}
+    if lhs.replyToActorID != rhs.replyToActorID {return false}
     if lhs._acpCommand != rhs._acpCommand {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -2912,9 +2913,9 @@ extension Amux_RemoveMember: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 }
 
-extension Amux_DeviceState: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".DeviceState"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}online\0\u{3}device_name\0\u{1}timestamp\0")
+extension Amux_ActorPresence: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ActorPresence"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}online\0\u{3}display_name\0\u{1}timestamp\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2923,7 +2924,7 @@ extension Amux_DeviceState: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularBoolField(value: &self.online) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.deviceName) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.displayName) }()
       case 3: try { try decoder.decodeSingularInt64Field(value: &self.timestamp) }()
       default: break
       }
@@ -2934,8 +2935,8 @@ extension Amux_DeviceState: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if self.online != false {
       try visitor.visitSingularBoolField(value: self.online, fieldNumber: 1)
     }
-    if !self.deviceName.isEmpty {
-      try visitor.visitSingularStringField(value: self.deviceName, fieldNumber: 2)
+    if !self.displayName.isEmpty {
+      try visitor.visitSingularStringField(value: self.displayName, fieldNumber: 2)
     }
     if self.timestamp != 0 {
       try visitor.visitSingularInt64Field(value: self.timestamp, fieldNumber: 3)
@@ -2943,9 +2944,9 @@ extension Amux_DeviceState: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Amux_DeviceState, rhs: Amux_DeviceState) -> Bool {
+  public static func ==(lhs: Amux_ActorPresence, rhs: Amux_ActorPresence) -> Bool {
     if lhs.online != rhs.online {return false}
-    if lhs.deviceName != rhs.deviceName {return false}
+    if lhs.displayName != rhs.displayName {return false}
     if lhs.timestamp != rhs.timestamp {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true

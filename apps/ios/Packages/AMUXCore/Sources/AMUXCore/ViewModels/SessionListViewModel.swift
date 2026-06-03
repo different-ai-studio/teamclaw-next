@@ -53,11 +53,11 @@ public final class SessionListViewModel {
         task?.cancel()
 
         // Daemon fans each session out to its own retained topic
-        // `device/{daemon_device_id}/runtime/{runtime}/state` (one RuntimeInfo
+        // `amux/{team}/{actor}/runtime/{runtime}/state` (one RuntimeInfo
         // per message). With multiple daemons in scope we maintain one
-        // wildcard subscription per known daemon device-id and re-sync the set
+        // wildcard subscription per known agent actor id and re-sync the set
         // whenever ConnectedAgentsStore reloads. Topic shape filtering happens
-        // in `parseRuntimeStateTopic`; the per-device subscriptions just gate
+        // in `parseRuntimeStateTopic`; the per-actor subscriptions just gate
         // delivery from the broker.
         task = Task { [weak self] in
             guard let self else { return }
@@ -85,7 +85,7 @@ public final class SessionListViewModel {
 
                 // Hub-filtered stream: only messages whose topic parses as
                 // a per-runtime state topic for this team. The wildcard
-                // device-scoped subscriptions below decide which daemons
+                // actor-scoped subscriptions below decide which daemons
                 // the broker actually delivers from; the predicate is the
                 // belt to that suspenders.
                 let stream = await hub.messages(matching: { [teamID] msg in
@@ -132,7 +132,7 @@ public final class SessionListViewModel {
                         continue
                     }
                     guard let info = try? ProtoMQTTCoder.decode(Amux_RuntimeInfo.self, from: msg.payload) else { continue }
-                    self.syncRuntime(info, daemonDeviceId: parsed.daemonDeviceId, modelContext: ctx)
+                    self.syncRuntime(info, routeActorID: parsed.routeActorID, modelContext: ctx)
                     self.refreshSessions(modelContext: ctx)
                 }
                 observer.cancel()
@@ -289,7 +289,7 @@ public final class SessionListViewModel {
         try? ctx?.save()
     }
 
-    /// Diffs the desired daemon device-id set against the currently subscribed
+    /// Diffs the desired agent actor-id set against the currently subscribed
     /// set and adjusts `runtime/+/state` subscriptions accordingly. Idempotent.
     private func resyncRuntimeStateSubscriptions(
         mqtt: MQTTService,
@@ -298,32 +298,32 @@ public final class SessionListViewModel {
     ) async {
         let desired: Set<String> = {
             guard let store else { return [] }
-            return Set(store.agents.compactMap(\.deviceID).filter { !$0.isEmpty })
+            return Set(store.agents.map(\.id).filter { !$0.isEmpty })
         }()
         // Diagnostic: if `desired` is empty we never subscribe to any
         // runtime/+/state topic, which is the single most common reason
         // slash commands never reach the composer popup (the daemon's
         // retained state with availableCommands never gets delivered).
-        // Either ConnectedAgentsStore hasn't reloaded yet, or no agent
-        // has a non-empty `agents.device_id` column populated upstream.
+        // Either ConnectedAgentsStore hasn't reloaded yet, or an agent
+        // arrived with an empty actor id (its routing actor == its id).
         let agentCount = store?.agents.count ?? 0
-        let missingDeviceCount = (store?.agents ?? []).filter {
-            ($0.deviceID ?? "").isEmpty
+        let missingActorCount = (store?.agents ?? []).filter {
+            $0.id.isEmpty
         }.count
-        NSLog("[SessionListVM] resync subs: desired=%d agents=%d missing-device=%d",
-              desired.count, agentCount, missingDeviceCount)
-        let toAdd = desired.subtracting(subscribedDeviceIDs)
-        let toRemove = subscribedDeviceIDs.subtracting(desired)
+        NSLog("[SessionListVM] resync subs: desired=%d agents=%d missing-actor=%d",
+              desired.count, agentCount, missingActorCount)
+        let toAdd = desired.subtracting(subscribedActorIDs)
+        let toRemove = subscribedActorIDs.subtracting(desired)
         for id in toAdd {
-            let topic = MQTTTopics.runtimeStateWildcard(teamID: teamID, deviceID: id)
+            let topic = MQTTTopics.runtimeStateWildcard(teamID: teamID, actorID: id)
             try? await mqtt.subscribe(topic)
             NSLog("[SessionListVM] subscribed to %@", topic)
         }
         for id in toRemove {
-            let topic = MQTTTopics.runtimeStateWildcard(teamID: teamID, deviceID: id)
+            let topic = MQTTTopics.runtimeStateWildcard(teamID: teamID, actorID: id)
             try? await mqtt.unsubscribe(topic)
         }
-        subscribedDeviceIDs = desired
+        subscribedActorIDs = desired
     }
 
     /// Suspends until any tracked property of `store.agents` mutates. Returns
@@ -342,26 +342,25 @@ public final class SessionListViewModel {
         }
     }
 
-    /// Returns the daemon device-id and runtime-id when `topic` matches
-    /// `amux/{team}/device/{dev}/runtime/{rid}/state`. Nil otherwise.
+    /// Returns the routing actor-id and runtime-id when `topic` matches
+    /// `amux/{team}/{actor}/runtime/{rid}/state` (6 segments). Nil otherwise.
     /// `nonisolated` so the MQTTMessageHub predicate (running on the hub
     /// actor) can call it without hopping to the main actor for what is
     /// pure string-splitting.
-    nonisolated static func parseRuntimeStateTopic(_ topic: String, teamID: String) -> (daemonDeviceId: String, runtimeId: String)? {
+    nonisolated static func parseRuntimeStateTopic(_ topic: String, teamID: String) -> (routeActorID: String, runtimeId: String)? {
         let parts = topic.split(separator: "/")
-        guard parts.count == 7,
+        guard parts.count == 6,
               parts[0] == "amux",
-              parts[2] == "device",
-              parts[4] == "runtime",
-              parts[6] == "state" else {
+              parts[3] == "runtime",
+              parts[5] == "state" else {
             return nil
         }
         let normalizedTeam = MQTTTopics.normalizedTeamID(teamID)
         guard parts[1] == Substring(normalizedTeam) else { return nil }
-        return (daemonDeviceId: String(parts[3]), runtimeId: String(parts[5]))
+        return (routeActorID: String(parts[2]), runtimeId: String(parts[4]))
     }
 
-    private func syncRuntime(_ proto: Amux_RuntimeInfo, daemonDeviceId: String, modelContext: ModelContext) {
+    private func syncRuntime(_ proto: Amux_RuntimeInfo, routeActorID: String, modelContext: ModelContext) {
         let id = proto.runtimeID
         // Diagnostic: visible from Console.app or `log stream`. Lets us tell
         // at a glance whether the daemon's retained `runtime/{id}/state`
@@ -369,11 +368,11 @@ public final class SessionListViewModel {
         // arrived empty (agent never emitted, daemon trim, or restart-race
         // wiped the cache before ACP re-emitted).
         NSLog("[SessionListVM] syncRuntime rid=%@ device=%@ status=%d cmds=%d models=%d",
-              id, daemonDeviceId, proto.status.rawValue,
+              id, routeActorID, proto.status.rawValue,
               proto.availableCommands.count, proto.availableModels.count)
         let descriptor = FetchDescriptor<Runtime>(predicate: #Predicate { $0.runtimeId == id })
         if let existing = try? modelContext.fetch(descriptor).first {
-            existing.daemonDeviceId = daemonDeviceId
+            existing.routeActorID = routeActorID
             // Mark unread and update timestamp if there's new activity
             if existing.lastOutputSummary != proto.lastOutputSummary
                 || existing.toolUseCount != Int(proto.toolUseCount) {
@@ -424,7 +423,7 @@ public final class SessionListViewModel {
             )
             newRuntime.lastEventTime = .now
             newRuntime.hasUnread = true
-            newRuntime.daemonDeviceId = daemonDeviceId
+            newRuntime.routeActorID = routeActorID
             let models = proto.availableModels.map { AvailableModel(id: $0.id, displayName: $0.displayName) }
             if let json = try? JSONEncoder().encode(models),
                let str = String(data: json, encoding: .utf8) {
@@ -491,9 +490,9 @@ public final class SessionListViewModel {
     /// session garbage on the shared broker from showing up in the list.
     public var validSessionIDs: Set<String>?
 
-    /// Daemon device-ids whose `runtime/+/state` topic we currently hold an
+    /// Agent actor-ids whose `runtime/+/state` topic we currently hold an
     /// active subscription on. Mutated only by `resyncRuntimeStateSubscriptions`.
-    private var subscribedDeviceIDs: Set<String> = []
+    private var subscribedActorIDs: Set<String> = []
 
     /// Call this from views when sessions are known to have changed (e.g. after TeamclawService sync).
     public func reloadSessions(modelContext: ModelContext) {

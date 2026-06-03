@@ -10,7 +10,7 @@ public struct WorkspaceManagementView: View {
 
     let viewModel: SessionListViewModel
     let teamclawService: TeamclawService
-    let targetDeviceID: String
+    let targetActorID: String
 
     @State private var newPath = ""
     @State private var errorMessage: String?
@@ -18,10 +18,10 @@ public struct WorkspaceManagementView: View {
 
     private var workspaces: [Workspace] { viewModel.workspaces }
 
-    public init(viewModel: SessionListViewModel, teamclawService: TeamclawService, targetDeviceID: String) {
+    public init(viewModel: SessionListViewModel, teamclawService: TeamclawService, targetActorID: String) {
         self.viewModel = viewModel
         self.teamclawService = teamclawService
-        self.targetDeviceID = targetDeviceID
+        self.targetActorID = targetActorID
     }
 
     public var body: some View {
@@ -97,9 +97,9 @@ public struct WorkspaceManagementView: View {
         isAdding = true
         errorMessage = nil
 
-        let target = targetDeviceID
+        let target = targetActorID
         Task {
-            let (ok, err) = await teamclawService.addWorkspaceRpc(targetDeviceID: target, path: path)
+            let (ok, err) = await teamclawService.addWorkspaceRpc(targetActorID: target, path: path)
             await MainActor.run {
                 isAdding = false
                 if ok {
@@ -113,9 +113,9 @@ public struct WorkspaceManagementView: View {
     }
 
     private func removeWorkspace(_ workspaceId: String) {
-        let target = targetDeviceID
+        let target = targetActorID
         Task {
-            let (ok, err) = await teamclawService.removeWorkspaceRpc(targetDeviceID: target, workspaceId: workspaceId)
+            let (ok, err) = await teamclawService.removeWorkspaceRpc(targetActorID: target, workspaceId: workspaceId)
             if !ok {
                 await MainActor.run {
                     errorMessage = err.isEmpty ? "Remove failed" : err

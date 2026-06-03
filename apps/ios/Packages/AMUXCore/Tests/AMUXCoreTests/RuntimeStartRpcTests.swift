@@ -65,6 +65,10 @@ final class RuntimeStartRpcTests: XCTestCase {
             modelContainer: container,
             connectedAgentsStore: nil
         )
+        // The daemon replies on the requester actor's rpc/res topic, so the
+        // RPC awaiter subscribes there. Seed the local actor so the response
+        // topic in these tests is deterministic (`member1`).
+        service.setLocalMemberIdForTesting("member1")
         await service.hubRef?.start()
         await Task.yield()
         return service
@@ -84,7 +88,7 @@ final class RuntimeStartRpcTests: XCTestCase {
         let service = try await configuredService(mqtt: mqtt)
 
         async let outcome = service.runtimeStartRpc(
-            targetDeviceID: "dev-a",
+            targetActorID: "agent-a",
             agentType: .claudeCode,
             workspaceId: "ws-1",
             worktree: "/tmp/work",
@@ -108,7 +112,7 @@ final class RuntimeStartRpcTests: XCTestCase {
 
         let responseBytes = try response.serializedData()
         mqtt.deliverForTesting(MQTTIncoming(
-            topic: MQTTTopics.deviceRpcResponse(teamID: "team1", deviceID: "dev-a"),
+            topic: MQTTTopics.actorRpcResponse(teamID: "team1", actorID: "member1"),
             payload: responseBytes,
             retained: false
         ))
@@ -135,7 +139,7 @@ final class RuntimeStartRpcTests: XCTestCase {
         let service = try await configuredService(mqtt: mqtt)
 
         async let outcome = service.runtimeStartRpc(
-            targetDeviceID: "dev-a",
+            targetActorID: "agent-a",
             agentType: .claudeCode,
             workspaceId: "ws-1",
             worktree: "/tmp/work",
@@ -156,7 +160,7 @@ final class RuntimeStartRpcTests: XCTestCase {
         response.result = .runtimeStartResult(result)
 
         mqtt.deliverForTesting(MQTTIncoming(
-            topic: MQTTTopics.deviceRpcResponse(teamID: "team1", deviceID: "dev-a"),
+            topic: MQTTTopics.actorRpcResponse(teamID: "team1", actorID: "member1"),
             payload: try response.serializedData(),
             retained: false
         ))
@@ -182,7 +186,7 @@ final class RuntimeStartRpcTests: XCTestCase {
         let service = try await configuredService(mqtt: mqtt)
 
         async let outcome = service.runtimeStartRpc(
-            targetDeviceID: "dev-a",
+            targetActorID: "agent-a",
             agentType: .claudeCode,
             workspaceId: "ws-1",
             worktree: "/tmp/work",
@@ -204,7 +208,7 @@ final class RuntimeStartRpcTests: XCTestCase {
         response.result = .runtimeStartResult(result)
 
         mqtt.deliverForTesting(MQTTIncoming(
-            topic: MQTTTopics.deviceRpcResponse(teamID: "team1", deviceID: "dev-a"),
+            topic: MQTTTopics.actorRpcResponse(teamID: "team1", actorID: "member1"),
             payload: try response.serializedData(),
             retained: false
         ))
@@ -222,7 +226,7 @@ final class RuntimeStartRpcTests: XCTestCase {
         let service = TeamclawService()
         // Intentionally no configureRuntimeForTesting — mqtt stays nil.
         let outcome = await service.runtimeStartRpc(
-            targetDeviceID: "dev-a",
+            targetActorID: "agent-a",
             agentType: .claudeCode,
             workspaceId: "ws-1",
             worktree: "/tmp/work",

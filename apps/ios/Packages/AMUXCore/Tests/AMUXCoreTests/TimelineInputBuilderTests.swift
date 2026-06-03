@@ -9,18 +9,18 @@ struct TimelineInputBuilderTests {
     func filtersIrrelevantTopics() {
         let builder = TimelineInputBuilder()
         let runtimeState = MQTTIncoming(
-            topic: "amux/team-x/device/dev-1/runtime/rt-1/state",
+            topic: "amux/team-x/actor-1/runtime/rt-1/state",
             payload: Data(),
             retained: true
         )
         #expect(builder.build(from: runtimeState) == nil)
 
-        let deviceState = MQTTIncoming(
-            topic: "amux/team-x/device/dev-1/status",
+        let actorState = MQTTIncoming(
+            topic: "amux/team-x/actor-1/status",
             payload: Data(),
             retained: true
         )
-        #expect(builder.build(from: deviceState) == nil)
+        #expect(builder.build(from: actorState) == nil)
     }
 
     @Test("malformed payload on a session/live topic yields nil rather than crashing")

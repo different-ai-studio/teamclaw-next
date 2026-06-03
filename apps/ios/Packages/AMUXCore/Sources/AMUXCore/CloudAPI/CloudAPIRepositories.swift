@@ -418,11 +418,6 @@ public actor CloudAPIAgentAccessRepository: AgentAccessRepository {
         try await client.postVoid("/v1/agents/\(Self.enc(agentID))/make-personal", body: CloudEmptyBody())
     }
 
-    public func deviceID(for agentID: String) async throws -> String? {
-        let result: CloudDeviceId = try await client.get("/v1/agents/\(Self.enc(agentID))/device-id")
-        return result.deviceId
-    }
-
     public func teamAgentCount(teamID: String) async throws -> Int {
         let page: CloudPage<CloudActorRef> = try await client.get("/v1/teams/\(Self.enc(teamID))/actors?kind=agent&limit=500")
         return page.items.count
@@ -816,7 +811,6 @@ private struct CloudConnectedAgent: Decodable, Sendable {
     let visibility: String?
     let isOwner: Bool?
     let lastActiveAt: String?
-    let deviceId: String?
 
     var connectedAgent: ConnectedAgent {
         ConnectedAgent(
@@ -827,7 +821,6 @@ private struct CloudConnectedAgent: Decodable, Sendable {
             defaultAgentType: defaultAgentType,
             permissionLevel: permissionLevel ?? "",
             lastActiveAt: parseCloudDate(lastActiveAt),
-            deviceID: deviceId,
             visibility: visibility ?? "team",
             isOwner: isOwner ?? false
         )
@@ -857,10 +850,6 @@ private struct CloudAgentAccess: Decodable, Sendable {
 private struct CloudAgentPermission: Decodable, Sendable {
     let allowed: Bool
     let role: String?
-}
-
-private struct CloudDeviceId: Decodable, Sendable {
-    let deviceId: String?
 }
 
 private struct CloudActorRef: Decodable, Sendable {

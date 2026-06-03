@@ -97,7 +97,7 @@ final class SessionDetailViewModelTests: XCTestCase {
         let session = Session(sessionId: "session-1", teamId: "team-1")
         session.primaryAgentId = "agent-actor-1"
         let placeholder = Runtime(runtimeId: "agent-actor-1")
-        placeholder.daemonDeviceId = "daemon-device-1"
+        placeholder.routeActorID = "daemon-device-1"
 
         let viewModel = SessionDetailViewModel(
             runtime: placeholder,
@@ -134,7 +134,7 @@ final class SessionDetailViewModelTests: XCTestCase {
         let session = Session(sessionId: "session-1", teamId: "team-1")
         session.primaryAgentId = "agent-primary"
         let primaryRuntime = Runtime(runtimeId: "rt-primary")
-        primaryRuntime.daemonDeviceId = "daemon-device-1"
+        primaryRuntime.routeActorID = "daemon-device-1"
 
         let viewModel = SessionDetailViewModel(
             runtime: primaryRuntime,
@@ -157,7 +157,7 @@ final class SessionDetailViewModelTests: XCTestCase {
         XCTAssertFalse(retain)
         XCTAssertEqual(
             topic,
-            MQTTTopics.runtimeCommands(teamID: "team-1", deviceID: "daemon-device-1", runtimeID: "rt-secondary")
+            MQTTTopics.runtimeCommands(teamID: "team-1", actorID: "daemon-device-1", runtimeID: "rt-secondary")
         )
         let envelope = try Amux_RuntimeCommandEnvelope(serializedBytes: data)
         XCTAssertEqual(envelope.runtimeID, "rt-secondary")
@@ -188,7 +188,7 @@ final class SessionDetailViewModelTests: XCTestCase {
         context.insert(session)
 
         let secondaryRuntime = Runtime(runtimeId: "rt-secondary")
-        secondaryRuntime.daemonDeviceId = "daemon-device-2"
+        secondaryRuntime.routeActorID = "daemon-device-2"
         context.insert(secondaryRuntime)
         try context.save()
 
@@ -214,7 +214,7 @@ final class SessionDetailViewModelTests: XCTestCase {
         XCTAssertFalse(retain)
         XCTAssertEqual(
             topic,
-            MQTTTopics.runtimeCommands(teamID: "team-1", deviceID: "daemon-device-2", runtimeID: "rt-secondary")
+            MQTTTopics.runtimeCommands(teamID: "team-1", actorID: "daemon-device-2", runtimeID: "rt-secondary")
         )
         let envelope = try Amux_RuntimeCommandEnvelope(serializedBytes: data)
         XCTAssertEqual(envelope.runtimeID, "rt-secondary")
@@ -259,7 +259,7 @@ final class SessionDetailViewModelTests: XCTestCase {
         session.primaryAgentId = "agent-actor-1"
         context.insert(session)
         let agentRuntime = Runtime(runtimeId: "agent-actor-1")
-        agentRuntime.daemonDeviceId = "daemon-device-1"
+        agentRuntime.routeActorID = "daemon-device-1"
         context.insert(agentRuntime)
         try context.save()
 
@@ -328,7 +328,7 @@ final class SessionDetailViewModelTests: XCTestCase {
         session.primaryAgentId = "agent-actor-1"
         context.insert(session)
         let agentRuntime = Runtime(runtimeId: "rt-mini-1")
-        agentRuntime.daemonDeviceId = "daemon-device-1"
+        agentRuntime.routeActorID = "daemon-device-1"
         context.insert(agentRuntime)
         try context.save()
 
@@ -356,7 +356,7 @@ final class SessionDetailViewModelTests: XCTestCase {
             snapshot.first?.0,
             MQTTTopics.runtimeCommands(
                 teamID: "team-1",
-                deviceID: "daemon-device-1",
+                actorID: "daemon-device-1",
                 runtimeID: "rt-mini-1"
             )
         )
@@ -365,7 +365,7 @@ final class SessionDetailViewModelTests: XCTestCase {
         let payload = try XCTUnwrap(snapshot.first?.1)
         let envelope = try Amux_RuntimeCommandEnvelope(serializedBytes: payload)
         XCTAssertEqual(envelope.runtimeID, "rt-mini-1")
-        XCTAssertEqual(envelope.deviceID, "daemon-device-1")
+        XCTAssertEqual(envelope.actorID, "daemon-device-1")
         XCTAssertEqual(envelope.senderActorID, "human-1")
         guard case .cancel = envelope.acpCommand.command else {
             return XCTFail("expected AcpCancel command")

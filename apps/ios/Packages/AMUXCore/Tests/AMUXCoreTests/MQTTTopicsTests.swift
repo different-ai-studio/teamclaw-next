@@ -4,16 +4,28 @@ import XCTest
 final class MQTTTopicsTests: XCTestCase {
     func testTeamclawRearchitectureTopics() {
         XCTAssertEqual(
-            MQTTTopics.deviceRpcRequest(teamID: "team1", deviceID: "dev-a"),
-            "amux/team1/device/dev-a/rpc/req"
+            MQTTTopics.actorRpcRequest(teamID: "team1", actorID: "actor-a"),
+            "amux/team1/actor-a/rpc/req"
         )
         XCTAssertEqual(
-            MQTTTopics.deviceRpcResponse(teamID: "team1", deviceID: "dev-a"),
-            "amux/team1/device/dev-a/rpc/res"
+            MQTTTopics.actorRpcResponse(teamID: "team1", actorID: "actor-a"),
+            "amux/team1/actor-a/rpc/res"
         )
         XCTAssertEqual(
-            MQTTTopics.deviceNotify(teamID: "team1", deviceID: "dev-a"),
-            "amux/team1/device/dev-a/notify"
+            MQTTTopics.actorNotify(teamID: "team1", actorID: "actor-a"),
+            "amux/team1/actor-a/notify"
+        )
+        XCTAssertEqual(
+            MQTTTopics.actorState(teamID: "team1", actorID: "actor-a"),
+            "amux/team1/actor-a/state"
+        )
+        XCTAssertEqual(
+            MQTTTopics.runtimeState(teamID: "team1", actorID: "actor-a", runtimeID: "rt-1"),
+            "amux/team1/actor-a/runtime/rt-1/state"
+        )
+        XCTAssertEqual(
+            MQTTTopics.runtimeCommands(teamID: "team1", actorID: "actor-a", runtimeID: "rt-1"),
+            "amux/team1/actor-a/runtime/rt-1/commands"
         )
         XCTAssertEqual(
             MQTTTopics.sessionLive(teamID: "team1", sessionID: "sess-1"),
