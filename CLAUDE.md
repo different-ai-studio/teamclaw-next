@@ -42,6 +42,7 @@ pnpm install
 # Dev
 pnpm dev                    # Frontend only (Vite)
 pnpm tauri:dev              # Full Tauri desktop app
+pnpm tauri:dev -- --skip-setup --skip-daemon-onboarding  # Dev: skip first-run wizards
 pnpm rust:check             # Fast Rust compile check with shared .cargo-target
 pnpm rust:build             # Rust build with shared .cargo-target
 pnpm daemon:run             # Run amuxd from apps/daemon
