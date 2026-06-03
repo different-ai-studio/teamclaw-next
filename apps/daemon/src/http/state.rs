@@ -46,6 +46,9 @@ pub struct HttpState {
     /// that case.
     pub workspace_control: Option<Arc<dyn WorkspaceControlStore>>,
     pub runtime_supervisor: Option<Arc<crate::runtime::RuntimeSupervisor>>,
+    /// Workspace refresh state shared with `/v1/workspaces/:id/runtime*`.
+    pub runtime_refresh:
+        Option<Arc<crate::runtime::refresh::RuntimeRefreshCoordinator>>,
     /// Loopback `opencode serve` pool for provider OAuth (settings only).
     pub opencode_settings: Option<Arc<crate::opencode_settings::OpenCodeSettingsService>>,
     /// Daemon-owned team sync dispatcher (drives `/v1/team/sync*`).
@@ -66,6 +69,9 @@ impl HttpState {
         opencode_settings: Option<Arc<crate::opencode_settings::OpenCodeSettingsService>>,
         sync_dispatcher: crate::sync::dispatch::SyncDispatcher,
     ) -> Self {
+        let runtime_refresh = runtime_supervisor
+            .as_ref()
+            .map(|supervisor| supervisor.refresh_coordinator());
         Self {
             config: Arc::new(config),
             tokens,
@@ -76,6 +82,7 @@ impl HttpState {
             limiter: RateLimiter::new(),
             workspace_control,
             runtime_supervisor,
+            runtime_refresh,
             opencode_settings,
             sync_dispatcher,
         }

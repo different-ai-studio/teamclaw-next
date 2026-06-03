@@ -125,6 +125,17 @@ fn apply_ok(outcome: ApplyOutcome) -> Json<ApplyResponse> {
     Json(ApplyResponse { outcome })
 }
 
+async fn runtime_status_with_refresh(
+    state: &HttpState,
+    workspace_id: &str,
+    mut status: RuntimeStatus,
+) -> RuntimeStatus {
+    if let Some(refresh) = state.runtime_refresh.as_ref() {
+        status.refresh = refresh.runtime_refresh_dto(workspace_id).await;
+    }
+    status
+}
+
 // ── Provider handlers ─────────────────────────────────────────────────────────
 
 /// `GET /v1/workspaces/:id/providers`
@@ -760,6 +771,7 @@ pub async fn get_runtime(
             .runtime_status(&workspace_id, &workspace_path)
             .await
             .map_err(map_control_err)?;
+        let status = runtime_status_with_refresh(&state, &workspace_id, status).await;
         return Ok(Json(status));
     }
 
@@ -767,6 +779,7 @@ pub async fn get_runtime(
     let status = store
         .get_runtime_status(&workspace_id)
         .map_err(map_control_err)?;
+    let status = runtime_status_with_refresh(&state, &workspace_id, status).await;
     Ok(Json(status))
 }
 
@@ -781,22 +794,48 @@ pub async fn reload_runtime(
 
     if let Some(supervisor) = state.runtime_supervisor.as_ref() {
         let outcome = supervisor
-            .reload_workspace(&workspace_id, &workspace_path)
+            .apply_refresh(&workspace_id, &workspace_path)
             .await
             .map_err(map_control_err)?;
         return Ok(apply_ok(outcome));
     }
 
     let store = resolve_store(&state)?;
-    let outcome = store
-        .reload_runtime(&workspace_id)
-        .map_err(map_control_err)?;
+    if let Some(refresh) = state.runtime_refresh.as_ref() {
+        refresh.mark_applying(&workspace_id).await;
+    }
+    let outcome = match store.reload_runtime(&workspace_id) {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            if let Some(refresh) = state.runtime_refresh.as_ref() {
+                refresh
+                    .mark_apply_failed(&workspace_id, err.to_string())
+                    .await;
+            }
+            return Err(map_control_err(err));
+        }
+    };
+    if let Some(refresh) = state.runtime_refresh.as_ref() {
+        refresh.clear_applied(&workspace_id).await;
+    }
     Ok(apply_ok(outcome))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::{to_bytes, Body},
+        http::{Request, StatusCode},
+    };
+    use std::{sync::Arc, time::Duration};
+    use tower::util::ServiceExt;
+
+    use crate::config::{workspace_control::OpenCodeCompatStore, HttpConfig};
+    use crate::http::{routes, runtime_adapter::StubRuntimeAdapter, state::DaemonMetadata};
+    use crate::runtime::refresh::{
+        RefreshChangeKind, RefreshSource, RuntimeRefreshCoordinator,
+    };
 
     fn provider(id: &str, models: &[&str]) -> ProviderInfo {
         ProviderInfo {
@@ -878,5 +917,135 @@ mod tests {
         // Static codex table is empty today; the group still appears so the UI
         // can show a "no models" hint rather than hiding the backend.
         assert!(catalog.backends[0].models.is_empty());
+    }
+
+    fn workspace_id(path: &std::path::Path) -> String {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        URL_SAFE_NO_PAD.encode(path.to_string_lossy().as_bytes())
+    }
+
+    fn test_dispatcher() -> crate::sync::dispatch::SyncDispatcher {
+        crate::sync::dispatch::SyncDispatcher::new(
+            crate::sync::secret_store::SecretStore::new(),
+            None,
+        )
+    }
+
+    fn test_metadata() -> DaemonMetadata {
+        DaemonMetadata {
+            version: "test",
+            started_at: chrono::Utc::now(),
+            actor_id: "actor-test".into(),
+            backend_kind: "test".into(),
+            configured_agent_types: Vec::new(),
+        }
+    }
+
+    fn auth_request(token: &str, method: &str, uri: String) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    fn runtime_test_app(
+        refresh: Arc<RuntimeRefreshCoordinator>,
+    ) -> (axum::Router, String) {
+        let runtime = StubRuntimeAdapter::new(32);
+        let token_dir = tempfile::tempdir().unwrap();
+        let mut state = HttpState::new(
+            HttpConfig::default(),
+            crate::http::tokens::TokenStore::load_or_init(&token_dir.path().join("token")).unwrap(),
+            test_metadata(),
+            runtime,
+            Some(Arc::new(OpenCodeCompatStore::new())),
+            None,
+            None,
+            test_dispatcher(),
+        );
+        state.runtime_refresh = Some(refresh);
+        let token = state
+            .tokens
+            .mint(
+                vec!["workspace:read".into(), "workspace:write".into()],
+                Duration::from_secs(3600),
+                None,
+            )
+            .0;
+        std::mem::forget(token_dir);
+        (routes::build(state), token)
+    }
+
+    #[tokio::test]
+    async fn runtime_status_includes_pending_refresh_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace_id = workspace_id(dir.path());
+        let refresh = RuntimeRefreshCoordinator::new();
+        refresh
+            .record_change(
+                &workspace_id,
+                dir.path(),
+                RefreshChangeKind::Skills,
+                RefreshSource::UiMutation,
+            )
+            .await
+            .unwrap();
+        let (app, token) = runtime_test_app(refresh);
+
+        let response = app
+            .oneshot(auth_request(
+                &token,
+                "GET",
+                format!("/v1/workspaces/{workspace_id}/runtime"),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["refresh"]["status"], "pending");
+        assert_eq!(json["refresh"]["recommended_action"], "apply_changes");
+        assert_eq!(json["refresh"]["change_kinds"], serde_json::json!(["skills"]));
+    }
+
+    #[tokio::test]
+    async fn apply_refresh_clears_pending_state_when_reload_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace_id = workspace_id(dir.path());
+        let refresh = RuntimeRefreshCoordinator::new();
+        refresh
+            .record_change(
+                &workspace_id,
+                dir.path(),
+                RefreshChangeKind::Skills,
+                RefreshSource::UiMutation,
+            )
+            .await
+            .unwrap();
+        let (app, token) = runtime_test_app(Arc::clone(&refresh));
+
+        let response = app
+            .clone()
+            .oneshot(auth_request(
+                &token,
+                "POST",
+                format!("/v1/workspaces/{workspace_id}/runtime/reload"),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["outcome"], "reload_required");
+
+        let refresh = refresh.runtime_refresh_dto(&workspace_id).await;
+        assert_eq!(refresh.status, "clean");
+        assert_eq!(refresh.recommended_action, "none");
+        assert!(refresh.change_kinds.is_empty());
+        assert_eq!(refresh.last_error, None);
     }
 }

@@ -972,8 +972,11 @@ impl DaemonServer {
                     self.agents.clone(),
                     http_cfg.max_event_backlog,
                 );
-            let runtime_supervisor =
-                Some(crate::runtime::RuntimeSupervisor::new(self.agents.clone()));
+            // The HTTP workspace runtime endpoints share this supervisor's
+            // refresh coordinator for status + apply-intent semantics.
+            let runtime_supervisor = Some(crate::runtime::RuntimeSupervisor::new(
+                self.agents.clone(),
+            ));
             let workspace_control: Option<
                 std::sync::Arc<dyn crate::config::WorkspaceControlStore>,
             > = Some(std::sync::Arc::new(

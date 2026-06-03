@@ -144,6 +144,19 @@ impl RuntimeRefreshCoordinator {
             .unwrap_or_else(RuntimeRefreshDto::clean)
     }
 
+    pub async fn mark_applying(&self, workspace_id: &str) {
+        let mut guard = self.inner.write().await;
+        if let Some(state) = guard.get_mut(workspace_id) {
+            state.status = WorkspaceRefreshStatus::Applying;
+            state.last_error = None;
+            state.last_detected_at = Utc::now();
+        }
+    }
+
+    pub async fn clear_applied(&self, workspace_id: &str) {
+        self.inner.write().await.remove(workspace_id);
+    }
+
     pub async fn mark_apply_failed(&self, workspace_id: &str, error: impl Into<String>) {
         let mut guard = self.inner.write().await;
         if let Some(state) = guard.get_mut(workspace_id) {

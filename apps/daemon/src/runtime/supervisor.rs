@@ -348,6 +348,26 @@ impl RuntimeSupervisor {
             Ok(ApplyOutcome::ReloadRequired)
         }
     }
+
+    pub async fn apply_refresh(
+        &self,
+        workspace_id: &str,
+        workspace_path: &Path,
+    ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        self.refresh.mark_applying(workspace_id).await;
+        match self.reload_workspace(workspace_id, workspace_path).await {
+            Ok(outcome) => {
+                self.refresh.clear_applied(workspace_id).await;
+                Ok(outcome)
+            }
+            Err(err) => {
+                self.refresh
+                    .mark_apply_failed(workspace_id, err.to_string())
+                    .await;
+                Err(err)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
