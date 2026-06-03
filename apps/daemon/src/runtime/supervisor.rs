@@ -15,7 +15,9 @@ use crate::config::workspace_control::{
     ApplyOutcome, RuntimeStatus, WorkspaceControlError,
 };
 use crate::proto::amux;
-use crate::runtime::{acp_catalog_probe, AgentLaunchConfig, RuntimeManager};
+use crate::runtime::{
+    acp_catalog_probe, refresh::RuntimeRefreshCoordinator, AgentLaunchConfig, RuntimeManager,
+};
 
 struct InherentSkill {
     dirname: &'static str,
@@ -241,11 +243,19 @@ fn backend_label(agent_type: amux::AgentType) -> &'static str {
 
 pub struct RuntimeSupervisor {
     agents: Arc<AsyncMutex<RuntimeManager>>,
+    refresh: Arc<RuntimeRefreshCoordinator>,
 }
 
 impl RuntimeSupervisor {
     pub fn new(agents: Arc<AsyncMutex<RuntimeManager>>) -> Arc<Self> {
-        Arc::new(Self { agents })
+        Arc::new(Self {
+            agents,
+            refresh: RuntimeRefreshCoordinator::new(),
+        })
+    }
+
+    pub fn refresh_coordinator(&self) -> Arc<RuntimeRefreshCoordinator> {
+        Arc::clone(&self.refresh)
     }
 
     /// Models OpenCode advertises via ACP for this workspace cwd (cron catalog).
@@ -300,7 +310,7 @@ impl RuntimeSupervisor {
             ready: backend_ready,
             backend,
             current_model,
-            refresh: None,
+            refresh: self.refresh.runtime_refresh_dto(workspace_id).await,
         })
     }
 
@@ -337,6 +347,7 @@ impl RuntimeSupervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::Mutex as AsyncMutex;
 
     #[test]
     fn prepare_workspace_creates_defaults() {
@@ -350,5 +361,29 @@ mod tests {
 
         assert!(dir.path().join(".teamclaw/skills/create-role/SKILL.md").is_file());
         assert!(!dir.path().join(".opencode/data").exists());
+    }
+
+    #[tokio::test]
+    async fn runtime_status_threads_refresh_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = RuntimeManager::new(RuntimeManager::default_launch_configs(), None);
+        let supervisor = RuntimeSupervisor::new(Arc::new(AsyncMutex::new(manager)));
+        let coordinator = supervisor.refresh_coordinator();
+
+        coordinator
+            .record_change(
+                "ws-1",
+                dir.path(),
+                crate::runtime::refresh::RefreshChangeKind::Skills,
+                crate::runtime::refresh::RefreshSource::UiMutation,
+            )
+            .await
+            .unwrap();
+
+        let status = supervisor.runtime_status("ws-1", dir.path()).await.unwrap();
+        let refresh = status.refresh.expect("refresh dto should be present");
+        assert_eq!(refresh.status, "pending");
+        assert_eq!(refresh.recommended_action, "apply_changes");
+        assert_eq!(refresh.change_kinds, vec!["skills".to_string()]);
     }
 }

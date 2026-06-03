@@ -144,7 +144,7 @@ impl RuntimeRefreshCoordinator {
     pub async fn mark_apply_failed(&self, workspace_id: &str, error: impl Into<String>) {
         let mut guard = self.inner.write().await;
         if let Some(state) = guard.get_mut(workspace_id) {
-            state.status = WorkspaceRefreshStatus::Failed;
+            state.status = WorkspaceRefreshStatus::Pending;
             state.recommended_action = RefreshRecommendedAction::ApplyChanges;
             state.last_error = Some(error.into());
             state.last_detected_at = Utc::now();
@@ -272,8 +272,32 @@ mod tests {
         coordinator.mark_apply_failed("ws-2", "reload failed").await;
 
         let state = coordinator.workspace_state("ws-2").await.unwrap();
-        assert_eq!(state.status, WorkspaceRefreshStatus::Failed);
+        assert_eq!(state.status, WorkspaceRefreshStatus::Pending);
+        assert_eq!(
+            state.recommended_action,
+            RefreshRecommendedAction::ApplyChanges
+        );
         assert!(state.last_error.as_deref().unwrap().contains("reload failed"));
         assert!(state.change_kinds.contains(&RefreshChangeKind::EnvVars));
+    }
+
+    #[tokio::test]
+    async fn runtime_refresh_dto_reports_pending_state() {
+        let coordinator = RuntimeRefreshCoordinator::new();
+        coordinator
+            .record_change(
+                "ws-3",
+                Path::new("/tmp/ws-3"),
+                RefreshChangeKind::Skills,
+                RefreshSource::UiMutation,
+            )
+            .await
+            .unwrap();
+
+        let dto = coordinator.runtime_refresh_dto("ws-3").await.unwrap();
+        assert_eq!(dto.status, "pending");
+        assert_eq!(dto.recommended_action, "apply_changes");
+        assert_eq!(dto.change_kinds, vec!["skills".to_string()]);
+        assert_eq!(dto.last_error, None);
     }
 }
