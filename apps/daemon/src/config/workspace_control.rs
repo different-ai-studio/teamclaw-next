@@ -181,6 +181,19 @@ pub struct RuntimeRefreshDto {
     pub last_error: Option<String>,
 }
 
+impl RuntimeRefreshDto {
+    pub fn clean() -> Self {
+        Self {
+            status: "clean".to_owned(),
+            change_kinds: Vec::new(),
+            recommended_action: "none".to_owned(),
+            auto_apply_blocked_by_active_runtime: false,
+            last_detected_at: None,
+            last_error: None,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct RuntimeStatus {
     pub workspace_id: String,
@@ -684,7 +697,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
             ready: false,
             backend: "opencode".to_owned(),
             current_model: None,
-            refresh: None,
+            refresh: Some(RuntimeRefreshDto::clean()),
         })
     }
 

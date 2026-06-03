@@ -137,14 +137,17 @@ impl RuntimeRefreshCoordinator {
         self.inner.read().await.get(workspace_id).cloned()
     }
 
-    pub async fn runtime_refresh_dto(&self, workspace_id: &str) -> Option<RuntimeRefreshDto> {
-        self.workspace_state(workspace_id).await.map(|state| state.to_dto())
+    pub async fn runtime_refresh_dto(&self, workspace_id: &str) -> RuntimeRefreshDto {
+        self.workspace_state(workspace_id)
+            .await
+            .map(|state| state.to_dto())
+            .unwrap_or_else(RuntimeRefreshDto::clean)
     }
 
     pub async fn mark_apply_failed(&self, workspace_id: &str, error: impl Into<String>) {
         let mut guard = self.inner.write().await;
         if let Some(state) = guard.get_mut(workspace_id) {
-            state.status = WorkspaceRefreshStatus::Pending;
+            state.status = WorkspaceRefreshStatus::Failed;
             state.recommended_action = RefreshRecommendedAction::ApplyChanges;
             state.last_error = Some(error.into());
             state.last_detected_at = Utc::now();
@@ -257,7 +260,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_apply_keeps_pending_state() {
+    async fn failed_apply_preserves_failed_state_and_change_context() {
         let coordinator = RuntimeRefreshCoordinator::new();
         coordinator
             .record_change(
@@ -272,13 +275,19 @@ mod tests {
         coordinator.mark_apply_failed("ws-2", "reload failed").await;
 
         let state = coordinator.workspace_state("ws-2").await.unwrap();
-        assert_eq!(state.status, WorkspaceRefreshStatus::Pending);
+        assert_eq!(state.status, WorkspaceRefreshStatus::Failed);
         assert_eq!(
             state.recommended_action,
             RefreshRecommendedAction::ApplyChanges
         );
         assert!(state.last_error.as_deref().unwrap().contains("reload failed"));
         assert!(state.change_kinds.contains(&RefreshChangeKind::EnvVars));
+
+        let dto = coordinator.runtime_refresh_dto("ws-2").await;
+        assert_eq!(dto.status, "failed");
+        assert_eq!(dto.recommended_action, "apply_changes");
+        assert_eq!(dto.change_kinds, vec!["env_vars".to_string()]);
+        assert!(dto.last_error.as_deref().unwrap().contains("reload failed"));
     }
 
     #[tokio::test]
@@ -294,10 +303,22 @@ mod tests {
             .await
             .unwrap();
 
-        let dto = coordinator.runtime_refresh_dto("ws-3").await.unwrap();
+        let dto = coordinator.runtime_refresh_dto("ws-3").await;
         assert_eq!(dto.status, "pending");
         assert_eq!(dto.recommended_action, "apply_changes");
         assert_eq!(dto.change_kinds, vec!["skills".to_string()]);
+        assert_eq!(dto.last_error, None);
+    }
+
+    #[tokio::test]
+    async fn runtime_refresh_dto_returns_clean_when_state_absent() {
+        let coordinator = RuntimeRefreshCoordinator::new();
+
+        let dto = coordinator.runtime_refresh_dto("ws-clean").await;
+        assert_eq!(dto.status, "clean");
+        assert_eq!(dto.recommended_action, "none");
+        assert!(dto.change_kinds.is_empty());
+        assert_eq!(dto.last_detected_at, None);
         assert_eq!(dto.last_error, None);
     }
 }

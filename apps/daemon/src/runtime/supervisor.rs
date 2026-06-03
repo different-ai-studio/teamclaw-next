@@ -290,27 +290,33 @@ impl RuntimeSupervisor {
         // runtime start (`runtime_adapter` spawn) and on explicit
         // `reload_workspace`, not here - otherwise polling this GET endpoint
         // would silently rewrite config and delete/recreate skill dirs.
-        let manager = self.agents.lock().await;
-        let agent_type = manager.default_agent_type();
-        let backend = backend_label(agent_type).to_owned();
-        let launch = manager.launch_config_for(agent_type);
-        let backend_ready = binary_available(&launch);
+        let (backend, backend_ready, current_model) = {
+            let manager = self.agents.lock().await;
+            let agent_type = manager.default_agent_type();
+            let backend = backend_label(agent_type).to_owned();
+            let launch = manager.launch_config_for(agent_type);
+            let backend_ready = binary_available(&launch);
 
-        let workspace_path_str = workspace_path.to_string_lossy();
-        let active: Vec<_> = manager
-            .active_handles_for_workspace(&workspace_path_str, workspace_id)
-            .collect();
+            let workspace_path_str = workspace_path.to_string_lossy();
+            let active: Vec<_> = manager
+                .active_handles_for_workspace(&workspace_path_str, workspace_id)
+                .collect();
 
-        let current_model = active
-            .iter()
-            .find_map(|(agent_id, _)| manager.current_model(agent_id).cloned());
+            let current_model = active
+                .iter()
+                .find_map(|(agent_id, _)| manager.current_model(agent_id).cloned());
+
+            (backend, backend_ready, current_model)
+        };
+
+        let refresh = self.refresh.runtime_refresh_dto(workspace_id).await;
 
         Ok(RuntimeStatus {
             workspace_id: workspace_id.to_owned(),
             ready: backend_ready,
             backend,
             current_model,
-            refresh: self.refresh.runtime_refresh_dto(workspace_id).await,
+            refresh: Some(refresh),
         })
     }
 
@@ -364,7 +370,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn runtime_status_threads_refresh_state() {
+    async fn runtime_status_threads_failed_refresh_state() {
         let dir = tempfile::tempdir().unwrap();
         let manager = RuntimeManager::new(RuntimeManager::default_launch_configs(), None);
         let supervisor = RuntimeSupervisor::new(Arc::new(AsyncMutex::new(manager)));
@@ -379,11 +385,30 @@ mod tests {
             )
             .await
             .unwrap();
+        coordinator.mark_apply_failed("ws-1", "reload failed").await;
 
         let status = supervisor.runtime_status("ws-1", dir.path()).await.unwrap();
         let refresh = status.refresh.expect("refresh dto should be present");
-        assert_eq!(refresh.status, "pending");
+        assert_eq!(refresh.status, "failed");
         assert_eq!(refresh.recommended_action, "apply_changes");
         assert_eq!(refresh.change_kinds, vec!["skills".to_string()]);
+        assert!(refresh.last_error.as_deref().unwrap().contains("reload failed"));
+    }
+
+    #[tokio::test]
+    async fn runtime_status_returns_clean_refresh_dto_when_no_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = RuntimeManager::new(RuntimeManager::default_launch_configs(), None);
+        let supervisor = RuntimeSupervisor::new(Arc::new(AsyncMutex::new(manager)));
+
+        let status = supervisor
+            .runtime_status("ws-clean", dir.path())
+            .await
+            .unwrap();
+        let refresh = status.refresh.expect("clean refresh dto should be present");
+        assert_eq!(refresh.status, "clean");
+        assert_eq!(refresh.recommended_action, "none");
+        assert!(refresh.change_kinds.is_empty());
+        assert_eq!(refresh.last_error, None);
     }
 }
