@@ -145,9 +145,18 @@ impl LocalSyncState {
         );
     }
 
-    /// Mark a file as deleted server-side (remove from map, or mark deleted).
-    pub fn mark_deleted(&mut self, path: &str) {
-        self.files.remove(path);
+    /// Record a tombstone for a path that was deleted (locally pushed, or pulled
+    /// from the server). The entry is RETAINED — set to the tombstone `version`
+    /// with `deleted_local=true` — rather than removed, so a later re-create of the
+    /// same path can CAS against the tombstone version. (Removing the entry made a
+    /// re-add push with parentVersion=0, which conflicts against the tombstone
+    /// forever and never resurrects the file.)
+    pub fn mark_tombstoned(&mut self, path: &str, version: i32) {
+        if let Some(f) = self.files.get_mut(path) {
+            f.synced_version = version;
+            f.deleted_local = true;
+            f.dirty = false;
+        }
     }
 
     /// Update the timestamp of last successful sync (RFC 3339).

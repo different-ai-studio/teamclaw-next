@@ -324,7 +324,7 @@ impl FcClient {
         path: &str,
         parent_version: i32,
         node_id: Option<&str>,
-    ) -> Result<(), SyncError> {
+    ) -> Result<i32, SyncError> {
         let mut body = serde_json::json!({
             "teamId": team_id,
             "path": path,
@@ -334,9 +334,14 @@ impl FcClient {
             body["nodeId"] = Value::String(nid.to_string());
         }
         #[derive(Deserialize)]
-        struct DeleteResp {}
-        let _: DeleteResp = self.post("/sync/delete", &body).await?;
-        Ok(())
+        #[serde(rename_all = "camelCase")]
+        struct DeleteResp {
+            version: i32,
+        }
+        // Returns the tombstone's new version so callers can record it for a later
+        // re-add CAS (see engine mark_tombstoned).
+        let resp: DeleteResp = self.post("/sync/delete", &body).await?;
+        Ok(resp.version)
     }
 
     // ── Batch endpoints ───────────────────────────────────────────────────────
