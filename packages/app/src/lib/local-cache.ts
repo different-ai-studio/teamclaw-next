@@ -1,6 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauri } from "@/lib/utils";
 
+// ── team gate ──────────────────────────────────────────────────────────────
+
+/**
+ * Point the local-cache team gate at `teamId`. Every upsert batch is rejected
+ * by the Rust gate when a row's team differs from the current gate team, so any
+ * caller that populates rows for a team out-of-band (E2E seeding, team switch)
+ * must set the gate first. Pass `null` to clear it. No-op outside Tauri.
+ */
+export async function setLocalCacheCurrentTeam(
+  teamId: string | null,
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("local_cache_set_current_team", { teamId });
+}
+
 // ── Row types (mirror Rust serde shape, camelCase) ─────────────────────────
 
 export type ActorRow = {
