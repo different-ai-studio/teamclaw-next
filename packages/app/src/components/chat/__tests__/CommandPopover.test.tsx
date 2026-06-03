@@ -5,9 +5,9 @@ import { CommandPopover } from '../CommandPopover'
 const mocks = vi.hoisted(() => ({
   runtimeRows: [] as Array<{ runtime_id: string | null; backend_type: string | null; current_model: string | null }>,
   runtimeStates: {} as Record<string, unknown>,
-  loadAllSkills: vi.fn(),
+  loadRolesSkillsWorkspaceState: vi.fn(),
   loadAllRoles: vi.fn(),
-  readSkillPermissions: vi.fn(),
+  getDaemonPermissions: vi.fn(),
 }))
 
 vi.mock('react-i18next', () => ({
@@ -47,16 +47,20 @@ vi.mock('@/lib/backend', () => ({
   }),
 }))
 
-vi.mock('@/lib/git/skill-loader', () => ({
-  loadAllSkills: (...args: unknown[]) => mocks.loadAllSkills(...args),
-}))
+vi.mock('@/lib/daemon-local-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/daemon-local-client')>()
+  return {
+    ...actual,
+    getDaemonPermissions: (...args: unknown[]) => mocks.getDaemonPermissions(...args),
+  }
+})
 
 vi.mock('@/lib/roles/loader', () => ({
+  loadRolesSkillsWorkspaceState: (...args: unknown[]) => mocks.loadRolesSkillsWorkspaceState(...args),
   loadAllRoles: (...args: unknown[]) => mocks.loadAllRoles(...args),
 }))
 
 vi.mock('@/lib/teamclaw-config', () => ({
-  readSkillPermissions: (...args: unknown[]) => mocks.readSkillPermissions(...args),
   resolveSkillPermission: () => ({ permission: 'allow', isExact: false }),
 }))
 
@@ -65,9 +69,15 @@ describe('CommandPopover', () => {
     vi.clearAllMocks()
     mocks.runtimeRows = []
     mocks.runtimeStates = {}
-    mocks.loadAllSkills.mockResolvedValue({ skills: [], overrides: [] })
+    mocks.loadRolesSkillsWorkspaceState.mockResolvedValue({
+      roles: [],
+      skills: [],
+      roleUsageBySkill: {},
+      skillNamesByRole: {},
+      metrics: { rolesCount: 0, skillsCount: 0, linkedSkillsCount: 0, unlinkedSkillsCount: 0 },
+    })
     mocks.loadAllRoles.mockResolvedValue([])
-    mocks.readSkillPermissions.mockResolvedValue({})
+    mocks.getDaemonPermissions.mockResolvedValue({})
   })
 
   it('shows daemon-advertised skills for the active session', async () => {
@@ -124,18 +134,24 @@ describe('CommandPopover', () => {
         },
       },
     }
-    mocks.loadAllSkills.mockResolvedValue({
+    mocks.loadRolesSkillsWorkspaceState.mockResolvedValue({
+      roles: [],
       skills: [
         {
           filename: 'brainstorming',
           name: 'Brainstorming',
           invocationName: 'superpowers/brainstorming',
+          description: 'Explore intent before coding',
           content: '---\ndescription: Explore intent before coding\n---\n# Brainstorming\n',
           source: 'global-agent',
           dirPath: '/Users/test/.agents/skills/superpowers',
+          linkedRoles: [],
+          isRoleSkill: false,
         },
       ],
-      overrides: [],
+      roleUsageBySkill: {},
+      skillNamesByRole: {},
+      metrics: { rolesCount: 0, skillsCount: 1, linkedSkillsCount: 0, unlinkedSkillsCount: 1 },
     })
 
     const onSelect = vi.fn()

@@ -565,14 +565,17 @@ export function useWorkspaceRuntimeRefreshPoll() {
     return () => stopPolling();
   }, [workspacePath, daemonHttpReady, startPolling, stopPolling]);
 
+  const noteLocalRefresh = useWorkspaceRuntimeRefreshStore((s) => s.noteLocalRefresh);
+
   useEffect(() => {
     const bump = () => {
+      noteLocalRefresh(["skills"]);
       const path = useWorkspaceStore.getState().workspacePath;
       if (path) void refreshNow(path);
     };
     window.addEventListener(SKILLS_CHANGED_EVENT, bump);
     return () => window.removeEventListener(SKILLS_CHANGED_EVENT, bump);
-  }, [refreshNow]);
+  }, [noteLocalRefresh, refreshNow]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

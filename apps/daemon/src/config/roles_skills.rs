@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use super::global_team_store::TEAM_LINK_NAME;
 use super::workspace_control::WorkspaceControlError;
 
 // ── DTOs (camelCase JSON for the frontend) ───────────────────────────────────
@@ -251,6 +252,31 @@ fn classify_teamclaw_skill(filename: &str, clawhub_slugs: &HashSet<String>) -> &
     }
 }
 
+fn collect_team_skill_paths(workspace_path: &Path) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = Vec::new();
+    let mut seen = HashSet::new();
+
+    let mut push = |path: PathBuf| {
+        if seen.insert(path.clone()) {
+            paths.push(path);
+        }
+    };
+
+    for extra in read_json_paths(workspace_path, "teamclaw.json", "/skills/paths") {
+        push(extra);
+    }
+    for extra in read_json_paths(workspace_path, "opencode.json", "/skills/paths") {
+        push(extra);
+    }
+
+    let default_team_skills = workspace_path.join(TEAM_LINK_NAME).join("skills");
+    if default_team_skills.is_dir() {
+        push(default_team_skills);
+    }
+
+    paths
+}
+
 fn load_all_skills(workspace_path: &Path, home: &Path) -> Result<Vec<RawSkill>, WorkspaceControlError> {
     let clawhub_slugs = read_clawhub_slugs(workspace_path);
     let home_str = home.to_string_lossy();
@@ -291,7 +317,7 @@ fn load_all_skills(workspace_path: &Path, home: &Path) -> Result<Vec<RawSkill>, 
         },
     ];
 
-    for extra in read_json_paths(workspace_path, "teamclaw.json", "/skills/paths") {
+    for extra in collect_team_skill_paths(workspace_path) {
         specs.push(SkillDirSpec {
             path: extra,
             source: "team",
@@ -869,6 +895,25 @@ mod tests {
         assert!(state.roles.is_empty());
         assert!(state.skills.is_empty());
         assert_eq!(state.metrics.roles_count, 0);
+    }
+
+    #[test]
+    fn scan_finds_team_share_skills_without_config_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+
+        let team_skill_dir = ws.join(TEAM_LINK_NAME).join("skills/shared-skill");
+        std::fs::create_dir_all(&team_skill_dir).unwrap();
+        std::fs::write(
+            team_skill_dir.join("SKILL.md"),
+            "---\nname: Shared Skill\ndescription: From team drive\n---\n\n# Shared",
+        )
+        .unwrap();
+
+        let state = scan_roles_skills_state(ws).unwrap();
+        assert_eq!(state.skills.len(), 1);
+        assert_eq!(state.skills[0].filename, "shared-skill");
+        assert_eq!(state.skills[0].source.as_deref(), Some("team"));
     }
 
     #[test]

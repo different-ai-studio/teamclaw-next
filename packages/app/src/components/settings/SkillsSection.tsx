@@ -394,6 +394,7 @@ ${skillContent.trim()}`
           await loadSkills()
           onDataChange?.()
           setHasSkillRuntimeChanges(true)
+          window.dispatchEvent(new CustomEvent(SKILLS_CHANGED_EVENT))
           setDialogOpen(false)
           setEditingSkill(null)
           setSkillDialogMode('create')
@@ -431,6 +432,7 @@ ${skillContent.trim()}`
       await loadSkills()
       onDataChange?.()
       setHasSkillRuntimeChanges(true)
+      window.dispatchEvent(new CustomEvent(SKILLS_CHANGED_EVENT))
 
       setDialogOpen(false)
       setEditingSkill(null)
@@ -496,6 +498,7 @@ ${skillContent.trim()}`
 
       onDataChange?.()
       setHasSkillRuntimeChanges(true)
+      window.dispatchEvent(new CustomEvent(SKILLS_CHANGED_EVENT))
     } catch (err) {
       console.error('Failed to delete skill:', err)
       setError(err instanceof Error ? err.message : 'Failed to delete skill')
@@ -861,6 +864,7 @@ ${skillContent.trim()}`
               await loadSkills()
               onDataChange?.()
               setHasSkillRuntimeChanges(true)
+              window.dispatchEvent(new CustomEvent(SKILLS_CHANGED_EVENT))
             }}
           />
         </div>
@@ -1271,7 +1275,7 @@ ${skillContent.trim()}`
                           {t('settings.skills.teamSkills', 'Team Skills')}
                         </span>
                         <div className="flex-1 h-px bg-border" />
-                        <span className="text-[11px] text-muted-foreground">{t('settings.skills.fromTeamConfig', 'From opencode.json → skills.paths')}</span>
+                        <span className="text-[11px] text-muted-foreground">{t('settings.skills.fromTeamConfig', 'From team share (teamclaw-team/skills)')}</span>
                       </div>
                     )}
                     {renderSkillGrid(teamSkills)}
