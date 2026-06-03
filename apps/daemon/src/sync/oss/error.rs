@@ -36,6 +36,11 @@ pub enum SyncError {
 
     #[error("internal: {0}")]
     Internal(String),
+
+    /// The FC instance does not implement a batch endpoint (HTTP 404). Signals the
+    /// engine to fall back to the per-file path. See engine.rs batch fallback.
+    #[error("batch endpoint unsupported (404)")]
+    BatchUnsupported,
 }
 
 impl From<crate::sync::oss::path_validator::PathValidationError> for SyncError {
