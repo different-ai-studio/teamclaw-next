@@ -13,7 +13,7 @@ use super::{
     error::SyncError,
     fc_client::{FcClient, ManifestItem},
     path_validator::{validate, validate_no_symlink_escape},
-    scanner::scan_workspace,
+    scanner::{scan_workspace, ScannedFile},
     state::LocalSyncState,
 };
 
@@ -36,6 +36,17 @@ pub async fn tick(
         .map_err(|e| SyncError::Crypto(e.to_string()))?;
     // content_root is now a parameter (the global team dir).
     let mut state = LocalSyncState::load_at(team_id).map_err(SyncError::State)?;
+
+    // Refresh the `dirty` flag from the working tree BEFORE PULL so the pull-phase
+    // checks reflect the CURRENT tree, not the last-sync snapshot. Without this an
+    // unsynced local edit (state still dirty=false) is silently overwritten by a
+    // newer remote version with no conflict sidecar.
+    //
+    // IMPORTANT: only `dirty` is updated here — NOT mtime/size. Those stay at the
+    // last-synced baseline that the PUSH-phase scan's cheap mtime+size check relies
+    // on; mutating them here would make that scan treat an edited file as clean and
+    // skip the upload.
+    refresh_dirty(&mut state, content_root);
 
     // ── PULL ─────────────────────────────────────────────────────────────────
     // Paginate /sync/manifest fully before advancing last_server_seq.
@@ -135,18 +146,9 @@ pub async fn tick(
     }
 
     // ── PUSH ─────────────────────────────────────────────────────────────────
-    // Re-scan to pick up current mtime/size/dirty flags.
-    let scan = scan_workspace(content_root, &state);
-
-    // Apply scan results back into state.
-    for scanned in &scan {
-        if let Some(fs) = state.files.get_mut(&scanned.rel_path) {
-            fs.mtime = scanned.mtime;
-            fs.size = scanned.size;
-            fs.local_plain_hash = scanned.local_plain_hash.clone();
-            fs.dirty = scanned.dirty;
-        }
-    }
+    // Re-scan (the tree may have changed during PULL) to pick up current
+    // mtime/size/dirty flags.
+    let scan = apply_scan(&mut state, content_root);
 
     let dirty_paths: Vec<String> = state
         .files
@@ -172,9 +174,14 @@ pub async fn tick(
 
     let mut pushed = 0u32;
     let mut push_conflicts = 0u32;
+    // Transient (rate-limit / 503) failures that survived in-call retries. We leave
+    // such files dirty (no upsert) so they retry next tick, and surface the
+    // condition via the returned error rather than silently dropping the change.
+    let mut deferred = 0u32;
+    let mut last_transient: Option<SyncError> = None;
 
     for path in all_dirty {
-        match upload_one(content_root, &path, team_id, &key, fc, &mut state).await {
+        match upload_one_retrying(content_root, &path, team_id, &key, fc, &mut state).await {
             Ok(_) => pushed += 1,
             Err(SyncError::Conflict {
                 remote_version,
@@ -212,12 +219,56 @@ pub async fn tick(
                     .await;
                 }
             }
-            Err(e) => tracing::warn!("[oss_sync] push {}: {e}", path),
+            Err(e) => {
+                if is_transient(&e) {
+                    deferred += 1;
+                    last_transient = Some(e);
+                } else {
+                    tracing::warn!("[oss_sync] push {}: {e}", path);
+                }
+            }
+        }
+    }
+
+    // Propagate local deletions: a previously-synced file that is absent from the
+    // current scan was deleted locally → emit a server-side tombstone so other
+    // nodes pull the deletion. `fc.delete_file` does a parentVersion CAS.
+    for (path, synced_version) in locally_deleted_paths(&state, &scan) {
+        match delete_file_retrying(fc, team_id, &path, synced_version).await {
+            Ok(()) => {
+                state.mark_deleted(&path);
+                pushed += 1;
+            }
+            Err(SyncError::Conflict { .. }) => {
+                // Remote advanced since our last sync; leave the entry so the next
+                // pull reconciles rather than deleting a file someone else changed.
+                push_conflicts += 1;
+            }
+            Err(e) => {
+                if is_transient(&e) {
+                    deferred += 1;
+                    last_transient = Some(e);
+                } else {
+                    tracing::warn!("[oss_sync] delete {}: {e}", path);
+                }
+            }
         }
     }
 
     state.touch_sync_at();
     state.save_at(team_id).map_err(SyncError::State)?;
+
+    // Surface persistent rate-limiting rather than silently dropping changes: the
+    // deferred files stay dirty and will retry on the next tick. The message keeps
+    // the underlying "429/Too Many Requests" text so callers can detect+back off.
+    if deferred > 0 {
+        let detail = last_transient
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "rate limited".to_string());
+        return Err(SyncError::Network(format!(
+            "{deferred} operation(s) deferred (pulled={pulled} pushed={pushed}); {detail}"
+        )));
+    }
 
     let conflict_count = pull_conflicts + push_conflicts;
 
@@ -354,4 +405,237 @@ async fn upload_one(
     );
 
     Ok(())
+}
+
+/// Treat FC rate-limiting (HTTP 429) and transient unavailability (503 / timeout)
+/// as retryable. These surface as SyncError::Internal/Network carrying the HTTP text.
+fn is_transient(e: &SyncError) -> bool {
+    let m = e.to_string().to_ascii_lowercase();
+    m.contains("429")
+        || m.contains("too many requests")
+        || m.contains("503")
+        || m.contains("temporarily")
+        || m.contains("timed out")
+        || m.contains("timeout")
+}
+
+const MAX_TRANSIENT_RETRIES: u32 = 5;
+
+/// Exponential backoff: ~0.8s, 1.6s, 3.2s, 6.4s, 12s.
+async fn backoff_sleep(attempt: u32) {
+    let ms = (800u64 << attempt.min(4)).min(12_000);
+    tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+}
+
+/// `upload_one` with in-call retry on transient (rate-limit) errors, so a 429 does
+/// not silently drop the change. Non-transient errors and Conflict return immediately.
+async fn upload_one_retrying(
+    content_root: &str,
+    rel_path: &str,
+    team_id: &str,
+    key: &[u8; 32],
+    fc: &FcClient,
+    state: &mut LocalSyncState,
+) -> Result<(), SyncError> {
+    let mut attempt = 0u32;
+    loop {
+        match upload_one(content_root, rel_path, team_id, key, fc, state).await {
+            Err(e) if is_transient(&e) && attempt < MAX_TRANSIENT_RETRIES => {
+                attempt += 1;
+                backoff_sleep(attempt).await;
+            }
+            other => return other,
+        }
+    }
+}
+
+/// `fc.delete_file` with in-call retry on transient (rate-limit) errors.
+async fn delete_file_retrying(
+    fc: &FcClient,
+    team_id: &str,
+    path: &str,
+    parent_version: i32,
+) -> Result<(), SyncError> {
+    let mut attempt = 0u32;
+    loop {
+        match fc.delete_file(team_id, path, parent_version, None).await {
+            Err(e) if is_transient(&e) && attempt < MAX_TRANSIENT_RETRIES => {
+                attempt += 1;
+                backoff_sleep(attempt).await;
+            }
+            other => return other,
+        }
+    }
+}
+
+/// Refresh ONLY the `dirty` flag of existing state entries from the working tree.
+/// Used before PULL so conflict/deletion checks see current dirtiness. Deliberately
+/// does NOT touch mtime/size (the last-synced baseline the PUSH scan depends on).
+fn refresh_dirty(state: &mut LocalSyncState, content_root: &str) {
+    let scan = scan_workspace(content_root, state);
+    for scanned in &scan {
+        if let Some(fs) = state.files.get_mut(&scanned.rel_path) {
+            fs.dirty = scanned.dirty;
+        }
+    }
+}
+
+/// Scan the working tree and apply current mtime/size/hash/dirty back into the
+/// state entries that already exist; returns the scan so callers can also use it
+/// for new-file and deletion detection. Used by PUSH (runs once per tick).
+fn apply_scan(state: &mut LocalSyncState, content_root: &str) -> Vec<ScannedFile> {
+    let scan = scan_workspace(content_root, state);
+    for scanned in &scan {
+        if let Some(fs) = state.files.get_mut(&scanned.rel_path) {
+            fs.mtime = scanned.mtime;
+            fs.size = scanned.size;
+            fs.local_plain_hash = scanned.local_plain_hash.clone();
+            fs.dirty = scanned.dirty;
+        }
+    }
+    scan
+}
+
+/// Paths previously synced (`synced_version > 0`) but absent from the current
+/// scan → deleted locally, needing a server-side tombstone. Sorted for determinism.
+fn locally_deleted_paths(state: &LocalSyncState, scan: &[ScannedFile]) -> Vec<(String, i32)> {
+    let present: std::collections::HashSet<&str> =
+        scan.iter().map(|s| s.rel_path.as_str()).collect();
+    let mut out: Vec<(String, i32)> = state
+        .files
+        .iter()
+        .filter(|(p, f)| !f.deleted_local && f.synced_version > 0 && !present.contains(p.as_str()))
+        .map(|(p, f)| (p.clone(), f.synced_version))
+        .collect();
+    out.sort();
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sync::oss::state::FileState;
+    use std::collections::HashMap;
+
+    fn empty_state() -> LocalSyncState {
+        LocalSyncState {
+            schema_version: 1,
+            team_id: "t".into(),
+            last_server_seq: 0,
+            last_sync_at: String::new(),
+            files: HashMap::new(),
+        }
+    }
+
+    fn synced_file(version: i32) -> FileState {
+        FileState {
+            synced_version: version,
+            synced_cipher_hash: "c".into(),
+            synced_plain_hash: "p".into(),
+            local_plain_hash: "p".into(),
+            mtime: 1,
+            size: 1,
+            dirty: false,
+            deleted_local: false,
+        }
+    }
+
+    fn scanned(path: &str) -> ScannedFile {
+        ScannedFile {
+            rel_path: path.into(),
+            mtime: 1,
+            size: 1,
+            local_plain_hash: "p".into(),
+            dirty: false,
+        }
+    }
+
+    #[test]
+    fn locally_deleted_detects_synced_file_absent_from_scan() {
+        let mut state = empty_state();
+        state.files.insert("skills/a.md".into(), synced_file(3));
+        state.files.insert("skills/b.md".into(), synced_file(1));
+        // Only a.md is still on disk; b.md was deleted locally.
+        let scan = vec![scanned("skills/a.md")];
+        assert_eq!(
+            locally_deleted_paths(&state, &scan),
+            vec![("skills/b.md".to_string(), 1)]
+        );
+    }
+
+    #[test]
+    fn locally_deleted_ignores_never_synced_and_already_deleted() {
+        let mut state = empty_state();
+        // never synced (version 0) — server doesn't have it; nothing to delete.
+        state.files.insert("skills/new.md".into(), synced_file(0));
+        // already marked deleted_local — don't re-emit.
+        let mut d = synced_file(2);
+        d.deleted_local = true;
+        state.files.insert("skills/gone.md".into(), d);
+        assert!(locally_deleted_paths(&state, &[]).is_empty());
+    }
+
+    #[test]
+    fn locally_deleted_empty_when_all_present() {
+        let mut state = empty_state();
+        state.files.insert("skills/a.md".into(), synced_file(2));
+        let scan = vec![scanned("skills/a.md")];
+        assert!(locally_deleted_paths(&state, &scan).is_empty());
+    }
+
+    #[test]
+    fn is_transient_matches_rate_limit_and_unavailable() {
+        assert!(is_transient(&SyncError::Internal(
+            "FC returned HTTP 429 Too Many Requests: Too many requests".into()
+        )));
+        assert!(is_transient(&SyncError::Network(
+            "503 Service Unavailable".into()
+        )));
+        assert!(is_transient(&SyncError::Network(
+            "connection timed out".into()
+        )));
+        // Non-transient errors must NOT be retried.
+        assert!(!is_transient(&SyncError::Conflict {
+            remote_version: Some(2),
+            remote_cipher_hash: None
+        }));
+        assert!(!is_transient(&SyncError::InvalidPath("bad prefix".into())));
+        assert!(!is_transient(&SyncError::Auth("forbidden".into())));
+    }
+
+    #[test]
+    fn refresh_dirty_marks_edit_without_mutating_mtime_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        std::fs::create_dir_all(dir.path().join("skills")).unwrap();
+        let f = dir.path().join("skills/x.md");
+        std::fs::write(&f, b"base\n").unwrap();
+
+        // State reflects last-synced "base\n" with a baseline mtime/size.
+        let mut state = empty_state();
+        state.files.insert(
+            "skills/x.md".into(),
+            FileState {
+                synced_version: 1,
+                synced_cipher_hash: "c".into(),
+                synced_plain_hash: sha256_hex(b"base\n"),
+                local_plain_hash: sha256_hex(b"base\n"),
+                mtime: 111,
+                size: 5,
+                dirty: false,
+                deleted_local: false,
+            },
+        );
+
+        // Edit the file (different content + size).
+        std::fs::write(&f, b"edited-bigger\n").unwrap();
+        refresh_dirty(&mut state, root);
+
+        let fs = &state.files["skills/x.md"];
+        assert!(fs.dirty, "edited file must be flagged dirty before pull");
+        // Critical: the last-synced baseline must be untouched so the PUSH scan
+        // still detects the change and uploads it.
+        assert_eq!(fs.mtime, 111, "refresh_dirty must not mutate mtime");
+        assert_eq!(fs.size, 5, "refresh_dirty must not mutate size");
+    }
 }
