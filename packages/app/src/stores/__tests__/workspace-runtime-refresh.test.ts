@@ -54,6 +54,13 @@ describe('workspace-runtime-refresh store', () => {
     expect(mocks.getDaemonRuntime).toHaveBeenCalledWith('id:/tmp/ws')
   })
 
+  it('noteLocalRefresh sets optimistic pending state', () => {
+    useWorkspaceRuntimeRefreshStore.getState().startPolling('/tmp/ws')
+    useWorkspaceRuntimeRefreshStore.getState().noteLocalRefresh(['skills'])
+    expect(useWorkspaceRuntimeRefreshStore.getState().refresh?.status).toBe('pending')
+    expect(useWorkspaceRuntimeRefreshStore.getState().refresh?.change_kinds).toEqual(['skills'])
+  })
+
   it('applyChanges calls runtime reload and refreshes status', async () => {
     mocks.getDaemonRuntime
       .mockResolvedValueOnce({

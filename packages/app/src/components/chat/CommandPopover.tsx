@@ -10,13 +10,14 @@ export type Command = {
   source?: string;
   _type?: 'role' | 'skill' | 'command';
 }
+import { SKILLS_CHANGED_EVENT } from '@/hooks/useAppInit'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
 import { isTauri } from '@/lib/utils'
 import { getBackend } from '@/lib/backend'
-import { loadAllSkills } from '@/lib/git/skill-loader'
-import { readSkillPermissions, resolveSkillPermission } from '@/lib/teamclaw-config'
-import { loadAllRoles } from '@/lib/roles/loader'
+import { encodeWorkspaceId, getDaemonPermissions } from '@/lib/daemon-local-client'
+import { resolveSkillPermission, type SkillPermissionMap } from '@/lib/teamclaw-config'
+import { loadAllRoles, loadRolesSkillsWorkspaceState } from '@/lib/roles/loader'
 
 interface CommandPopoverProps {
   activeSessionId: string | null
@@ -77,22 +78,32 @@ function summarizeRuntimeStates(
 }
 
 async function scanAvailableSkills(workspacePath: string): Promise<SkillEntry[]> {
-  const { skills } = await loadAllSkills(workspacePath)
-  return skills
-    .map((skill) => {
-      const frontmatterMatch = skill.content.match(/^---\n([\s\S]*?)\n---/)
-      const frontmatter = frontmatterMatch?.[1] ?? ""
-      const descMatch = frontmatter.match(/^description:\s*(.+)$/m)
-
-        return {
-          name: skill.name,
-          invocationName: skill.invocationName,
-          description: descMatch?.[1]?.trim() || "",
-          path: skill.filename,
-          permissionKey: skill.invocationName,
-        }
-      })
+  const state = await loadRolesSkillsWorkspaceState(workspacePath)
+  return state.skills
+    .map((skill) => ({
+      name: skill.name,
+      invocationName: skill.invocationName ?? skill.filename,
+      description: skill.description?.trim() || '',
+      path: skill.filename,
+      permissionKey: skill.invocationName ?? skill.filename,
+    }))
     .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+async function loadSkillPermissionsForSession(
+  workspacePath: string,
+): Promise<SkillPermissionMap> {
+  if (isTauri()) {
+    try {
+      const perms = await getDaemonPermissions(encodeWorkspaceId(workspacePath))
+      if (perms) {
+        return perms
+      }
+    } catch (error) {
+      console.warn('[CommandPopover] daemon permissions unavailable, using empty allow map:', error)
+    }
+  }
+  return {}
 }
 
 async function scanAvailableRoles(workspacePath: string): Promise<RoleEntry[]> {
@@ -199,7 +210,14 @@ export function CommandPopover({
   const [skills, setSkills] = React.useState<CommandOrSkill[]>([])
   const [isLoading, setIsLoading] = React.useState(false)
   const [highlightedIndex, setHighlightedIndex] = React.useState(0)
+  const [skillsRevision, setSkillsRevision] = React.useState(0)
   const listRef = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    const bump = () => setSkillsRevision((value) => value + 1)
+    window.addEventListener(SKILLS_CHANGED_EVENT, bump)
+    return () => window.removeEventListener(SKILLS_CHANGED_EVENT, bump)
+  }, [])
   
   // Load commands and skills when popover opens
   React.useEffect(() => {
@@ -232,7 +250,7 @@ export function CommandPopover({
         : Promise.resolve([])
 
       const permissionsPromise = workspacePath
-        ? readSkillPermissions(workspacePath).catch(error => {
+        ? loadSkillPermissionsForSession(workspacePath).catch(error => {
             console.error('[CommandPopover] Failed to load skill permissions:', error)
             return {}
           })
@@ -325,7 +343,7 @@ export function CommandPopover({
       setSkills([])
       setCommands([])
     }
-  }, [activeSessionId, open, runtimeStates, workspacePath])
+  }, [activeSessionId, open, runtimeStates, workspacePath, skillsRevision])
   
   React.useEffect(() => {
     if (!open) {

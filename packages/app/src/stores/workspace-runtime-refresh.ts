@@ -20,6 +20,8 @@ export interface WorkspaceRuntimeRefreshState {
   startPolling: (workspacePath: string) => void
   stopPolling: () => void
   refreshNow: (workspacePath?: string) => Promise<void>
+  /** Optimistic pending state when local skill files change before daemon poll catches up. */
+  noteLocalRefresh: (changeKinds?: string[]) => void
   applyChanges: () => Promise<void>
 }
 
@@ -65,6 +67,24 @@ export const useWorkspaceRuntimeRefreshStore = create<WorkspaceRuntimeRefreshSta
       isApplying: false,
       applyError: null,
     })
+  },
+
+  noteLocalRefresh(changeKinds: string[] = ['skills']) {
+    const workspacePath = get().workspacePath ?? pollWorkspacePath
+    set({
+      workspacePath: workspacePath ?? null,
+      refresh: {
+        status: 'pending',
+        change_kinds: changeKinds,
+        recommended_action: 'apply_changes',
+        auto_apply_blocked_by_active_runtime: false,
+        last_detected_at: new Date().toISOString(),
+        last_error: null,
+      },
+    })
+    if (workspacePath) {
+      schedulePoll(POLL_ACTIVE_MS)
+    }
   },
 
   async refreshNow(workspacePathArg?: string) {
