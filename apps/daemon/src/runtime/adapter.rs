@@ -143,14 +143,18 @@ fn report_startup(reporter: &StartupReporter, result: Result<AcpStartupMetadata,
 
 async fn emit_acp_error(
     event_tx: &mpsc::Sender<amux::AcpEvent>,
+    acp_session_id: &str,
     message: impl Into<String>,
     details: impl Into<String>,
 ) {
+    let message = message.into();
+    let details = details.into();
+    super::agent_trace::log_acp_error(acp_session_id, &message, &details);
     let _ = event_tx
         .send(amux::AcpEvent {
             event: Some(amux::acp_event::Event::Error(amux::AcpError {
-                message: message.into(),
-                details: details.into(),
+                message,
+                details,
             })),
             model: String::new(),
         })
@@ -515,6 +519,9 @@ impl acp::Client for AmuxClient {
             // the monotonic `finished` counter so the barrier can tell a
             // just-completed handler apart from one that never started.
             let _inflight_guard = NotifInflightGuard::new(inflight, finished);
+            for event in &events {
+                super::agent_trace::log_acp_event(&session_id, event);
+            }
             for event in events {
                 let _ = event_tx.send(event).await;
             }
@@ -1365,17 +1372,21 @@ fn spawn_prompt_worker(
     let acp_session_key = session_id.to_string();
     tokio::task::spawn_local(async move {
         while let Some((text, attachment_urls)) = prompt_rx.recv().await {
-            let _ = event_tx
-                .send(amux::AcpEvent {
-                    event: Some(amux::acp_event::Event::StatusChange(
-                        amux::AcpStatusChange {
-                            old_status: amux::AgentStatus::Idle as i32,
-                            new_status: amux::AgentStatus::Active as i32,
-                        },
-                    )),
-                    model: String::new(),
-                })
-                .await;
+            let attachment_count = attachment_urls.len();
+            super::agent_trace::log_prompt_begin(&acp_session_key, &text, attachment_count);
+            let turn_started = Instant::now();
+
+            let status_active = amux::AcpEvent {
+                event: Some(amux::acp_event::Event::StatusChange(
+                    amux::AcpStatusChange {
+                        old_status: amux::AgentStatus::Idle as i32,
+                        new_status: amux::AgentStatus::Active as i32,
+                    },
+                )),
+                model: String::new(),
+            };
+            super::agent_trace::log_acp_event(&acp_session_key, &status_active);
+            let _ = event_tx.send(status_active).await;
 
             let mut blocks: Vec<acp::ContentBlock> = vec![text.into()];
             for url in &attachment_urls {
@@ -1389,31 +1400,37 @@ fn spawn_prompt_worker(
                 .prompt(acp::PromptRequest::new(session_id.clone(), blocks))
                 .await;
 
+            // Every prompt completion — success, provider error, or cancel/
+            // abort — must close the turn with Active→Idle so clients can
+            // finalize partial streaming content.
+            await_notifications_drained(&registry, &acp_session_key).await;
+            let status_idle = amux::AcpEvent {
+                event: Some(amux::acp_event::Event::StatusChange(
+                    amux::AcpStatusChange {
+                        old_status: amux::AgentStatus::Active as i32,
+                        new_status: amux::AgentStatus::Idle as i32,
+                    },
+                )),
+                model: String::new(),
+            };
+            super::agent_trace::log_acp_event(&acp_session_key, &status_idle);
+            let _ = event_tx.send(status_idle).await;
+
+            let elapsed_ms = turn_started.elapsed().as_millis() as u64;
             match result {
                 Ok(_) => {
-                    // `prompt()` can resolve before the turn's trailing
-                    // `AgentMessageChunk` notifications have been pushed onto
-                    // `event_tx` (the crate dispatches them on independent
-                    // spawned tasks). Wait for that pipeline to drain so the
-                    // final text is ordered ahead of the Active->Idle marker
-                    // the aggregator uses to close the turn.
-                    await_notifications_drained(&registry, &acp_session_key).await;
-                    let _ = event_tx
-                        .send(amux::AcpEvent {
-                            event: Some(amux::acp_event::Event::StatusChange(
-                                amux::AcpStatusChange {
-                                    old_status: amux::AgentStatus::Active as i32,
-                                    new_status: amux::AgentStatus::Idle as i32,
-                                },
-                            )),
-                            model: String::new(),
-                        })
-                        .await;
+                    super::agent_trace::log_prompt_end(&acp_session_key, true, "", elapsed_ms);
                 }
                 Err(e) => {
                     let details = format!("ACP prompt failed: {e}");
-                    error!("{}", details);
-                    emit_acp_error(&event_tx, "ACP prompt failed", details).await;
+                    super::agent_trace::log_prompt_end(&acp_session_key, false, &details, elapsed_ms);
+                    emit_acp_error(
+                        &event_tx,
+                        &acp_session_key,
+                        "ACP prompt failed",
+                        details,
+                    )
+                    .await;
                 }
             }
         }
@@ -1531,6 +1548,10 @@ async fn run_acp_host(
                     } => {
                         let startup_reporter: StartupReporter =
                             Arc::new(Mutex::new(Some(startup_tx)));
+                        let attach_session_label = resume_acp_session_id
+                            .as_deref()
+                            .unwrap_or("new-session")
+                            .to_string();
                         let attach_result = attach_acp_session_on_conn(
                             &conn,
                             &registry,
@@ -1567,7 +1588,14 @@ async fn run_acp_host(
                             Err(e) => {
                                 let details = format!("{e:#}");
                                 report_startup(&startup_reporter, Err(details.clone()));
-                                emit_acp_error(&event_tx, "ACP attach failed", details).await;
+                                let session_label = attach_session_label.as_str();
+                                emit_acp_error(
+                                    &event_tx,
+                                    session_label,
+                                    "ACP attach failed",
+                                    details,
+                                )
+                                .await;
                             }
                         }
                     }
@@ -1577,9 +1605,11 @@ async fn run_acp_host(
                                 if let Some(route) = registry.borrow().sessions.get(&acp_session_id) {
                                     emit_acp_error(
                                         &route.event_tx,
+                                        &acp_session_id,
                                         "ACP prompt failed",
                                         "ACP prompt worker stopped",
-                                    ).await;
+                                    )
+                                    .await;
                                 }
                             }
                         } else {
@@ -1587,11 +1617,20 @@ async fn run_acp_host(
                         }
                     }
                     AcpCommand::Cancel { acp_session_id } => {
-                        if let Err(e) = conn
-                            .cancel(acp::CancelNotification::new(acp::SessionId::new(acp_session_id)))
+                        match conn
+                            .cancel(acp::CancelNotification::new(acp::SessionId::new(
+                                acp_session_id.clone(),
+                            )))
                             .await
                         {
-                            warn!("ACP cancel failed: {}", e);
+                            Ok(()) => {
+                                super::agent_trace::log_cancel(&acp_session_id, true, "");
+                            }
+                            Err(e) => {
+                                let err = e.to_string();
+                                super::agent_trace::log_cancel(&acp_session_id, false, &err);
+                                warn!(acp_session_id = %acp_session_id, error = %err, "ACP cancel failed");
+                            }
                         }
                     }
                     AcpCommand::ResolvePermission { request_id, granted } => {

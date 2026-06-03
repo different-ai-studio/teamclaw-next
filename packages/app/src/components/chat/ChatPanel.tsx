@@ -45,6 +45,7 @@ import { MessageList, type MessageListHandle } from "./MessageList";
 import { SessionErrorAlert } from "./SessionErrorAlert";
 import { PendingPermissionInline, hasVisiblePendingPermissions } from "./PermissionCard";
 import { collectAcpStreamingPermissions } from "@/lib/teamclaw/acp-permission-entries";
+import { useSessionPermissionMode } from "@/lib/session-permission-mode";
 import {
   interruptAgentActor,
   interruptAllActiveAgents,
@@ -172,6 +173,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
   // ── Session store selectors (reactive state only) ────────────────────
   const activeSessionId = useSessionSelectionStore(s => s.activeSessionId);
+  const sessionPermissionMode = useSessionPermissionMode(activeSessionId);
   const error = useSessionStore(s => s.error);
   const errorSessionId = useSessionStore(s => s.errorSessionId);
   const isConnected = useSessionStore(s => s.isConnected);
@@ -209,6 +211,15 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       return [...archived, ...current].sort((a, b) => a.lastUpdate - b.lastUpdate);
     },
     [v2StreamsByKey, v2StreamsArchived, activeSessionId],
+  );
+
+  /** Live streaming only — finalized turns belong in the main message list. */
+  const activeV2Streams = React.useMemo(
+    () =>
+      Object.values(v2StreamsByKey).filter(
+        (e) => e.sessionId === activeSessionId && e.active,
+      ),
+    [v2StreamsByKey, activeSessionId],
   );
 
   // Plan entries from the active agent's stream surface in the TodoList dock
@@ -287,6 +298,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       sessions,
       pendingPermissions,
       acpPendingForTodo,
+      sessionPermissionMode,
     );
   }, [
     activeSessionId,
@@ -295,6 +307,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     isViewingChild,
     messageQueue.length,
     pendingPermissions,
+    sessionPermissionMode,
     sessions,
     todos,
     planTodos.length,
@@ -1740,14 +1753,14 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       : null;
 
   const messageBottomContent = !isViewingChild &&
-    (v2Streams.length > 0 || visibleSessionError || visibleError) ? (
+    (activeV2Streams.length > 0 || visibleSessionError || visibleError) ? (
     <>
-      {v2Streams.map(entry => {
-        const bubbleKey = "archiveId" in entry
-          ? (entry as { archiveId: string }).archiveId
-          : `current::${entry.actorId}`;
-        return <StreamingAgentBubble key={bubbleKey} entry={entry} />;
-      })}
+      {activeV2Streams.map((entry) => (
+        <StreamingAgentBubble
+          key={`current::${entry.actorId}`}
+          entry={entry}
+        />
+      ))}
       {visibleSessionError ? (
         <SessionErrorAlert
           error={visibleSessionError}

@@ -43,6 +43,10 @@ pub struct TurnAggregator {
     /// `EmittedMessage` carries this id so downstream INSERTs can
     /// correlate the rows belonging to the same logical turn.
     current_turn_id: Option<String>,
+    /// True once this turn emits thinking, output, or tool events.
+    turn_had_activity: bool,
+    /// True once this turn emits an AgentReply (mid-turn flush or turn end).
+    turn_had_reply: bool,
 }
 
 impl TurnAggregator {
@@ -56,16 +60,19 @@ impl TurnAggregator {
         match event.event.as_ref() {
             Some(amux::acp_event::Event::Thinking(t)) => {
                 self.ensure_turn_started();
+                self.turn_had_activity = true;
                 self.thinking_buf.push_str(&t.text);
             }
             Some(amux::acp_event::Event::Output(o)) => {
                 self.ensure_turn_started();
+                self.turn_had_activity = true;
                 self.reply_buf.push_str(&o.text);
             }
             Some(amux::acp_event::Event::ToolUse(tu)) => {
                 // A tool call interrupts: flush any pending thinking + reply
                 // first, then emit the tool call as its own message.
                 self.ensure_turn_started();
+                self.turn_had_activity = true;
                 self.flush_thinking_into(&mut out);
                 self.flush_reply_into(&mut out);
                 let metadata = serde_json::json!({
@@ -84,6 +91,8 @@ impl TurnAggregator {
                 });
             }
             Some(amux::acp_event::Event::ToolResult(tr)) => {
+                self.ensure_turn_started();
+                self.turn_had_activity = true;
                 let metadata = serde_json::json!({
                     "tool_id": tr.tool_id,
                     "success": tr.success,
@@ -105,6 +114,8 @@ impl TurnAggregator {
                 // already-open turn (shouldn't happen, but if it does
                 // the existing id stays in force).
                 if sc.old_status == idle && sc.new_status == active {
+                    self.turn_had_activity = false;
+                    self.turn_had_reply = false;
                     self.ensure_turn_started();
                 }
                 // Active -> Idle is the canonical "turn ended" signal
@@ -114,6 +125,19 @@ impl TurnAggregator {
                 if sc.old_status == active && sc.new_status == idle {
                     self.flush_thinking_into(&mut out);
                     self.flush_reply_into(&mut out);
+                    // Tool-only turns never accumulate reply text. Emit an
+                    // empty AgentReply so clients get message.created and
+                    // can anchor the turn in the main timeline.
+                    if !self.turn_had_reply && self.turn_had_activity {
+                        out.push(EmittedMessage {
+                            kind: MessageKind::AgentReply,
+                            content: String::new(),
+                            metadata_json: String::new(),
+                            turn_id: self.current_turn_id.clone().unwrap_or_default(),
+                        });
+                    }
+                    self.turn_had_activity = false;
+                    self.turn_had_reply = false;
                     self.current_turn_id = None;
                 }
             }
@@ -150,6 +174,7 @@ impl TurnAggregator {
                 metadata_json: String::new(),
                 turn_id: self.current_turn_id.clone().unwrap_or_default(),
             });
+            self.turn_had_reply = true;
         }
     }
 
@@ -307,6 +332,27 @@ mod tests {
         assert_eq!(emitted[0].kind, MessageKind::AgentToolResult);
         assert_eq!(emitted[0].content, "file content here");
         assert!(emitted[0].metadata_json.contains("\"success\":true"));
+    }
+
+    #[test]
+    fn tool_only_turn_emits_empty_agent_reply_at_idle() {
+        let mut agg = TurnAggregator::new();
+        agg.ingest(&status_change(
+            amux::AgentStatus::Idle,
+            amux::AgentStatus::Active,
+        ));
+        agg.ingest(&thinking_chunk("Need todos"));
+        agg.ingest(&tool_use("t1", "todowrite", "{}"));
+        agg.ingest(&tool_result("t1", true, "ok"));
+
+        let emitted = agg.ingest(&status_change(
+            amux::AgentStatus::Active,
+            amux::AgentStatus::Idle,
+        ));
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].kind, MessageKind::AgentReply);
+        assert!(emitted[0].content.is_empty());
+        assert!(!emitted[0].turn_id.is_empty());
     }
 
     #[test]

@@ -63,6 +63,25 @@ vi.mock('@/stores/streaming', () => ({
     selector(streamingState),
 }));
 
+const permissionModeState = {
+  autoAllow: false,
+};
+
+vi.mock('@/lib/session-permission-mode', () => ({
+  shouldAutoAllowSessionPermissions: (sessionId: string) =>
+    permissionModeState.autoAllow && sessionId === sessionState.activeSessionId,
+  useSessionPermissionMode: (sessionId: string | null) =>
+    permissionModeState.autoAllow && sessionId === sessionState.activeSessionId
+      ? 'fullAccess'
+      : 'default',
+  getSessionPermissionMode: () => (permissionModeState.autoAllow ? 'fullAccess' : 'default'),
+}));
+
+vi.mock('@/stores/v2-streaming-store', () => ({
+  useV2StreamingStore: (selector: (s: { byKey: Record<string, unknown> }) => unknown) =>
+    selector({ byKey: {} }),
+}));
+
 // ── Tests ──────────────────────────────────────────────────────────────
 
 describe('PendingPermissionInline', () => {
@@ -73,6 +92,28 @@ describe('PendingPermissionInline', () => {
     sessionState.pendingPermissions = [];
     sessionState.replyPermission = vi.fn(() => Promise.resolve());
     streamingState.childSessionStreaming = {};
+    permissionModeState.autoAllow = false;
+  });
+
+  it('does not render when session is in fullAccess mode', async () => {
+    sessionState.activeSessionId = 'sess-full';
+    permissionModeState.autoAllow = true;
+    sessionState.pendingPermissions = [
+      {
+        permission: {
+          id: 'perm-1',
+          permission: 'bash',
+          patterns: ['ls'],
+        },
+        childSessionId: null,
+        ownerSessionId: 'sess-full',
+      },
+    ];
+
+    const { PendingPermissionInline } = await import('../PermissionCard');
+    render(<PendingPermissionInline />);
+
+    expect(screen.queryByTestId('pending-permission-inline')).toBeNull();
   });
 
   it('renders permission request details', async () => {

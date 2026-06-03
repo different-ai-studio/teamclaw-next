@@ -79,8 +79,8 @@ describe("interruptAgentActor", () => {
     const envelope = fromBinary(RuntimeCommandEnvelopeSchema, bytes);
     expect(envelope.acpCommand?.command.case).toBe("cancel");
 
-    expect(discardPendingStreamReply).toHaveBeenCalledWith("session-1", "agent-a");
-    expect(useV2StreamingStore.getState().byKey["session-1::agent-a"]?.active).toBe(false);
+    expect(discardPendingStreamReply).not.toHaveBeenCalled();
+    expect(useV2StreamingStore.getState().byKey["session-1::agent-a"]?.active).toBe(true);
   });
 
   it("cleans up locally when runtime target cannot be resolved", async () => {

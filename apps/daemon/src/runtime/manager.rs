@@ -868,6 +868,18 @@ impl RuntimeManager {
         }
         #[cfg(not(test))]
         {
+            let (acp_session_id, attachment_count) = {
+                let handle = self.agents.get(agent_id).ok_or_else(|| {
+                    crate::error::AmuxError::Agent(format!("agent {} not found", agent_id))
+                })?;
+                (handle.acp_session_id.clone(), attachment_urls.len())
+            };
+            super::agent_trace::log_runtime_prompt(
+                agent_id,
+                &acp_session_id,
+                text,
+                attachment_count,
+            );
             let handle = self.agents.get_mut(agent_id).ok_or_else(|| {
                 crate::error::AmuxError::Agent(format!("agent {} not found", agent_id))
             })?;
@@ -1002,6 +1014,15 @@ impl RuntimeManager {
 
     /// Cancel the current turn for an agent.
     pub async fn cancel_agent(&mut self, agent_id: &str) -> crate::error::Result<()> {
+        let acp_session_id = self
+            .agents
+            .get(agent_id)
+            .ok_or_else(|| {
+                crate::error::AmuxError::Agent(format!("agent {} not found", agent_id))
+            })?
+            .acp_session_id
+            .clone();
+        super::agent_trace::log_runtime_cancel(agent_id, &acp_session_id);
         let handle = self.agents.get(agent_id).ok_or_else(|| {
             crate::error::AmuxError::Agent(format!("agent {} not found", agent_id))
         })?;

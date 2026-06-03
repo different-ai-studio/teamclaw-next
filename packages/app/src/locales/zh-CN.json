@@ -316,6 +316,10 @@
     "voiceInputInsertToChat": "插入到聊天",
     "inputPlaceholderDescription": "添加描述...",
     "inputPlaceholderMention": "输入 @ 提及人或 agent，# 引用文件...",
+    "permissionMode": {
+      "default": "默认权限",
+      "fullAccess": "完全访问权限"
+    },
     "mentionPopoverTitle": "提及人或 agent",
     "mentionEmptyState": "当前会话还没有可 @ 的人或 agent",
     "mentionGroupAgents": "智能体",

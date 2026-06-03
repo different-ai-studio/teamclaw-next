@@ -316,6 +316,10 @@
     "voiceInputInsertToChat": "Insert to chat",
     "inputPlaceholderDescription": "Add a description...",
     "inputPlaceholderMention": "Mention with @, reference files with #...",
+    "permissionMode": {
+      "default": "Default permissions",
+      "fullAccess": "Full access"
+    },
     "mentionPopoverTitle": "Mention people or agents",
     "mentionEmptyState": "No one to mention in this session yet",
     "mentionGroupAgents": "Agents",

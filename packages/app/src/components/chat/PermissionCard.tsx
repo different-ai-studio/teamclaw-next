@@ -2,6 +2,10 @@ import * as React from "react"
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 import { collectAcpStreamingPermissions } from "@/lib/teamclaw/acp-permission-entries"
+import {
+  useSessionPermissionMode,
+  type SessionPermissionMode,
+} from "@/lib/session-permission-mode"
 import { resolvePendingPermissionActivityOwner } from "@/lib/session-list-activity"
 import { useSessionStore } from "@/stores/session"
 import type { PendingPermissionEntry, Session, ToolCallPermission } from "@/stores/session-types"
@@ -192,7 +196,11 @@ export function hasVisiblePendingPermissions(
   sessions: Session[],
   pendingPermissions: PendingPermissionEntry[],
   acpStreamingPermissions: PendingPermissionEntry[] = [],
+  sessionPermissionMode: SessionPermissionMode = "default",
 ) {
+  if (sessionPermissionMode === "fullAccess") {
+    return false
+  }
   return collectVisiblePermissions(
     activeSessionId,
     sessions,
@@ -323,6 +331,7 @@ export function PendingPermissionInline() {
     return translate(i18nT, key, fallback, options)
   }, [i18nT])
   const activeSessionId = useSessionStore((s) => s.activeSessionId)
+  const sessionPermissionMode = useSessionPermissionMode(activeSessionId)
   const sessions = useSessionStore((s) => s.sessions)
   const pendingPermissions = useSessionStore((s) => s.pendingPermissions)
   const streamByKey = useV2StreamingStore((s) => s.byKey)
@@ -352,6 +361,10 @@ export function PendingPermissionInline() {
     () => baseVisiblePermissions.filter((entry) => !dismissedIds.includes(entry.permission.id)),
     [baseVisiblePermissions, dismissedIds],
   )
+
+  if (sessionPermissionMode === "fullAccess") {
+    return null
+  }
 
   if (visiblePermissions.length === 0) return null
 

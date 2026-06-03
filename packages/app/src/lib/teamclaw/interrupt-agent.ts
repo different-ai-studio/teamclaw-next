@@ -116,7 +116,8 @@ export async function interruptAgentActor(args: {
     throw error;
   }
 
-  cleanupLocalAgentStream(sessionId, agentActorId);
+  // Wait for daemon Active→Idle + message.created; App.tsx finalizes the
+  // partial turn via flushPendingStreamReply on statusChange.
 
   sessionFlowLog("interrupt.ok", {
     sessionId,

@@ -1,5 +1,6 @@
 pub mod acp_host;
 pub mod adapter;
+mod agent_trace;
 pub mod env_assembly;
 mod handle;
 mod manager;

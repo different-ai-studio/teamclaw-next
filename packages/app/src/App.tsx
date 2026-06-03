@@ -86,6 +86,7 @@ import {
   sessionIdFromLiveEvent,
   streamActorIdFromLiveEvent,
 } from "@/lib/teamclaw-events";
+import { handleAcpPermissionRequest } from "@/lib/teamclaw/handle-acp-permission-request";
 import { handleInboxEnvelope } from "@/lib/inbox-handler";
 import {
   persistStreamingPartsForReply,
@@ -1126,11 +1127,15 @@ function AppContent() {
                 description?: string;
                 params?: Record<string, string>;
               };
-              useV2StreamingStore.getState().setPermissionRequest(sid, actorId, {
-                requestId: pr.requestId ?? "",
-                toolName: pr.toolName ?? "",
-                description: pr.description ?? "",
-                params: pr.params ?? {},
+              void handleAcpPermissionRequest({
+                sessionId: sid,
+                agentActorId: actorId,
+                request: {
+                  requestId: pr.requestId ?? "",
+                  toolName: pr.toolName ?? "",
+                  description: pr.description ?? "",
+                  params: pr.params ?? {},
+                },
               });
             } else if (event?.case === "planUpdate") {
               const pu = event.value as { entries?: Array<{ content?: string; priority?: string; status?: string }> };
