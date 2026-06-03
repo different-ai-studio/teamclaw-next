@@ -1,0 +1,37 @@
+name: oss-sync-e2e
+on:
+  workflow_dispatch:
+    inputs:
+      three_node:
+        description: "Run optional three-node scenario"
+        type: boolean
+        default: false
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/daemon/e2e/oss-sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Write .env.local
+        run: |
+          cat > .env.local <<EOF
+          TEST_EMAIL=${{ secrets.OSS_E2E_TEST_EMAIL }}
+          TEST_PASSWORD=${{ secrets.OSS_E2E_TEST_PASSWORD }}
+          CLOUD_API_URL=${{ vars.OSS_E2E_CLOUD_API_URL || 'https://cloud.ucar.cc' }}
+          HOST_PORT_A=18081
+          HOST_PORT_B=18082
+          HOST_PORT_C=18083
+          RUN_THREE_NODE=${{ inputs.three_node && '1' || '0' }}
+          EOF
+      - name: Build amuxd image
+        run: docker compose build node-a
+      - name: Unit helpers
+        run: node --test tests/unit-*.test.mjs
+      - name: E2E scenarios
+        run: node --env-file=.env.local --test 'tests/0*.test.mjs'
