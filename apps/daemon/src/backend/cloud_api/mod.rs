@@ -233,20 +233,39 @@ impl CloudApiBackend {
         }
     }
 
+    /// Drop only the cached access token. The refresh token is unchanged.
+    fn invalidate_access_token_cache(&self) {
+        let mut state = self.token.lock().expect("token state poisoned");
+        state.access_token = None;
+        state.expires_at = None;
+    }
+
     pub(super) async fn get<T>(&self, path: &str) -> BackendResult<T>
     where
         T: for<'de> Deserialize<'de>,
     {
-        let token = self.access_token().await?;
-        let resp = self
-            .http
-            .get(self.cloud_url(path))
-            .bearer_auth(token)
-            .header("x-request-id", request_id())
-            .send()
-            .await
-            .map_err(network_error)?;
-        decode_response(resp).await
+        for is_retry in [false, true] {
+            let token = self.access_token().await?;
+            let resp = self
+                .http
+                .get(self.cloud_url(path))
+                .bearer_auth(token)
+                .header("x-request-id", request_id())
+                .send()
+                .await
+                .map_err(network_error)?;
+            match decode_response(resp).await {
+                Err(BackendError::Auth(_)) if !is_retry => {
+                    tracing::debug!(
+                        path,
+                        "cloud_api: 401 unauthorized, invalidating cached access token and retrying once"
+                    );
+                    self.invalidate_access_token_cache();
+                }
+                result => return result,
+            }
+        }
+        unreachable!("cloud_api get retry loop exhausted")
     }
 
     pub(super) async fn post<Req, Resp>(
@@ -259,66 +278,100 @@ impl CloudApiBackend {
         Req: Serialize + ?Sized,
         Resp: for<'de> Deserialize<'de>,
     {
-        let token = self.access_token().await?;
-        let mut req = self
-            .http
-            .post(self.cloud_url(path))
-            .bearer_auth(token)
-            .header("x-request-id", request_id())
-            .json(body);
-        if let Some(key) = idempotency_key {
-            req = req.header("idempotency-key", key);
+        for is_retry in [false, true] {
+            let token = self.access_token().await?;
+            let mut req = self
+                .http
+                .post(self.cloud_url(path))
+                .bearer_auth(token)
+                .header("x-request-id", request_id())
+                .json(body);
+            if let Some(key) = idempotency_key {
+                req = req.header("idempotency-key", key);
+            }
+            let resp = req.send().await.map_err(network_error)?;
+            match decode_response(resp).await {
+                Err(BackendError::Auth(_)) if !is_retry => {
+                    tracing::debug!(
+                        path,
+                        "cloud_api: 401 unauthorized, invalidating cached access token and retrying once"
+                    );
+                    self.invalidate_access_token_cache();
+                }
+                result => return result,
+            }
         }
-        let resp = req.send().await.map_err(network_error)?;
-        decode_response(resp).await
+        unreachable!("cloud_api post retry loop exhausted")
     }
 
     pub(super) async fn patch_no_content<Req>(&self, path: &str, body: &Req) -> BackendResult<()>
     where
         Req: Serialize + ?Sized,
     {
-        let token = self.access_token().await?;
-        let resp = self
-            .http
-            .patch(self.cloud_url(path))
-            .bearer_auth(token)
-            .header("x-request-id", request_id())
-            .json(body)
-            .send()
-            .await
-            .map_err(network_error)?;
-        if resp.status().is_success() {
-            Ok(())
-        } else {
+        for is_retry in [false, true] {
+            let token = self.access_token().await?;
+            let resp = self
+                .http
+                .patch(self.cloud_url(path))
+                .bearer_auth(token)
+                .header("x-request-id", request_id())
+                .json(body)
+                .send()
+                .await
+                .map_err(network_error)?;
+            if resp.status().is_success() {
+                return Ok(());
+            }
             let status = resp.status();
             let bytes = resp.bytes().await.map_err(network_error)?;
             let envelope = serde_json::from_slice::<client::CloudErrorEnvelope>(&bytes).ok();
-            Err(client::decode_error(status, envelope))
+            match client::decode_error(status, envelope) {
+                BackendError::Auth(_) if !is_retry => {
+                    tracing::debug!(
+                        path,
+                        "cloud_api: 401 unauthorized, invalidating cached access token and retrying once"
+                    );
+                    self.invalidate_access_token_cache();
+                }
+                err => return Err(err),
+            }
         }
+        unreachable!("cloud_api patch retry loop exhausted")
     }
 
     pub(super) async fn put_no_content<Req>(&self, path: &str, body: &Req) -> BackendResult<()>
     where
         Req: Serialize + ?Sized,
     {
-        let token = self.access_token().await?;
-        let resp = self
-            .http
-            .put(self.cloud_url(path))
-            .bearer_auth(token)
-            .header("x-request-id", request_id())
-            .json(body)
-            .send()
-            .await
-            .map_err(network_error)?;
-        if resp.status().is_success() {
-            Ok(())
-        } else {
+        for is_retry in [false, true] {
+            let token = self.access_token().await?;
+            let resp = self
+                .http
+                .put(self.cloud_url(path))
+                .bearer_auth(token)
+                .header("x-request-id", request_id())
+                .json(body)
+                .send()
+                .await
+                .map_err(network_error)?;
+            if resp.status().is_success() {
+                return Ok(());
+            }
             let status = resp.status();
             let bytes = resp.bytes().await.map_err(network_error)?;
             let envelope = serde_json::from_slice::<client::CloudErrorEnvelope>(&bytes).ok();
-            Err(client::decode_error(status, envelope))
+            match client::decode_error(status, envelope) {
+                BackendError::Auth(_) if !is_retry => {
+                    tracing::debug!(
+                        path,
+                        "cloud_api: 401 unauthorized, invalidating cached access token and retrying once"
+                    );
+                    self.invalidate_access_token_cache();
+                }
+                err => return Err(err),
+            }
         }
+        unreachable!("cloud_api put retry loop exhausted")
     }
 
     pub(super) fn cloud_url(&self, path: &str) -> String {
@@ -381,9 +434,7 @@ impl Backend for CloudApiBackend {
     }
 
     fn invalidate_cached_credential(&self) {
-        let mut state = self.token.lock().expect("token state poisoned");
-        state.access_token = None;
-        state.expires_at = None;
+        self.invalidate_access_token_cache();
     }
 
     async fn claim_team_invite(&self, token: &str) -> BackendResult<ClaimResult> {
@@ -1190,6 +1241,128 @@ mod tests {
             refreshes, 1,
             "single-flight should collapse concurrent refreshes into one"
         );
+    }
+
+    fn unauthorized_envelope(message: &str) -> serde_json::Value {
+        serde_json::json!({
+            "error": {
+                "code": "unauthorized",
+                "message": message
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn get_retries_once_after_401_with_stale_cached_token() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/sessions/session-1"))
+            .respond_with(
+                ResponseTemplate::new(401).set_body_json(unauthorized_envelope("JWT expired")),
+            )
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/sessions/session-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "session-1",
+                "teamId": "team-1",
+                "title": "t13",
+                "mode": "collab",
+                "participants": []
+            })))
+            .mount(&server)
+            .await;
+
+        let backend = CloudApiBackend::new(config(&server));
+        backend.access_token().await.unwrap();
+
+        let session = backend
+            .fetch_session_with_participants("session-1")
+            .await
+            .unwrap();
+
+        assert_eq!(session.session.id, "session-1");
+        assert_eq!(session.session.title, "t13");
+
+        let refreshes = server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.url.path() == "/v1/auth/refresh")
+            .count();
+        assert_eq!(
+            refreshes, 2,
+            "initial cache warm plus post-401 refresh should hit refresh twice"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_fails_after_two_401s_without_extra_refresh_loops() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/sessions/session-1"))
+            .respond_with(
+                ResponseTemplate::new(401).set_body_json(unauthorized_envelope("JWT expired")),
+            )
+            .mount(&server)
+            .await;
+
+        let backend = CloudApiBackend::new(config(&server));
+        backend.access_token().await.unwrap();
+
+        let err = backend
+            .fetch_session_with_participants("session-1")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, BackendError::Auth(_)));
+        assert!(err.to_string().contains("JWT expired"));
+
+        let refreshes = server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.url.path() == "/v1/auth/refresh")
+            .count();
+        assert_eq!(refreshes, 2, "only one retry should trigger one extra refresh");
+    }
+
+    #[tokio::test]
+    async fn get_does_not_retry_on_404() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/sessions/missing"))
+            .respond_with(
+                ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                    "error": { "code": "not_found", "message": "session not found" }
+                })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let backend = CloudApiBackend::new(config(&server));
+        let err = backend
+            .fetch_session_with_participants("missing")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, BackendError::NotFound(_)));
+
+        let refreshes = server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.url.path() == "/v1/auth/refresh")
+            .count();
+        assert_eq!(refreshes, 1, "404 must not trigger auth retry refresh");
     }
 
     #[tokio::test]
