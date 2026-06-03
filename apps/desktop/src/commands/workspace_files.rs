@@ -45,6 +45,52 @@ fn resolve_workspace_view_path(workspace_path: &str, path: &str) -> Result<PathB
     Ok(normalized_target)
 }
 
+/// Classify a directory entry as `"directory"` or `"file"`, **following
+/// symlinks**.
+///
+/// A symlink that resolves to a directory must browse as a directory — e.g. the
+/// per-workspace `teamclaw-team` link into the daemon's global team dir
+/// (`~/.amuxd/teams/<id>/teamclaw-team`). The previous
+/// `metadata().or_else(symlink_metadata)` form silently degraded *any* symlink
+/// whose `metadata()` (follow) call failed into a plain `"file"`, so a
+/// symlinked directory that momentarily failed to stat would render in the file
+/// tree as an unexpandable file — with no chevron and no way to browse into it.
+///
+/// Here we follow explicitly. When the follow fails we still probe `read_dir`
+/// before giving up, and log the underlying error so a genuine
+/// permission/resolution failure is *visible* instead of being silently
+/// mislabeled as a file.
+fn classify_entry(entry_path: &Path) -> Result<&'static str, String> {
+    let lmeta = std::fs::symlink_metadata(entry_path)
+        .map_err(|e| format!("Failed to read metadata '{}': {}", entry_path.display(), e))?;
+
+    if !lmeta.file_type().is_symlink() {
+        return Ok(if lmeta.is_dir() { "directory" } else { "file" });
+    }
+
+    // Symlink: classify by the target it resolves to.
+    match std::fs::metadata(entry_path) {
+        Ok(target_meta) => Ok(if target_meta.is_dir() {
+            "directory"
+        } else {
+            "file"
+        }),
+        Err(follow_err) => {
+            // Follow failed (dangling, permission, transient). Probe
+            // directory-ness directly before falling back to "file".
+            if std::fs::read_dir(entry_path).is_ok() {
+                Ok("directory")
+            } else {
+                eprintln!(
+                    "[workspace_files] symlink '{}' did not resolve: {follow_err}",
+                    entry_path.display()
+                );
+                Ok("file")
+            }
+        }
+    }
+}
+
 #[tauri::command]
 pub fn read_workspace_directory(
     workspace_path: String,
@@ -65,14 +111,7 @@ pub fn read_workspace_directory(
         })?;
         let name = entry.file_name().to_string_lossy().to_string();
         let entry_path = target.join(&name);
-        let metadata = std::fs::metadata(&entry_path)
-            .or_else(|_| std::fs::symlink_metadata(&entry_path))
-            .map_err(|e| format!("Failed to read metadata '{}': {}", entry_path.display(), e))?;
-        let kind = if metadata.is_dir() {
-            "directory"
-        } else {
-            "file"
-        };
+        let kind = classify_entry(&entry_path)?;
 
         result.push(WorkspaceDirectoryEntry {
             name,
@@ -162,5 +201,31 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "linked-dir");
         assert_eq!(entries[0].kind, "directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_symlink_classifies_as_file_without_erroring() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().unwrap();
+        // Target does not exist: the follow (`metadata`) fails and the
+        // `read_dir` probe also fails, so it falls back to "file" — but the
+        // listing itself must still succeed.
+        symlink(
+            workspace.path().join("does-not-exist"),
+            workspace.path().join("broken-link"),
+        )
+        .unwrap();
+
+        let entries = read_workspace_directory(
+            workspace.path().to_string_lossy().to_string(),
+            workspace.path().to_string_lossy().to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "broken-link");
+        assert_eq!(entries[0].kind, "file");
     }
 }
