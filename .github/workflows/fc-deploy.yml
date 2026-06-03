@@ -30,6 +30,8 @@ jobs:
       ACCESS_KEY_SECRET: ${{ secrets.ACCESS_KEY_SECRET }}
       ROLE_ARN: ${{ secrets.ROLE_ARN }}
       # Function runtime environment variables (see services/fc/s.yaml)
+      # Non-secret backend selector ("supabase" default | "postgres").
+      BACKEND_KIND: ${{ vars.BACKEND_KIND || 'supabase' }}
       PUSH_WEBHOOK_SECRET: ${{ secrets.PUSH_WEBHOOK_SECRET }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
