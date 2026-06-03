@@ -125,17 +125,6 @@ fn apply_ok(outcome: ApplyOutcome) -> Json<ApplyResponse> {
     Json(ApplyResponse { outcome })
 }
 
-async fn runtime_status_with_refresh(
-    state: &HttpState,
-    workspace_id: &str,
-    mut status: RuntimeStatus,
-) -> RuntimeStatus {
-    if let Some(refresh) = state.runtime_refresh.as_ref() {
-        status.refresh = refresh.runtime_refresh_dto(workspace_id).await;
-    }
-    status
-}
-
 // ── Provider handlers ─────────────────────────────────────────────────────────
 
 /// `GET /v1/workspaces/:id/providers`
@@ -771,15 +760,16 @@ pub async fn get_runtime(
             .runtime_status(&workspace_id, &workspace_path)
             .await
             .map_err(map_control_err)?;
-        let status = runtime_status_with_refresh(&state, &workspace_id, status).await;
         return Ok(Json(status));
     }
 
     let store = resolve_store(&state)?;
-    let status = store
+    let mut status = store
         .get_runtime_status(&workspace_id)
         .map_err(map_control_err)?;
-    let status = runtime_status_with_refresh(&state, &workspace_id, status).await;
+    if let Some(refresh) = state.runtime_refresh.as_ref() {
+        status.refresh = refresh.runtime_refresh_dto(&workspace_id).await;
+    }
     Ok(Json(status))
 }
 
@@ -801,22 +791,24 @@ pub async fn reload_runtime(
     }
 
     let store = resolve_store(&state)?;
-    if let Some(refresh) = state.runtime_refresh.as_ref() {
-        refresh.mark_applying(&workspace_id).await;
-    }
+    let attempt = if let Some(refresh) = state.runtime_refresh.as_ref() {
+        Some(refresh.mark_applying(&workspace_id, &workspace_path).await)
+    } else {
+        None
+    };
     let outcome = match store.reload_runtime(&workspace_id) {
         Ok(outcome) => outcome,
         Err(err) => {
-            if let Some(refresh) = state.runtime_refresh.as_ref() {
+            if let (Some(refresh), Some(attempt)) = (state.runtime_refresh.as_ref(), attempt) {
                 refresh
-                    .mark_apply_failed(&workspace_id, err.to_string())
+                    .mark_apply_failed(&workspace_id, &workspace_path, attempt, err.to_string())
                     .await;
             }
             return Err(map_control_err(err));
         }
     };
-    if let Some(refresh) = state.runtime_refresh.as_ref() {
-        refresh.clear_applied(&workspace_id).await;
+    if let (Some(refresh), Some(attempt)) = (state.runtime_refresh.as_ref(), attempt) {
+        refresh.clear_applied(&workspace_id, attempt).await;
     }
     Ok(apply_ok(outcome))
 }
@@ -829,13 +821,15 @@ mod tests {
         http::{Request, StatusCode},
     };
     use std::{sync::Arc, time::Duration};
+    use tokio::sync::Mutex as AsyncMutex;
     use tower::util::ServiceExt;
 
     use crate::config::{workspace_control::OpenCodeCompatStore, HttpConfig};
     use crate::http::{routes, runtime_adapter::StubRuntimeAdapter, state::DaemonMetadata};
     use crate::runtime::refresh::{
-        RefreshChangeKind, RefreshSource, RuntimeRefreshCoordinator,
+        RefreshChangeKind, RefreshSource,
     };
+    use crate::runtime::{RuntimeManager, RuntimeSupervisor};
 
     fn provider(id: &str, models: &[&str]) -> ProviderInfo {
         ProviderInfo {
@@ -950,22 +944,22 @@ mod tests {
             .unwrap()
     }
 
-    fn runtime_test_app(
-        refresh: Arc<RuntimeRefreshCoordinator>,
-    ) -> (axum::Router, String) {
+    fn runtime_test_app_with_supervisor() -> (axum::Router, String, Arc<RuntimeSupervisor>) {
         let runtime = StubRuntimeAdapter::new(32);
         let token_dir = tempfile::tempdir().unwrap();
-        let mut state = HttpState::new(
+        let supervisor = RuntimeSupervisor::new(Arc::new(AsyncMutex::new(
+            RuntimeManager::new(RuntimeManager::default_launch_configs(), None),
+        )));
+        let state = HttpState::new(
             HttpConfig::default(),
             crate::http::tokens::TokenStore::load_or_init(&token_dir.path().join("token")).unwrap(),
             test_metadata(),
             runtime,
             Some(Arc::new(OpenCodeCompatStore::new())),
-            None,
+            Some(Arc::clone(&supervisor)),
             None,
             test_dispatcher(),
         );
-        state.runtime_refresh = Some(refresh);
         let token = state
             .tokens
             .mint(
@@ -975,14 +969,15 @@ mod tests {
             )
             .0;
         std::mem::forget(token_dir);
-        (routes::build(state), token)
+        (routes::build(state), token, supervisor)
     }
 
     #[tokio::test]
     async fn runtime_status_includes_pending_refresh_state() {
         let dir = tempfile::tempdir().unwrap();
         let workspace_id = workspace_id(dir.path());
-        let refresh = RuntimeRefreshCoordinator::new();
+        let (app, token, supervisor) = runtime_test_app_with_supervisor();
+        let refresh = supervisor.refresh_coordinator();
         refresh
             .record_change(
                 &workspace_id,
@@ -992,7 +987,6 @@ mod tests {
             )
             .await
             .unwrap();
-        let (app, token) = runtime_test_app(refresh);
 
         let response = app
             .oneshot(auth_request(
@@ -1015,7 +1009,8 @@ mod tests {
     async fn apply_refresh_clears_pending_state_when_reload_succeeds() {
         let dir = tempfile::tempdir().unwrap();
         let workspace_id = workspace_id(dir.path());
-        let refresh = RuntimeRefreshCoordinator::new();
+        let (app, token, supervisor) = runtime_test_app_with_supervisor();
+        let refresh = supervisor.refresh_coordinator();
         refresh
             .record_change(
                 &workspace_id,
@@ -1025,7 +1020,6 @@ mod tests {
             )
             .await
             .unwrap();
-        let (app, token) = runtime_test_app(Arc::clone(&refresh));
 
         let response = app
             .clone()

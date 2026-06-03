@@ -63,6 +63,8 @@ pub struct WorkspaceRefreshState {
     pub change_kinds: BTreeSet<RefreshChangeKind>,
     pub sources: BTreeSet<RefreshSource>,
     pub auto_apply_blocked_by_active_runtime: bool,
+    pub revision: u64,
+    pub apply_attempt_id: Option<u64>,
     pub first_detected_at: DateTime<Utc>,
     pub last_detected_at: DateTime<Utc>,
     pub last_error: Option<String>,
@@ -87,13 +89,28 @@ impl WorkspaceRefreshState {
 
 #[derive(Debug)]
 pub struct RuntimeRefreshCoordinator {
-    inner: RwLock<HashMap<String, WorkspaceRefreshState>>,
+    inner: RwLock<CoordinatorState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RefreshApplyAttempt {
+    workspace_revision: u64,
+    attempt_id: u64,
+}
+
+#[derive(Debug)]
+struct CoordinatorState {
+    workspaces: HashMap<String, WorkspaceRefreshState>,
+    next_attempt_id: u64,
 }
 
 impl RuntimeRefreshCoordinator {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            inner: RwLock::new(HashMap::new()),
+            inner: RwLock::new(CoordinatorState {
+                workspaces: HashMap::new(),
+                next_attempt_id: 1,
+            }),
         })
     }
 
@@ -107,6 +124,7 @@ impl RuntimeRefreshCoordinator {
         let now = Utc::now();
         let mut guard = self.inner.write().await;
         let entry = guard
+            .workspaces
             .entry(workspace_id.to_owned())
             .or_insert_with(|| WorkspaceRefreshState {
                 workspace_id: workspace_id.to_owned(),
@@ -117,6 +135,8 @@ impl RuntimeRefreshCoordinator {
                 change_kinds: BTreeSet::new(),
                 sources: BTreeSet::new(),
                 auto_apply_blocked_by_active_runtime: false,
+                revision: 0,
+                apply_attempt_id: None,
                 first_detected_at: now,
                 last_detected_at: now,
                 last_error: None,
@@ -128,13 +148,19 @@ impl RuntimeRefreshCoordinator {
         entry.sources.insert(source);
         entry.strongest_impact = strongest_impact(entry.change_kinds.iter().copied());
         entry.recommended_action = recommended_action_for(entry.strongest_impact);
+        entry.revision += 1;
         entry.last_detected_at = now;
         entry.last_error = None;
         Ok(())
     }
 
     pub async fn workspace_state(&self, workspace_id: &str) -> Option<WorkspaceRefreshState> {
-        self.inner.read().await.get(workspace_id).cloned()
+        self.inner
+            .read()
+            .await
+            .workspaces
+            .get(workspace_id)
+            .cloned()
     }
 
     pub async fn runtime_refresh_dto(&self, workspace_id: &str) -> RuntimeRefreshDto {
@@ -144,27 +170,95 @@ impl RuntimeRefreshCoordinator {
             .unwrap_or_else(RuntimeRefreshDto::clean)
     }
 
-    pub async fn mark_applying(&self, workspace_id: &str) {
+    pub async fn mark_applying(
+        &self,
+        workspace_id: &str,
+        workspace_path: &Path,
+    ) -> RefreshApplyAttempt {
+        let now = Utc::now();
         let mut guard = self.inner.write().await;
-        if let Some(state) = guard.get_mut(workspace_id) {
-            state.status = WorkspaceRefreshStatus::Applying;
-            state.last_error = None;
-            state.last_detected_at = Utc::now();
+        let attempt_id = guard.next_attempt_id;
+        guard.next_attempt_id += 1;
+        let state = guard
+            .workspaces
+            .entry(workspace_id.to_owned())
+            .or_insert_with(|| WorkspaceRefreshState {
+                workspace_id: workspace_id.to_owned(),
+                workspace_path: workspace_path.display().to_string(),
+                status: WorkspaceRefreshStatus::Applying,
+                strongest_impact: RefreshImpact::UserApplyRequired,
+                recommended_action: RefreshRecommendedAction::ApplyChanges,
+                change_kinds: BTreeSet::new(),
+                sources: BTreeSet::new(),
+                auto_apply_blocked_by_active_runtime: false,
+                revision: 0,
+                apply_attempt_id: None,
+                first_detected_at: now,
+                last_detected_at: now,
+                last_error: None,
+            });
+        state.workspace_path = workspace_path.display().to_string();
+        state.status = WorkspaceRefreshStatus::Applying;
+        state.recommended_action = RefreshRecommendedAction::ApplyChanges;
+        state.apply_attempt_id = Some(attempt_id);
+        state.last_error = None;
+        state.last_detected_at = now;
+        RefreshApplyAttempt {
+            workspace_revision: state.revision,
+            attempt_id,
         }
     }
 
-    pub async fn clear_applied(&self, workspace_id: &str) {
-        self.inner.write().await.remove(workspace_id);
+    pub async fn clear_applied(&self, workspace_id: &str, attempt: RefreshApplyAttempt) {
+        let mut guard = self.inner.write().await;
+        let should_clear = guard
+            .workspaces
+            .get(workspace_id)
+            .is_some_and(|state| {
+                state.apply_attempt_id == Some(attempt.attempt_id)
+                    && state.revision == attempt.workspace_revision
+            });
+        if should_clear {
+            guard.workspaces.remove(workspace_id);
+        }
     }
 
-    pub async fn mark_apply_failed(&self, workspace_id: &str, error: impl Into<String>) {
+    pub async fn mark_apply_failed(
+        &self,
+        workspace_id: &str,
+        workspace_path: &Path,
+        attempt: RefreshApplyAttempt,
+        error: impl Into<String>,
+    ) {
+        let now = Utc::now();
+        let error = error.into();
         let mut guard = self.inner.write().await;
-        if let Some(state) = guard.get_mut(workspace_id) {
-            state.status = WorkspaceRefreshStatus::Failed;
-            state.recommended_action = RefreshRecommendedAction::ApplyChanges;
-            state.last_error = Some(error.into());
-            state.last_detected_at = Utc::now();
+        let state = guard
+            .workspaces
+            .entry(workspace_id.to_owned())
+            .or_insert_with(|| WorkspaceRefreshState {
+                workspace_id: workspace_id.to_owned(),
+                workspace_path: workspace_path.display().to_string(),
+                status: WorkspaceRefreshStatus::Failed,
+                strongest_impact: RefreshImpact::UserApplyRequired,
+                recommended_action: RefreshRecommendedAction::ApplyChanges,
+                change_kinds: BTreeSet::new(),
+                sources: BTreeSet::new(),
+                auto_apply_blocked_by_active_runtime: false,
+                revision: 0,
+                apply_attempt_id: Some(attempt.attempt_id),
+                first_detected_at: now,
+                last_detected_at: now,
+                last_error: None,
+            });
+        if state.apply_attempt_id != Some(attempt.attempt_id) {
+            return;
         }
+        state.workspace_path = workspace_path.display().to_string();
+        state.status = WorkspaceRefreshStatus::Failed;
+        state.recommended_action = RefreshRecommendedAction::ApplyChanges;
+        state.last_error = Some(error);
+        state.last_detected_at = now;
     }
 }
 
@@ -239,6 +333,10 @@ impl WorkspaceRefreshStatus {
 mod tests {
     use super::*;
 
+    fn ws_path(id: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(format!("/tmp/{id}"))
+    }
+
     #[tokio::test]
     async fn strongest_pending_impact_wins() {
         let coordinator = RuntimeRefreshCoordinator::new();
@@ -285,7 +383,12 @@ mod tests {
             .await
             .unwrap();
 
-        coordinator.mark_apply_failed("ws-2", "reload failed").await;
+        let attempt = coordinator
+            .mark_applying("ws-2", Path::new("/tmp/ws-2"))
+            .await;
+        coordinator
+            .mark_apply_failed("ws-2", Path::new("/tmp/ws-2"), attempt, "reload failed")
+            .await;
 
         let state = coordinator.workspace_state("ws-2").await.unwrap();
         assert_eq!(state.status, WorkspaceRefreshStatus::Failed);
@@ -333,5 +436,56 @@ mod tests {
         assert!(dto.change_kinds.is_empty());
         assert_eq!(dto.last_detected_at, None);
         assert_eq!(dto.last_error, None);
+    }
+
+    #[tokio::test]
+    async fn clear_applied_does_not_drop_newer_changes() {
+        let coordinator = RuntimeRefreshCoordinator::new();
+        let workspace = ws_path("ws-apply-race");
+        coordinator
+            .record_change(
+                "ws-apply-race",
+                &workspace,
+                RefreshChangeKind::Skills,
+                RefreshSource::UiMutation,
+            )
+            .await
+            .unwrap();
+
+        let attempt = coordinator.mark_applying("ws-apply-race", &workspace).await;
+
+        coordinator
+            .record_change(
+                "ws-apply-race",
+                &workspace,
+                RefreshChangeKind::Mcp,
+                RefreshSource::FilesystemWatch,
+            )
+            .await
+            .unwrap();
+
+        coordinator.clear_applied("ws-apply-race", attempt).await;
+
+        let dto = coordinator.runtime_refresh_dto("ws-apply-race").await;
+        assert_eq!(dto.status, "pending");
+        assert!(dto.change_kinds.contains(&"skills".to_string()));
+        assert!(dto.change_kinds.contains(&"mcp".to_string()));
+    }
+
+    #[tokio::test]
+    async fn apply_failure_creates_failed_state_for_clean_workspace() {
+        let coordinator = RuntimeRefreshCoordinator::new();
+        let workspace = ws_path("ws-failed-clean");
+
+        let attempt = coordinator.mark_applying("ws-failed-clean", &workspace).await;
+        coordinator
+            .mark_apply_failed("ws-failed-clean", &workspace, attempt, "reload failed")
+            .await;
+
+        let dto = coordinator.runtime_refresh_dto("ws-failed-clean").await;
+        assert_eq!(dto.status, "failed");
+        assert_eq!(dto.recommended_action, "apply_changes");
+        assert!(dto.change_kinds.is_empty());
+        assert_eq!(dto.last_error.as_deref(), Some("reload failed"));
     }
 }

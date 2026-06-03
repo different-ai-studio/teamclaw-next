@@ -354,15 +354,18 @@ impl RuntimeSupervisor {
         workspace_id: &str,
         workspace_path: &Path,
     ) -> Result<ApplyOutcome, WorkspaceControlError> {
-        self.refresh.mark_applying(workspace_id).await;
+        let attempt = self
+            .refresh
+            .mark_applying(workspace_id, workspace_path)
+            .await;
         match self.reload_workspace(workspace_id, workspace_path).await {
             Ok(outcome) => {
-                self.refresh.clear_applied(workspace_id).await;
+                self.refresh.clear_applied(workspace_id, attempt).await;
                 Ok(outcome)
             }
             Err(err) => {
                 self.refresh
-                    .mark_apply_failed(workspace_id, err.to_string())
+                    .mark_apply_failed(workspace_id, workspace_path, attempt, err.to_string())
                     .await;
                 Err(err)
             }
@@ -405,7 +408,10 @@ mod tests {
             )
             .await
             .unwrap();
-        coordinator.mark_apply_failed("ws-1", "reload failed").await;
+        let attempt = coordinator.mark_applying("ws-1", dir.path()).await;
+        coordinator
+            .mark_apply_failed("ws-1", dir.path(), attempt, "reload failed")
+            .await;
 
         let status = supervisor.runtime_status("ws-1", dir.path()).await.unwrap();
         let refresh = status.refresh;
@@ -433,5 +439,33 @@ mod tests {
         assert_eq!(refresh.recommended_action, "none");
         assert!(refresh.change_kinds.is_empty());
         assert_eq!(refresh.last_error, None);
+    }
+
+    #[tokio::test]
+    async fn apply_refresh_marks_clean_workspace_failed_when_reload_errors() {
+        let missing = tempfile::tempdir().unwrap();
+        let missing_path = missing.path().join("does-not-exist");
+        let manager = RuntimeManager::new(RuntimeManager::default_launch_configs(), None);
+        let supervisor = RuntimeSupervisor::new(Arc::new(AsyncMutex::new(manager)));
+
+        let err = supervisor
+            .apply_refresh("ws-missing", &missing_path)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("workspace"));
+
+        let status = supervisor
+            .runtime_status("ws-missing", &missing_path)
+            .await
+            .unwrap();
+        assert_eq!(status.refresh.status, "failed");
+        assert_eq!(status.refresh.recommended_action, "apply_changes");
+        assert!(status.refresh.change_kinds.is_empty());
+        assert!(status
+            .refresh
+            .last_error
+            .as_deref()
+            .unwrap()
+            .contains("workspace"));
     }
 }
