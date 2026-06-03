@@ -21,7 +21,7 @@
     "expo-constants": "~56.0.15",
     "expo-document-picker": "^56.0.4",
     "expo-file-system": "~56.0.7",
-    "expo-haptics": "^14.1.4",
+    "expo-haptics": "^56.0.3",
     "expo-image-picker": "^16.1.4",
     "expo-linking": "~7.1.7",
     "expo-notifications": "~0.31.5",
