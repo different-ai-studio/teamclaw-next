@@ -159,6 +159,13 @@
     },
     "clear": "清空聊天",
     "newChat": "新聊天",
+    "newChatMoreOptions": "更多新建选项",
+    "newMultiPersonSession": "多人会话",
+    "newMultiPersonSessionHint": "选择参与者",
+    "noLocalDaemonAgent": "未检测到本机 amuxd Agent",
+    "noLocalDaemonAgentHint": "请完成 Agent 初始化或启动 daemon 后重试。",
+    "openAgentSettings": "打开 Agent 设置",
+    "quickSessionCreateError": "无法与本机 Agent 开始会话",
     "backToActiveSession": "返回活跃会话",
     "archivedSession": "归档会话",
     "restoreSession": "恢复",
@@ -176,6 +183,10 @@
     "connecting": "连接中...",
     "skillRestartTitle": "检测到新技能",
     "skillRestartBody": "检测到新增或更新的技能。请等待 skills 生成完成后再进行重启。",
+    "runtimeRefresh": {
+      "sessionHint": "重载 Agent 运行时以加载工作区变更。",
+      "sessionHintKinds": "重载 Agent 以加载 {{kinds}}。"
+    },
     "planningMoves": "规划下一步",
     "loadEarlierMessages": "加载前 {{count}} 条消息",
     "compaction": {
@@ -485,6 +496,15 @@
   "workspace": {
     "connectingDaemon": "正在连接 amuxd daemon…",
     "daemonUnavailableHint": "请在本机启动 amuxd（例如 pnpm daemon:run），确认 ~/.amuxd/ 下已写入 HTTP port/token 文件后重试。",
+    "runtimeRefresh": {
+      "pendingTitle": "工作区配置已变更，需要重载",
+      "applyingTitle": "正在应用工作区变更…",
+      "failedTitle": "运行时重载失败",
+      "pendingKinds": "待处理：{{kinds}}",
+      "pendingGeneric": "运行中的 Agent 尚未加载最新的配置或技能。",
+      "blockedByActive": "当前有 Agent 在运行 — 确认后将执行重载。",
+      "apply": "应用变更"
+    },
     "title": "工作区",
     "openFolder": "打开文件夹",
     "recentFolders": "最近文件夹",

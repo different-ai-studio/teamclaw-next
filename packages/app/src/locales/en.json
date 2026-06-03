@@ -159,6 +159,13 @@
     },
     "clear": "Clear Chat",
     "newChat": "New Chat",
+    "newChatMoreOptions": "More new chat options",
+    "newMultiPersonSession": "Group Session",
+    "newMultiPersonSessionHint": "Select participants",
+    "noLocalDaemonAgent": "No local amuxd agent on this device",
+    "noLocalDaemonAgentHint": "Finish agent setup or start the daemon, then try again.",
+    "openAgentSettings": "Open agent settings",
+    "quickSessionCreateError": "Could not start a session with your local agent",
     "backToActiveSession": "Back to active session",
     "archivedSession": "Archived session",
     "restoreSession": "Restore",
@@ -176,6 +183,10 @@
     "connecting": "Connecting...",
     "skillRestartTitle": "Detected new skills",
     "skillRestartBody": "New or updated skills were detected. Please wait until skill generation is complete before restarting the agent runtime.",
+    "runtimeRefresh": {
+      "sessionHint": "Reload the agent runtime to pick up workspace changes.",
+      "sessionHintKinds": "Reload the agent to pick up {{kinds}}."
+    },
     "planningMoves": "Planning next moves",
     "loadEarlierMessages": "Load {{count}} earlier messages",
     "compaction": {
@@ -485,6 +496,15 @@
   "workspace": {
     "connectingDaemon": "Connecting to amuxd daemon…",
     "daemonUnavailableHint": "Start amuxd on this machine (e.g. pnpm daemon:run), confirm the HTTP port/token files exist under ~/.amuxd/, then retry.",
+    "runtimeRefresh": {
+      "pendingTitle": "Workspace changes need a reload",
+      "applyingTitle": "Applying workspace changes…",
+      "failedTitle": "Runtime refresh failed",
+      "pendingKinds": "Pending: {{kinds}}",
+      "pendingGeneric": "Configuration or skills changed outside the running agent.",
+      "blockedByActive": "An agent runtime is active — apply reloads when you confirm.",
+      "apply": "Apply changes"
+    },
     "title": "Workspace",
     "openFolder": "Open Folder",
     "recentFolders": "Recent Folders",

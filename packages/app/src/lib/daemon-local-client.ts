@@ -653,6 +653,34 @@ export async function putDaemonMcp(
 
 // ─── Runtime ──────────────────────────────────────────────────────────────────
 
+export type DaemonRuntimeRefreshStatus = 'clean' | 'pending' | 'applying' | 'failed'
+
+export interface DaemonRuntimeRefresh {
+  status: DaemonRuntimeRefreshStatus
+  change_kinds: string[]
+  recommended_action: 'none' | 'apply_changes'
+  auto_apply_blocked_by_active_runtime: boolean
+  last_detected_at: string | null
+  last_error: string | null
+}
+
+export interface DaemonRuntimeStatus {
+  workspace_id: string
+  ready: boolean
+  backend: string
+  current_model: string | null
+  refresh: DaemonRuntimeRefresh
+}
+
+export async function getDaemonRuntime(
+  workspaceId: string,
+): Promise<DaemonRuntimeStatus | null> {
+  const result = await daemonFetch<DaemonRuntimeStatus>(
+    `/v1/workspaces/${workspaceId}/runtime`,
+  )
+  return result.ok ? result.data : null
+}
+
 export async function reloadDaemonRuntime(
   workspaceId: string,
 ): Promise<DaemonApplyOutcome | null> {

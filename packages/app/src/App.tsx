@@ -28,6 +28,7 @@ import {
   useChannelGatewayInit,
   useGitReposInit,
   useCronInit,
+  useWorkspaceRuntimeRefreshPoll,
   useOpenCodePreload,
 
   useExternalLinkHandler,
@@ -70,6 +71,7 @@ import { SetupGuide } from "@/components/SetupGuide";
 import { TelemetryConsentDialog } from "@/components/telemetry/TelemetryConsentDialog";
 import { WorkspacePrompt } from "@/components/workspace";
 import { WorkspaceTypeDialog } from "@/components/workspace/WorkspaceTypeDialog";
+import { RuntimeRefreshWorkspaceBanner } from "@/components/workspace/RuntimeRefreshBanner";
 import { useSessionStore } from "@/stores/session";
 import { useSessionListStore } from "@/stores/session-list-store";
 import { useSessionMessageStore } from "@/stores/session-message-store";
@@ -104,6 +106,7 @@ import { MessageSchema, MessageKind, type Message as TeamclawMessage } from "@/l
 import {
   PENDING_AGENT_REPLY_FALLBACK_MS,
   agentStreamKey,
+  isAgentActiveStatus,
   isTerminalAgentStatus,
   mergePendingAgentReplies,
   normalizeToolResultEvent,
@@ -665,6 +668,7 @@ function AppContent() {
   useChannelGatewayInit();
   useGitReposInit();
   useCronInit();
+  useWorkspaceRuntimeRefreshPoll();
   useMCPFileWatcher(workspacePath);
   useExternalLinkHandler();
   usePanelAutoOpen();
@@ -1108,7 +1112,9 @@ function AppContent() {
               }, 500);
             } else if (event?.case === "statusChange") {
               const sc = event.value as { newStatus?: number };
-              if (isTerminalAgentStatus(sc.newStatus)) {
+              if (isAgentActiveStatus(sc.newStatus)) {
+                useV2StreamingStore.getState().beginPlanningPlaceholder(sid, actorId);
+              } else if (isTerminalAgentStatus(sc.newStatus)) {
                 if (!flushPendingStreamReply(sid, actorId)) {
                   const streamEntry = useV2StreamingStore.getState().byKey[
                     agentStreamKey(sid, actorId)
@@ -1711,6 +1717,8 @@ function AppContent() {
               )}
             </div>
           </header>
+
+          <RuntimeRefreshWorkspaceBanner />
 
           {/* Main content - Chat or file preview */}
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">

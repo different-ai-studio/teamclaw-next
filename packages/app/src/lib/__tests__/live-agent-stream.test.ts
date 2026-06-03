@@ -5,6 +5,7 @@ import {
   PENDING_AGENT_REPLY_FALLBACK_MS,
   PENDING_AGENT_REPLY_HARD_TIMEOUT_MS,
   PENDING_AGENT_REPLY_TOOL_GRACE_MS,
+  isAgentActiveStatus,
   isTerminalAgentStatus,
   mergePendingAgentReplies,
   normalizeToolResultEvent,
@@ -68,6 +69,12 @@ describe("live agent stream event helpers", () => {
     expect(isTerminalAgentStatus(AgentStatus.ERROR)).toBe(true);
     expect(isTerminalAgentStatus(AgentStatus.STOPPED)).toBe(true);
     expect(isTerminalAgentStatus(AgentStatus.ACTIVE)).toBe(false);
+  });
+
+  it("recognizes active agent status for planning placeholder", () => {
+    expect(isAgentActiveStatus(AgentStatus.ACTIVE)).toBe(true);
+    expect(isAgentActiveStatus(AgentStatus.IDLE)).toBe(false);
+    expect(isAgentActiveStatus(2)).toBe(true);
   });
 
   it("does not flush a parked reply before the fallback grace window", () => {

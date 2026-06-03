@@ -340,6 +340,17 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
       }
     }, [v2StreamScrollTrigger, childStreamingScrollTrigger, scrollToBottomIfAtBottom]);
 
+    // After a persisted agent reply lands in the list, re-pin to the bottom
+    // once layout commits (stream bubble may shrink/move in the same tick).
+    const prevMessageCountRef = React.useRef(messages.length);
+    React.useEffect(() => {
+      const grew = messages.length > prevMessageCountRef.current;
+      prevMessageCountRef.current = messages.length;
+      if (grew) {
+        scrollToBottomAfterCommit();
+      }
+    }, [messages.length, scrollToBottomAfterCommit]);
+
     const prevSessionIdRef = React.useRef(activeSessionId);
     const needsScrollAfterLoadRef = React.useRef(false);
     React.useEffect(() => {

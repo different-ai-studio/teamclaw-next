@@ -37,8 +37,12 @@ export interface OutboxEntry {
 interface OutboxStore {
   /** Keyed by messageId. */
   byId: Record<string, OutboxEntry>;
+  /** UI-only: Cloud API insert succeeded; not persisted to libsql. */
+  cloudPersistedIds: Record<string, true>;
   /** Hydrated from libsql on app boot. Idempotent. */
   hydrate: () => Promise<void>;
+  /** Mark that insertOutgoingMessage succeeded (show delivered check early). */
+  markCloudPersisted: (messageId: string) => void;
   /** Insert a brand-new outbox row in `pending` state. Writes through to
    * libsql so a crash before the first send doesn't lose the message. */
   enqueue: (
@@ -123,6 +127,16 @@ let hydrated = false;
 
 export const useOutboxStore = create<OutboxStore>((set, get) => ({
   byId: {},
+  cloudPersistedIds: {},
+
+  markCloudPersisted: (messageId) => {
+    set((s) => {
+      if (s.cloudPersistedIds[messageId]) return s;
+      return {
+        cloudPersistedIds: { ...s.cloudPersistedIds, [messageId]: true },
+      };
+    });
+  },
 
   hydrate: async () => {
     if (hydrated) return;
@@ -227,7 +241,9 @@ export const useOutboxStore = create<OutboxStore>((set, get) => ({
     set((s) => {
       const next = { ...s.byId };
       delete next[messageId];
-      return { byId: next };
+      const cloudPersistedIds = { ...s.cloudPersistedIds };
+      delete cloudPersistedIds[messageId];
+      return { byId: next, cloudPersistedIds };
     });
     try {
       await deleteOutbox(messageId);
@@ -262,7 +278,11 @@ export const useOutboxStore = create<OutboxStore>((set, get) => ({
       lastError: null,
       updatedAt: now,
     };
-    set((s) => ({ byId: { ...s.byId, [messageId]: next } }));
+    set((s) => {
+      const cloudPersistedIds = { ...s.cloudPersistedIds };
+      delete cloudPersistedIds[messageId];
+      return { byId: { ...s.byId, [messageId]: next }, cloudPersistedIds };
+    });
     try {
       await upsertOutbox(entryToRow(next));
     } catch (e) {

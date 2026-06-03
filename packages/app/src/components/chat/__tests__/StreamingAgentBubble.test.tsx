@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import { STREAM_AWAITING_NEXT_EVENT_MS } from "@/hooks/useStreamAwaitingNextEvent";
 import { StreamingAgentBubble } from "../StreamingAgentBubble";
 import { selectStreamsForSession, useV2StreamingStore } from "@/stores/v2-streaming-store";
 
@@ -31,6 +32,102 @@ async function flushStreamReveal() {
 }
 
 describe("StreamingAgentBubble", () => {
+  it("renders planning label for an empty active stream after idle gap", () => {
+    vi.useFakeTimers();
+    const { getByTestId, queryByTestId } = render(
+      <StreamingAgentBubble
+        entry={{
+          sessionId: "s1",
+          actorId: "agent-a",
+          outputText: "",
+          thinkingText: "",
+          parts: [],
+          toolCalls: [],
+          planEntries: [],
+          pendingPermission: null,
+          errorMessage: null,
+          errorDetails: null,
+          lastUpdate: Date.now(),
+          active: true,
+          streamId: "s1::agent-a::stream-1",
+        }}
+      />,
+    );
+
+    expect(queryByTestId("v2-streaming-planning")).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(STREAM_AWAITING_NEXT_EVENT_MS);
+    });
+    const planning = getByTestId("v2-streaming-planning");
+    expect(planning.querySelectorAll(".stream-loading-dot")).toHaveLength(3);
+    vi.useRealTimers();
+  });
+
+  it("renders planning label after a mid-stream pause", () => {
+    vi.useFakeTimers();
+    const { getByTestId, queryByTestId, rerender } = render(
+      <StreamingAgentBubble
+        entry={{
+          sessionId: "s1",
+          actorId: "agent-a",
+          outputText: "Hello",
+          thinkingText: "",
+          parts: [
+            {
+              id: "text-1",
+              type: "text",
+              text: "Hello",
+              content: "Hello",
+            },
+          ],
+          toolCalls: [],
+          planEntries: [],
+          pendingPermission: null,
+          errorMessage: null,
+          errorDetails: null,
+          lastUpdate: 1000,
+          active: true,
+          streamId: "s1::agent-a::stream-1",
+        }}
+      />,
+    );
+
+    expect(queryByTestId("v2-streaming-planning")).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(STREAM_AWAITING_NEXT_EVENT_MS);
+    });
+    expect(getByTestId("v2-streaming-planning").querySelectorAll(".stream-loading-dot")).toHaveLength(3);
+
+    rerender(
+      <StreamingAgentBubble
+        entry={{
+          sessionId: "s1",
+          actorId: "agent-a",
+          outputText: "Hello world",
+          thinkingText: "",
+          parts: [
+            {
+              id: "text-1",
+              type: "text",
+              text: "Hello world",
+              content: "Hello world",
+            },
+          ],
+          toolCalls: [],
+          planEntries: [],
+          pendingPermission: null,
+          errorMessage: null,
+          errorDetails: null,
+          lastUpdate: 2000,
+          active: true,
+          streamId: "s1::agent-a::stream-1",
+        }}
+      />,
+    );
+    expect(queryByTestId("v2-streaming-planning")).toBeNull();
+    vi.useRealTimers();
+  });
+
   it("does not render an archived text-only stream after persisted reply takes over", () => {
     const { container } = render(
       <StreamingAgentBubble

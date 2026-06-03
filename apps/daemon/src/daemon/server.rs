@@ -26,7 +26,7 @@ use crate::daemon::runtime_cursor::{
 };
 use crate::daemon::runtime_resolution::{
     agent_type_from_name, resolve_requested_agent_type, runtime_start_initial_model_override,
-    supported_agent_type_names,
+    session_message_model_override, supported_agent_type_names,
 };
 use crate::daemon::session_events::{
     format_idea_prompt, message_attachment_urls, parse_mention_actor_ids, resolve_mention_actor_ids,
@@ -189,6 +189,8 @@ pub struct DaemonServer {
     /// hits the "absent → create" branch, but the lookup-first shape stays
     /// so future code can adopt session reuse without changing the handler.
     cron_sessions: std::collections::HashMap<String, String>,
+    refresh_watch_registry:
+        Option<std::sync::Arc<crate::runtime::refresh::refresh_watch::RefreshWatchRegistry>>,
 }
 
 /// Single control command parsed off `amuxd.sock`. Variants correspond to the
@@ -454,6 +456,7 @@ impl DaemonServer {
             actor_id,
             channel_mgr: None,
             cron_sessions: std::collections::HashMap::new(),
+            refresh_watch_registry: None,
         })
     }
 
@@ -972,8 +975,28 @@ impl DaemonServer {
                     self.agents.clone(),
                     http_cfg.max_event_backlog,
                 );
-            let runtime_supervisor =
-                Some(crate::runtime::RuntimeSupervisor::new(self.agents.clone()));
+            // The HTTP workspace runtime endpoints share this supervisor's
+            // refresh coordinator for status + apply-intent semantics.
+            let runtime_supervisor = crate::runtime::RuntimeSupervisor::new(self.agents.clone());
+            let refresh_watch_registry =
+                crate::runtime::refresh::refresh_watch::start_refresh_watchers(
+                    runtime_supervisor.refresh_coordinator(),
+                    self.workspaces
+                        .workspaces
+                        .iter()
+                        .map(
+                            |workspace| crate::runtime::refresh::refresh_watch::WatchedWorkspace {
+                                workspace_id:
+                                    crate::runtime::refresh::refresh_watch::workspace_runtime_id(
+                                        Path::new(&workspace.path),
+                                    ),
+                                workspace_path: PathBuf::from(&workspace.path),
+                            },
+                        )
+                        .collect(),
+                    dirs::home_dir(),
+                );
+            self.refresh_watch_registry = Some(refresh_watch_registry);
             let workspace_control: Option<
                 std::sync::Arc<dyn crate::config::WorkspaceControlStore>,
             > = Some(std::sync::Arc::new(
@@ -994,7 +1017,7 @@ impl DaemonServer {
                 meta,
                 runtime,
                 workspace_control,
-                runtime_supervisor,
+                Some(runtime_supervisor),
                 opencode_settings,
                 self.sync_dispatcher.clone(),
             )
@@ -2558,6 +2581,32 @@ impl DaemonServer {
                     session_id = %session_id,
                     "route_session_message: delivering mentioned prompt to runtime"
                 );
+                if let Some(desired_model) = session_message_model_override(message) {
+                    let current_model = self
+                        .agents
+                        .lock()
+                        .await
+                        .current_model(&runtime_id)
+                        .cloned()
+                        .unwrap_or_default();
+                    if desired_model != current_model {
+                        let mut agents = self.agents.lock().await;
+                        match agents.send_set_model(&runtime_id, &desired_model).await {
+                            Ok(()) => {
+                                agents.set_current_model(&runtime_id, &desired_model);
+                            }
+                            Err(e) => {
+                                warn!(
+                                    runtime_id = %runtime_id,
+                                    message_id = %message.message_id,
+                                    model_id = %desired_model,
+                                    err = %e,
+                                    "route_session_message: send_set_model failed"
+                                );
+                            }
+                        }
+                    }
+                }
                 let send_res = self
                     .agents
                     .lock()
@@ -3935,6 +3984,19 @@ impl DaemonServer {
                 if let Some(team_id) = ws.team_id.clone() {
                     ensure_team_link(&team_id, &ws.path);
                 }
+                if let Some(registry) = self.refresh_watch_registry.as_ref() {
+                    registry
+                        .upsert_workspace(
+                            crate::runtime::refresh::refresh_watch::WatchedWorkspace {
+                                workspace_id:
+                                    crate::runtime::refresh::refresh_watch::workspace_runtime_id(
+                                        Path::new(&ws.path),
+                                    ),
+                                workspace_path: PathBuf::from(&ws.path),
+                            },
+                        )
+                        .await;
+                }
                 info!(workspace_id = %ws.workspace_id, path = %ws.path, "workspace added");
                 let info = amux::WorkspaceInfo {
                     workspace_id: ws.workspace_id,
@@ -3952,7 +4014,17 @@ impl DaemonServer {
 
     /// Applies a workspace remove. Returns (success, error_text).
     async fn apply_remove_workspace(&mut self, remove: &amux::RemoveWorkspace) -> (bool, String) {
+        let workspace_path = self
+            .workspaces
+            .find_by_id(&remove.workspace_id)
+            .map(|workspace| PathBuf::from(&workspace.path));
         if self.workspaces.remove(&remove.workspace_id) {
+            if let (Some(registry), Some(workspace_path)) = (
+                self.refresh_watch_registry.as_ref(),
+                workspace_path.as_deref(),
+            ) {
+                registry.remove_workspace_path(workspace_path).await;
+            }
             let _ = self.workspaces.save(&self.workspaces_path);
             info!(workspace_id = %remove.workspace_id, "workspace removed");
             (true, String::new())
@@ -5412,6 +5484,7 @@ mod tests {
                 actor_id: "agent-actor".to_string(),
                 channel_mgr: None,
                 cron_sessions: HashMap::new(),
+                refresh_watch_registry: None,
             },
             _tmp: tmp,
         }
@@ -6258,6 +6331,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn live_message_model_override_is_applied_before_prompt_routing() {
+        let mut fixture = test_server();
+
+        let msg = crate::proto::teamclaw::Message {
+            message_id: "msg-model-1".to_string(),
+            session_id: "session-1".to_string(),
+            sender_actor_id: "human-actor".to_string(),
+            kind: 0,
+            content: "which model?".to_string(),
+            created_at: 1,
+            model: "opencode/deepseek-v4-flash-free".to_string(),
+            ..Default::default()
+        };
+        let msg_env = crate::proto::teamclaw::SessionMessageEnvelope {
+            message: Some(msg),
+            mention_actor_ids: vec!["agent-actor".to_string()],
+            ..Default::default()
+        };
+        let live = crate::proto::teamclaw::LiveEventEnvelope {
+            event_id: "event-model-1".to_string(),
+            event_type: "message.created".to_string(),
+            session_id: "session-1".to_string(),
+            actor_id: "human-actor".to_string(),
+            sent_at: 1,
+            body: msg_env.encode_to_vec(),
+        };
+
+        fixture
+            .server
+            .handle_incoming(subscriber::IncomingMessage::TeamclawSessionLive {
+                session_id: "session-1".to_string(),
+                payload: live.encode_to_vec(),
+            })
+            .await;
+
+        let agents = fixture.server.agents.lock().await;
+        assert_eq!(
+            agents.current_model("rt1").map(|s| s.as_str()),
+            Some("opencode/deepseek-v4-flash-free")
+        );
+        assert_eq!(agents.last_sent_to("rt1").as_deref(), Some("which model?"));
+    }
+
+    #[tokio::test]
     async fn register_startup_workspace_bootstraps_cwd_when_store_empty() {
         let mock = Arc::new(crate::backend::mock::MockBackend::with_identity(
             "team-test",
@@ -6452,6 +6569,36 @@ mod tests {
             mock.state().default_workspace_ids,
             vec!["remote-ws-1".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn apply_add_and_remove_workspace_updates_refresh_watch_registry() {
+        let mut ts = test_server();
+        let registry =
+            crate::runtime::refresh::refresh_watch::RefreshWatchRegistry::new(Vec::new());
+        ts.server.refresh_watch_registry = Some(registry.clone());
+
+        let workspace_dir = ts._tmp.path().join("watch-me");
+        std::fs::create_dir_all(&workspace_dir).unwrap();
+
+        let add = amux::AddWorkspace {
+            path: workspace_dir.to_string_lossy().to_string(),
+        };
+        let (accepted, error, workspace) = ts.server.apply_add_workspace(&add).await;
+        assert!(accepted, "add workspace failed: {error}");
+
+        assert_eq!(
+            registry.workspace_paths().await,
+            vec![workspace_dir.canonicalize().unwrap()]
+        );
+
+        let workspace_id = workspace.unwrap().workspace_id;
+        let (accepted, error) = ts
+            .server
+            .apply_remove_workspace(&amux::RemoveWorkspace { workspace_id })
+            .await;
+        assert!(accepted, "remove workspace failed: {error}");
+        assert!(registry.workspace_paths().await.is_empty());
     }
 
     #[tokio::test]
