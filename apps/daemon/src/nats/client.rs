@@ -5,10 +5,10 @@
 //! - URL handed to async_nats verbatim (nats://, tls://, ws://, wss://)
 //! - Cloud bearer JWT supplied as a token via `async_nats::ConnectOptions::token`,
 //!   verified server-side by the NATS auth_callout service
-//! - Name = `amuxd-<device_id[..8]>` for monitoring (matches MQTT client_id)
+//! - Name = `amuxd-<actor_id[..8]>` for monitoring (matches MQTT client_id)
 //!
 //! LWT equivalent: NATS has no LWT, so the daemon explicitly publishes
-//! an `online=false` DeviceState to the JetStream KV retained bucket on
+//! an `online=false` ActorPresence to the JetStream KV retained bucket on
 //! graceful shutdown. Unclean disconnects are detected server-side by the
 //! callout service via NATS connection events (handled outside the daemon).
 
@@ -21,7 +21,7 @@ use tracing::info;
 
 use crate::config::DaemonConfig;
 use crate::mqtt::Topics;
-use crate::proto::amux::DeviceState;
+use crate::proto::amux::ActorPresence;
 
 use super::retained::RetainedKv;
 
@@ -42,7 +42,7 @@ impl NatsBackend {
     ) -> crate::error::Result<Self> {
         let name = format!(
             "amuxd-{}",
-            &config.device.id[..8.min(config.device.id.len())]
+            &config.actor.id[..8.min(config.actor.id.len())]
         );
 
         let raw: Client = ConnectOptions::new()
@@ -57,7 +57,7 @@ impl NatsBackend {
 
         let (client, inbound) = NatsClient::new(raw);
         let team_id = config.team_id.as_deref().unwrap_or("teamclaw");
-        let topics = Topics::new(team_id, &config.device.id);
+        let topics = Topics::new(team_id, &config.actor.id);
 
         Ok(Self {
             client,
@@ -80,14 +80,14 @@ impl NatsBackend {
     /// Publish online state to the retained KV bucket and (legacy parity)
     /// fire-and-forget on the core subject so any non-KV subscribers can
     /// still see it during the migration window.
-    pub async fn announce_online(&self, device_name: &str) -> crate::error::Result<()> {
-        let state = DeviceState {
+    pub async fn announce_online(&self, display_name: &str) -> crate::error::Result<()> {
+        let state = ActorPresence {
             online: true,
-            device_name: device_name.into(),
+            display_name: display_name.into(),
             timestamp: chrono::Utc::now().timestamp(),
         };
         let bytes = state.encode_to_vec();
-        let topic = self.topics.device_state();
+        let topic = self.topics.actor_state();
         self.retained.put(&topic, bytes.clone()).await?;
         self.client
             .publish(&topic, bytes, true, DeliveryGuarantee::AtLeastOnce)
@@ -99,14 +99,14 @@ impl NatsBackend {
     /// shutdown and during JWT-refresh reconnect so other devices see the
     /// presence drop without waiting for the server-side callout to notice
     /// the closed NATS connection.
-    pub async fn announce_offline(&self, device_name: &str) -> crate::error::Result<()> {
-        let state = DeviceState {
+    pub async fn announce_offline(&self, display_name: &str) -> crate::error::Result<()> {
+        let state = ActorPresence {
             online: false,
-            device_name: device_name.into(),
+            display_name: display_name.into(),
             timestamp: chrono::Utc::now().timestamp(),
         };
         let bytes = state.encode_to_vec();
-        let topic = self.topics.device_state();
+        let topic = self.topics.actor_state();
         self.retained.put(&topic, bytes).await?;
         Ok(())
     }

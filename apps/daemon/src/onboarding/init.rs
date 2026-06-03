@@ -1,4 +1,4 @@
-use crate::config::{AgentsConfig, DaemonConfig, DeviceConfig, MqttConfig};
+use crate::config::{AgentsConfig, DaemonConfig, ActorConfig, MqttConfig};
 use crate::onboarding::invite_url::{self, ParsedInvite};
 use crate::provider_config::{CloudApiConfig, ProviderConfig};
 use anyhow::{anyhow, Context, Result};
@@ -20,7 +20,7 @@ pub struct InitOutcome {
 ///  4. write `daemon.toml` if absent (broker_url left empty unless the invite
 ///     carries a `?broker=` override — the daemon resolves it from
 ///     `/v1/config/bootstrap` at startup), or preserve the existing one's
-///     device.id while refreshing team_id
+///     actor.id while refreshing team_id
 pub async fn run(raw_url: &str, config_path: Option<&Path>) -> Result<InitOutcome> {
     let invite = invite_url::parse(raw_url)?;
 
@@ -189,7 +189,7 @@ fn actionable_invite_claim_error(err: anyhow::Error) -> anyhow::Error {
 
 fn default_daemon_config(display_name: &str, actor_id: &str) -> DaemonConfig {
     DaemonConfig {
-        device: DeviceConfig {
+        actor: ActorConfig {
             id: actor_id.to_string(),
             name: display_name.to_string(),
         },
@@ -217,10 +217,10 @@ fn daemon_config_for_invite(
     invite: &ParsedInvite,
 ) -> DaemonConfig {
     let mut daemon_cfg = existing.unwrap_or_else(|| default_daemon_config(display_name, actor_id));
-    // device.id must equal actor_id — the Cloud API access-token hook embeds
-    // ACL rules under `amux/{team}/device/{actor_id}/...`, so any other
+    // actor.id IS the actor_id — the Cloud API access-token hook embeds ACL
+    // rules under the `amux/{team}/{actor}/...` topic namespace, so any other
     // value makes EMQX reject the daemon's CONNECT (LWT topic denied).
-    daemon_cfg.device.id = actor_id.to_string();
+    daemon_cfg.actor.id = actor_id.to_string();
     daemon_cfg.team_id = Some(team_id.to_string());
     // Honor an explicit `?broker=` invite override; otherwise leave empty so the
     // daemon resolves the broker from /v1/config/bootstrap at startup.
@@ -245,8 +245,8 @@ mod tests {
             },
         );
         assert_eq!(cfg.team_id.as_deref(), Some("team-1"));
-        assert_eq!(cfg.device.id, "actor-1");
-        assert_eq!(cfg.device.name, "macmini-5");
+        assert_eq!(cfg.actor.id, "actor-1");
+        assert_eq!(cfg.actor.name, "macmini-5");
         assert_eq!(cfg.mqtt.broker_url, "mqtts://broker.example.com:8883");
     }
 
@@ -268,12 +268,12 @@ mod tests {
     }
 
     #[test]
-    fn existing_device_id_is_replaced_with_actor_id() {
+    fn existing_actor_id_is_replaced_with_claim_actor_id() {
         let cfg = daemon_config_for_invite(
             Some(DaemonConfig {
-                device: DeviceConfig {
-                    id: "stale-device-uuid".into(),
-                    name: "existing-device".into(),
+                actor: ActorConfig {
+                    id: "stale-actor-id".into(),
+                    name: "existing-host".into(),
                 },
                 mqtt: MqttConfig {
                     broker_url: "mqtts://old.example.com:8883".into(),
@@ -295,8 +295,8 @@ mod tests {
                 broker_url: Some("mqtts://broker.example.com:8883".into()),
             },
         );
-        assert_eq!(cfg.device.id, "actor-2");
-        assert_eq!(cfg.device.name, "existing-device");
+        assert_eq!(cfg.actor.id, "actor-2");
+        assert_eq!(cfg.actor.name, "existing-host");
         assert_eq!(cfg.team_id.as_deref(), Some("team-2"));
         assert_eq!(cfg.mqtt.broker_url, "mqtts://broker.example.com:8883");
     }

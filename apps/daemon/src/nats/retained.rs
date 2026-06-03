@@ -1,7 +1,7 @@
 //! JetStream KV-backed replacement for MQTT retained messages.
 //!
 //! NATS core has no retained-message concept. The daemon's retained writes
-//! (device/{id}/state, runtime/{id}/state) instead persist to a JetStream
+//! ({actor}/state, runtime/{id}/state) instead persist to a JetStream
 //! KV bucket called `amux_state`. Subscribers that need the latest value
 //! for a topic read it from KV on (re)connect rather than relying on
 //! broker-side retention.
@@ -99,8 +99,8 @@ mod tests {
     #[test]
     fn key_replaces_slash_with_underscore() {
         assert_eq!(
-            RetainedKv::key("amux/team1/device/dev-a/state"),
-            "amux_team1_device_dev-a_state"
+            RetainedKv::key("amux/team1/actor-a/state"),
+            "amux_team1_actor-a_state"
         );
     }
 }

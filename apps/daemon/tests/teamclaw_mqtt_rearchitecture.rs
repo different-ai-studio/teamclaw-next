@@ -10,12 +10,12 @@ mod proto {
 use topics::Topics;
 
 #[test]
-fn builds_new_device_and_live_topics() {
-    let topics = Topics::new("team1", "dev-a");
+fn builds_new_actor_and_live_topics() {
+    let topics = Topics::new("team1", "actor-a");
 
-    assert_eq!(topics.device_rpc_req(), "amux/team1/device/dev-a/rpc/req");
-    assert_eq!(topics.device_rpc_res(), "amux/team1/device/dev-a/rpc/res");
-    assert_eq!(topics.device_notify(), "amux/team1/device/dev-a/notify");
+    assert_eq!(topics.actor_rpc_req(), "amux/team1/actor-a/rpc/req");
+    assert_eq!(topics.actor_rpc_res(), "amux/team1/actor-a/rpc/res");
+    assert_eq!(topics.actor_notify(), "amux/team1/actor-a/notify");
     assert_eq!(
         topics.session_live("sess-1"),
         "amux/team1/session/sess-1/live"
@@ -23,14 +23,14 @@ fn builds_new_device_and_live_topics() {
 }
 
 #[tokio::test]
-async fn parse_session_live_and_device_notify_topics() {
+async fn parse_session_live_and_actor_notify_topics() {
     let live = rumqttc::Publish::new(
         "amux/team1/session/sess-1/live",
         rumqttc::QoS::AtLeastOnce,
         vec![1, 2, 3],
     );
     let notify = rumqttc::Publish::new(
-        "amux/team1/device/dev-a/notify",
+        "amux/team1/actor-a/notify",
         rumqttc::QoS::AtLeastOnce,
         vec![4, 5, 6],
     );

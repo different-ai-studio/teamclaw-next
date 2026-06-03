@@ -424,7 +424,7 @@ impl DaemonServer {
             Some(crate::teamclaw::SessionManager::new(
                 publisher_handle.clone(),
                 team_id,
-                &config.device.id,
+                &config.actor.id,
                 Some(actor_id.clone()),
                 crate::config::DaemonConfig::config_dir(),
             )?)
@@ -1056,19 +1056,17 @@ impl DaemonServer {
             info!("idle_runtime_timeout_secs unset; idle ACP eviction disabled");
         }
 
-        // Register device_id in the cloud backend once (background).
+        // Advertise supported agent backend types on the cloud `agents` row
+        // once (background). Routing identity is the actor_id; no separate
+        // device-id upsert.
         {
             let sb = self.backend.clone();
-            let device_id = self.config.device.id.clone();
             let supported_agent_types = supported_agent_type_names(&self.config);
             let default_agent_type = supported_agent_types
                 .first()
                 .cloned()
                 .unwrap_or_else(|| "claude".to_string());
             tokio::spawn(async move {
-                if let Err(e) = sb.set_agent_device_id(&device_id).await {
-                    warn!("cloud agents.device_id upsert failed: {e}");
-                }
                 if let Err(e) = sb
                     .ensure_agent_types(&supported_agent_types, &default_agent_type)
                     .await
@@ -1138,7 +1136,7 @@ impl DaemonServer {
                 self.teamclaw = match crate::teamclaw::SessionManager::new(
                     self.publisher_handle.clone(),
                     &team_id,
-                    &self.config.device.id,
+                    &self.config.actor.id,
                     Some(self.actor_id.clone()),
                     crate::config::DaemonConfig::config_dir(),
                 ) {
@@ -1188,19 +1186,19 @@ impl DaemonServer {
                 let publisher =
                     Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
                 if let Err(e) = publisher
-                    .publish_device_state(&crate::proto::amux::DeviceState {
+                    .publish_actor_presence(&crate::proto::amux::ActorPresence {
                         online: true,
-                        device_name: self.config.device.name.clone(),
+                        display_name: self.config.actor.name.clone(),
                         timestamp: chrono::Utc::now().timestamp(),
                     })
                     .await
                 {
-                    warn!("publish_device_state failed after CONNACK: {e}, reconnecting");
+                    warn!("publish_actor_presence failed after CONNACK: {e}, reconnecting");
                     continue 'outer;
                 }
             }
             self.publish_all_agent_states().await;
-            info!(device_id = %self.config.device.id, "MQTT connected, listening for commands");
+            info!(actor_id = %self.config.actor.id, "MQTT connected, listening for commands");
 
             if first_connect {
                 // Drain messages that landed in the cloud backend while the daemon
@@ -1329,9 +1327,9 @@ impl DaemonServer {
                                     let _ = tc.subscribe_all().await;
                                 }
                                 let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
-                                let _ = publisher.publish_device_state(&crate::proto::amux::DeviceState {
+                                let _ = publisher.publish_actor_presence(&crate::proto::amux::ActorPresence {
                                     online: true,
-                                    device_name: self.config.device.name.clone(),
+                                    display_name: self.config.actor.name.clone(),
                                     timestamp: chrono::Utc::now().timestamp(),
                                 }).await;
                                 self.publish_all_agent_states().await;
@@ -1478,7 +1476,7 @@ impl DaemonServer {
                 self.teamclaw = match crate::teamclaw::SessionManager::new(
                     self.publisher_handle.clone(),
                     &team_id,
-                    &self.config.device.id,
+                    &self.config.actor.id,
                     Some(self.actor_id.clone()),
                     crate::config::DaemonConfig::config_dir(),
                 ) {
@@ -1506,14 +1504,14 @@ impl DaemonServer {
                 .nats
                 .as_ref()
                 .unwrap()
-                .announce_online(&self.config.device.name)
+                .announce_online(&self.config.actor.name)
                 .await
             {
                 warn!("nats announce_online failed: {e}, reconnecting");
                 continue 'outer;
             }
             self.publish_all_agent_states().await;
-            info!(device_id = %self.config.device.id, "NATS connected, listening for runtime commands");
+            info!(actor_id = %self.config.actor.id, "NATS connected, listening for runtime commands");
 
             if first_connect {
                 self.auto_restart_offline_sessions().await;
@@ -1552,7 +1550,7 @@ impl DaemonServer {
                     _ = &mut shutdown => {
                         info!("shutdown signal received, draining channels");
                         if let Some(nats) = &self.nats {
-                            let _ = nats.announce_offline(&self.config.device.name).await;
+                            let _ = nats.announce_offline(&self.config.actor.name).await;
                         }
                         self.shutdown_channels().await;
                         let _ = std::fs::remove_file(&sock_path);
@@ -1639,7 +1637,7 @@ impl DaemonServer {
                         // the presence change immediately rather than waiting
                         // for the next online publish.
                         if let Some(nats) = &self.nats {
-                            let _ = nats.announce_offline(&self.config.device.name).await;
+                            let _ = nats.announce_offline(&self.config.actor.name).await;
                         }
                         break;
                     }
@@ -2157,7 +2155,7 @@ impl DaemonServer {
                     };
                     let envelope = amux::Envelope {
                         runtime_id: agent_id.into(),
-                        device_id: self.config.device.id.clone(),
+                        actor_id: self.config.actor.id.clone(),
                         source_peer_id: String::new(),
                         timestamp: chrono::Utc::now().timestamp(),
                         sequence: seq,
@@ -2365,7 +2363,7 @@ impl DaemonServer {
 
         let envelope = amux::Envelope {
             runtime_id: agent_id.into(),
-            device_id: self.config.device.id.clone(),
+            actor_id: self.config.actor.id.clone(),
             source_peer_id: String::new(), // agent-initiated
             timestamp: chrono::Utc::now().timestamp(),
             sequence: seq,
@@ -2901,13 +2899,14 @@ impl DaemonServer {
                 error: "no method".to_string(),
                 requester_client_id: request.requester_client_id.clone(),
                 requester_actor_id: request.requester_actor_id.clone(),
-                requester_device_id: request.requester_device_id.clone(),
                 result: None,
             },
         };
 
-        // Publish response on the sender's rpc/res topic (mirrors RpcServer::respond).
-        let res_topic = self.topics.rpc_res_for(&request.sender_device_id);
+        // Publish response on the requester's rpc/res topic (mirrors
+        // RpcServer::respond). The requester subscribes on its own actor
+        // namespace `amux/{team}/{actor}/rpc/res`.
+        let res_topic = self.topics.rpc_res_for(&request.requester_actor_id);
         let bytes = response.encode_to_vec();
         info!(
             request_id = %request.request_id,
@@ -2952,13 +2951,13 @@ impl DaemonServer {
                 payload,
             } => {
                 let session_title = self.session_title_for_log(&session_id);
-                let daemon_device_id = self.config.device.id.as_str();
+                let daemon_config_actor_id = self.config.actor.id.as_str();
                 let daemon_actor_id = self.actor_id.as_str();
                 let daemon_team_id = self.config.team_id.as_deref().unwrap_or("<none>");
                 info!(
                     session_id = %session_id,
                     session_title = %session_title,
-                    daemon_device_id = %daemon_device_id,
+                    daemon_config_actor_id = %daemon_config_actor_id,
                     daemon_actor_id = %daemon_actor_id,
                     daemon_team_id = %daemon_team_id,
                     payload_bytes = payload.len(),
@@ -2970,7 +2969,7 @@ impl DaemonServer {
                     warn!(
                         session_id = %session_id,
                         session_title = %session_title,
-                        daemon_device_id = %daemon_device_id,
+                        daemon_config_actor_id = %daemon_config_actor_id,
                         daemon_actor_id = %daemon_actor_id,
                         daemon_team_id = %daemon_team_id,
                         err = %e,
@@ -2981,7 +2980,7 @@ impl DaemonServer {
                     info!(
                         session_id = %session_id,
                         session_title = %session_title,
-                        daemon_device_id = %daemon_device_id,
+                        daemon_config_actor_id = %daemon_config_actor_id,
                         daemon_actor_id = %daemon_actor_id,
                         daemon_team_id = %daemon_team_id,
                         event_type = %envelope.event_type,
@@ -2999,7 +2998,7 @@ impl DaemonServer {
                                     warn!(
                                         session_id = %session_id,
                                         session_title = %session_title,
-                                        daemon_device_id = %daemon_device_id,
+                                        daemon_config_actor_id = %daemon_config_actor_id,
                                         daemon_actor_id = %daemon_actor_id,
                                         daemon_team_id = %daemon_team_id,
                                         err = %e,
@@ -3012,7 +3011,7 @@ impl DaemonServer {
                                 warn!(
                                     session_id = %session_id,
                                     session_title = %session_title,
-                                    daemon_device_id = %daemon_device_id,
+                                    daemon_config_actor_id = %daemon_config_actor_id,
                                     daemon_actor_id = %daemon_actor_id,
                                     daemon_team_id = %daemon_team_id,
                                     "SessionMessageEnvelope without inner message; dropping"
@@ -3078,7 +3077,7 @@ impl DaemonServer {
                     }
                 }
             }
-            subscriber::IncomingMessage::TeamclawNotify { device_id, payload } => {
+            subscriber::IncomingMessage::TeamclawNotify { actor_id, payload } => {
                 match crate::proto::teamclaw::Notify::decode(payload.as_slice()) {
                     Ok(n) => {
                         if n.event_type == "membership.refresh" && !n.refresh_hint.is_empty() {
@@ -3098,7 +3097,7 @@ impl DaemonServer {
                                         {
                                             warn!(
                                                 ?err,
-                                                device_id = %device_id,
+                                                actor_id = %actor_id,
                                                 session_id = %n.refresh_hint,
                                                 "failed to ingest cloud session after membership.refresh notify"
                                             );
@@ -3108,7 +3107,7 @@ impl DaemonServer {
                                 Err(err) => {
                                     warn!(
                                         ?err,
-                                        device_id = %device_id,
+                                        actor_id = %actor_id,
                                         session_id = %n.refresh_hint,
                                         "failed to fetch cloud session after membership.refresh notify"
                                     );
@@ -3117,7 +3116,7 @@ impl DaemonServer {
                         }
                     }
                     Err(err) => {
-                        warn!(?err, "failed to decode device/notify payload as Notify");
+                        warn!(?err, "failed to decode actor notify payload as Notify");
                     }
                 }
             }
@@ -3166,10 +3165,10 @@ impl DaemonServer {
         let peer_id = envelope.peer_id.clone();
         let command_id = envelope.command_id.clone();
         let sender_actor_id = envelope.sender_actor_id.clone();
-        let reply_device_id = if envelope.reply_to_device_id.is_empty() {
-            envelope.device_id.clone()
+        let reply_actor_id = if envelope.reply_to_actor_id.is_empty() {
+            envelope.actor_id.clone()
         } else {
-            envelope.reply_to_device_id.clone()
+            envelope.reply_to_actor_id.clone()
         };
 
         let acp_command = match envelope.acp_command {
@@ -3191,7 +3190,7 @@ impl DaemonServer {
         if let Err(reason) = self.permissions.check_command_permission(role, &cmd) {
             warn!(
                 peer_id,
-                reply_device_id = %reply_device_id,
+                reply_actor_id = %reply_actor_id,
                 command_id = %command_id,
                 %reason,
                 "command rejected; legacy collab NACK no longer published"
@@ -3228,7 +3227,7 @@ impl DaemonServer {
                         info!(
                             agent_id = %res.runtime_id,
                             peer_id,
-                            reply_device_id = %reply_device_id,
+                            reply_actor_id = %reply_actor_id,
                             command_id = %command_id,
                             session_id = %res.session_id,
                             "agent started; legacy collab AgentStartResult no longer published"
@@ -3238,7 +3237,7 @@ impl DaemonServer {
                         let reason = err.error_message.clone();
                         error!(
                             peer_id,
-                            reply_device_id = %reply_device_id,
+                            reply_actor_id = %reply_actor_id,
                             command_id = %command_id,
                             session_id = %start.session_id,
                             "startAgent failed: {}; legacy collab AgentStartResult no longer published",
@@ -3695,7 +3694,7 @@ impl DaemonServer {
         // by turn anyway.
         let envelope = amux::Envelope {
             runtime_id: agent_id.into(),
-            device_id: self.config.device.id.clone(),
+            actor_id: self.config.actor.id.clone(),
             source_peer_id: String::new(),
             timestamp: chrono::Utc::now().timestamp(),
             sequence: 0,
@@ -3720,7 +3719,6 @@ impl DaemonServer {
             error: String::new(),
             requester_client_id: request.requester_client_id.clone(),
             requester_actor_id: request.requester_actor_id.clone(),
-            requester_device_id: request.requester_device_id.clone(),
             result: Some(rpc_response::Result::FetchPeersResult(FetchPeersResult {
                 peers,
             })),
@@ -3740,7 +3738,6 @@ impl DaemonServer {
             error: String::new(),
             requester_client_id: request.requester_client_id.clone(),
             requester_actor_id: request.requester_actor_id.clone(),
-            requester_device_id: request.requester_device_id.clone(),
             result: Some(rpc_response::Result::FetchWorkspacesResult(
                 FetchWorkspacesResult { workspaces },
             )),
@@ -3823,7 +3820,6 @@ impl DaemonServer {
             error: error.clone(),
             requester_client_id: request.requester_client_id.clone(),
             requester_actor_id: request.requester_actor_id.clone(),
-            requester_device_id: request.requester_device_id.clone(),
             result: Some(rpc_response::Result::AnnouncePeerResult(
                 AnnouncePeerResult {
                     accepted,
@@ -3854,7 +3850,6 @@ impl DaemonServer {
             error: error.clone(),
             requester_client_id: request.requester_client_id.clone(),
             requester_actor_id: request.requester_actor_id.clone(),
-            requester_device_id: request.requester_device_id.clone(),
             result: Some(rpc_response::Result::DisconnectPeerResult(
                 DisconnectPeerResult { accepted, error },
             )),
@@ -3992,7 +3987,6 @@ impl DaemonServer {
             error: error.clone(),
             requester_client_id: request.requester_client_id.clone(),
             requester_actor_id: request.requester_actor_id.clone(),
-            requester_device_id: request.requester_device_id.clone(),
             result: Some(rpc_response::Result::AddWorkspaceResult(
                 AddWorkspaceResult {
                     accepted,
@@ -4026,7 +4020,6 @@ impl DaemonServer {
             error: error.clone(),
             requester_client_id: request.requester_client_id.clone(),
             requester_actor_id: request.requester_actor_id.clone(),
-            requester_device_id: request.requester_device_id.clone(),
             result: Some(rpc_response::Result::RemoveWorkspaceResult(
                 RemoveWorkspaceResult { accepted, error },
             )),
@@ -4086,7 +4079,6 @@ impl DaemonServer {
             error: error.clone(),
             requester_client_id: request.requester_client_id.clone(),
             requester_actor_id: request.requester_actor_id.clone(),
-            requester_device_id: request.requester_device_id.clone(),
             result: Some(rpc_response::Result::RemoveMemberResult(
                 RemoveMemberResult { accepted, error },
             )),
@@ -4599,7 +4591,6 @@ impl DaemonServer {
             error: String::new(),
             requester_client_id: request.requester_client_id.clone(),
             requester_actor_id: request.requester_actor_id.clone(),
-            requester_device_id: request.requester_device_id.clone(),
             result: Some(rpc_response::Result::RuntimeStopResult(RuntimeStopResult {
                 accepted: true,
                 rejected_reason: String::new(),
@@ -4661,7 +4652,6 @@ impl DaemonServer {
                 error: String::new(),
                 requester_client_id: request.requester_client_id.clone(),
                 requester_actor_id: request.requester_actor_id.clone(),
-                requester_device_id: request.requester_device_id.clone(),
                 result: Some(rpc_response::Result::RuntimeStartResult(
                     RuntimeStartResult {
                         accepted: true,
@@ -4677,7 +4667,6 @@ impl DaemonServer {
                 error: err.error_message.clone(),
                 requester_client_id: request.requester_client_id.clone(),
                 requester_actor_id: request.requester_actor_id.clone(),
-                requester_device_id: request.requester_device_id.clone(),
                 result: Some(rpc_response::Result::RuntimeStartResult(
                     RuntimeStartResult {
                         accepted: false,
@@ -4788,7 +4777,6 @@ impl DaemonServer {
             error: error.clone(),
             requester_client_id: request.requester_client_id.clone(),
             requester_actor_id: request.requester_actor_id.clone(),
-            requester_device_id: request.requester_device_id.clone(),
             result: Some(rpc_response::Result::SetModelResult(SetModelResult {
                 success,
                 error,
@@ -4808,7 +4796,6 @@ fn reject_stop(
         error: reason.to_string(),
         requester_client_id: request.requester_client_id.clone(),
         requester_actor_id: request.requester_actor_id.clone(),
-        requester_device_id: request.requester_device_id.clone(),
         result: Some(rpc_response::Result::RuntimeStopResult(RuntimeStopResult {
             accepted: false,
             rejected_reason: reason.to_string(),
@@ -4827,7 +4814,6 @@ fn reject_set_model(
         error: reason.to_string(),
         requester_client_id: request.requester_client_id.clone(),
         requester_actor_id: request.requester_actor_id.clone(),
-        requester_device_id: request.requester_device_id.clone(),
         result: Some(rpc_response::Result::SetModelResult(SetModelResult {
             success: false,
             error: reason.to_string(),
@@ -4841,7 +4827,7 @@ fn reject_set_model(
 /// descriptions is still not enough, drop commands from the tail.
 ///
 /// The budget is deliberately well under the 10 240-byte broker limit to
-/// leave headroom for the envelope wrapper (device_id, agent_id, sequence,
+/// leave headroom for the envelope wrapper (actor_id, agent_id, sequence,
 /// etc.) and the MQTT topic name / fixed header.
 fn fit_available_commands_in_budget(ac: &mut crate::proto::amux::AcpAvailableCommands) {
     use prost::Message;
@@ -5163,7 +5149,6 @@ fn not_yet_implemented(
         error: format!("{} not yet implemented", method_name),
         requester_client_id: request.requester_client_id.clone(),
         requester_actor_id: request.requester_actor_id.clone(),
-        requester_device_id: request.requester_device_id.clone(),
         result: None,
     }
 }
@@ -5290,9 +5275,9 @@ mod tests {
 
     fn test_config() -> DaemonConfig {
         DaemonConfig {
-            device: crate::config::DeviceConfig {
-                id: "device-test".to_string(),
-                name: "test-device".to_string(),
+            actor: crate::config::ActorConfig {
+                id: "actor-config-test".to_string(),
+                name: "test-host".to_string(),
             },
             mqtt: crate::config::MqttConfig {
                 broker_url: "mqtt://localhost:1883".to_string(),
@@ -5340,14 +5325,14 @@ mod tests {
         assert_eq!(backend.actor_id(), "agent-actor");
     }
 
-    fn test_mqtt(device_id: &str) -> MqttClient {
+    fn test_mqtt(actor_id: &str) -> MqttClient {
         let mut opts = MqttOptions::new("daemon-server-test", "localhost", 1883);
         opts.set_clean_session(true);
         let (client, eventloop) = AsyncClient::new(opts, 10);
         MqttClient {
             client,
             eventloop,
-            topics: crate::mqtt::Topics::new("team-test", device_id),
+            topics: crate::mqtt::Topics::new("team-test", actor_id),
         }
     }
 
@@ -5358,11 +5343,11 @@ mod tests {
     fn test_server_with_cloud_api(backend: Arc<dyn Backend>) -> TestServer {
         let tmp = TempDir::new().unwrap();
         let config = test_config();
-        let mqtt = test_mqtt(&config.device.id);
+        let mqtt = test_mqtt(&config.actor.id);
         let teamclaw = crate::teamclaw::SessionManager::new(
             Arc::new(mqtt.client.clone()) as Arc<dyn MessagePublisher>,
             "team-test",
-            &config.device.id,
+            &config.actor.id,
             Some("agent-actor".to_string()),
             tmp.path().to_path_buf(),
         )
@@ -5547,7 +5532,7 @@ mod tests {
         let logs = capture.text();
         assert!(logs.contains("LiveEventEnvelope decoded"), "{logs}");
         assert!(logs.contains("session_title=Launch Plan"), "{logs}");
-        assert!(logs.contains("daemon_device_id=device-test"), "{logs}");
+        assert!(logs.contains("daemon_config_actor_id=actor-config-test"), "{logs}");
         assert!(logs.contains("daemon_actor_id=agent-actor"), "{logs}");
         assert!(logs.contains("daemon_team_id=team-test"), "{logs}");
     }

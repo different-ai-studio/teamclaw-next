@@ -47,7 +47,7 @@ impl TestClient {
         }
 
         let team_id = config.team_id.as_deref().unwrap_or("teamclaw");
-        let topics = Topics::new(team_id, &config.device.id);
+        let topics = Topics::new(team_id, &config.actor.id);
         let (client, eventloop) = AsyncClient::new(opts, 100);
 
         Ok(Self {
@@ -60,12 +60,12 @@ impl TestClient {
     }
 
     async fn subscribe_all(&self) -> Result<(), rumqttc::ClientError> {
-        let device_id = &self.config.device.id;
+        let actor_id = &self.config.actor.id;
 
         // Subscribe to current topics only. Legacy /status, /peers, /members,
         // /collab, and agent/+/... wildcards were retired in Phase 3.
         self.client
-            .subscribe(self.topics.device_state(), QoS::AtLeastOnce)
+            .subscribe(self.topics.actor_state(), QoS::AtLeastOnce)
             .await?;
         self.client
             .subscribe(self.topics.runtime_state_wildcard(), QoS::AtLeastOnce)
@@ -73,12 +73,12 @@ impl TestClient {
         let team_id = self.config.team_id.as_deref().unwrap_or("teamclaw");
         self.client
             .subscribe(
-                &format!("amux/{}/device/{}/runtime/+/events", team_id, device_id),
+                &format!("amux/{}/{}/runtime/+/events", team_id, actor_id),
                 QoS::AtLeastOnce,
             )
             .await?;
 
-        info!("subscribed to all amux/{}/... topics", device_id);
+        info!("subscribed to all amux/{}/... topics", actor_id);
         Ok(())
     }
 }
@@ -88,8 +88,8 @@ pub async fn run_watch(config: DaemonConfig) -> anyhow::Result<()> {
     tc.subscribe_all().await?;
 
     println!(
-        "📡 Watching MQTT topics for device {}...\n",
-        tc.config.device.id
+        "📡 Watching MQTT topics for actor {}...\n",
+        tc.config.actor.id
     );
 
     loop {
@@ -100,9 +100,9 @@ pub async fn run_watch(config: DaemonConfig) -> anyhow::Result<()> {
                 let retained = if publish.retain { " [retained]" } else { "" };
 
                 // Try to decode based on topic. Only current topics are live:
-                //   device/{id}/state          — DeviceState (retained LWT)
-                //   device/{id}/runtime/{rid}/state   — RuntimeInfo (retained)
-                //   device/{id}/runtime/{rid}/events  — Envelope stream
+                //   {actor}/state          — ActorPresence (retained LWT)
+                //   {actor}/runtime/{rid}/state   — RuntimeInfo (retained)
+                //   {actor}/runtime/{rid}/events  — Envelope stream
                 if topic.ends_with("/events") {
                     match amux::Envelope::decode(payload.as_ref()) {
                         Ok(env) => {
@@ -199,7 +199,7 @@ pub async fn run_watch(config: DaemonConfig) -> anyhow::Result<()> {
                         }
                     }
                 } else if topic.ends_with("/state") {
-                    // Either device/{id}/state (DeviceState) or runtime/{rid}/state (RuntimeInfo).
+                    // Either {actor}/state (ActorPresence) or runtime/{rid}/state (RuntimeInfo).
                     if let Ok(info) = amux::RuntimeInfo::decode(payload.as_ref()) {
                         println!(
                             "📊 {} → RuntimeInfo {{ id={}, status={:?}, worktree=\"{}\" }}{}",
@@ -210,10 +210,10 @@ pub async fn run_watch(config: DaemonConfig) -> anyhow::Result<()> {
                             info.worktree,
                             retained
                         );
-                    } else if let Ok(s) = amux::DeviceState::decode(payload.as_ref()) {
+                    } else if let Ok(s) = amux::ActorPresence::decode(payload.as_ref()) {
                         println!(
-                            "📌 {} → DeviceState {{ online: {}, name: \"{}\" }}{}",
-                            topic, s.online, s.device_name, retained
+                            "📌 {} → ActorPresence {{ online: {}, name: \"{}\" }}{}",
+                            topic, s.online, s.display_name, retained
                         );
                     } else {
                         println!(
@@ -263,12 +263,12 @@ pub async fn run_start_agent(
 
     let envelope = amux::RuntimeCommandEnvelope {
         runtime_id: String::new(), // daemon will assign
-        device_id: tc.config.device.id.clone(),
+        actor_id: tc.config.actor.id.clone(),
         peer_id: tc.peer_id.clone(),
         command_id: Uuid::new_v4().to_string(),
         timestamp: chrono::Utc::now().timestamp(),
         sender_actor_id: String::new(),
-        reply_to_device_id: tc.config.device.id.clone(),
+        reply_to_actor_id: tc.config.actor.id.clone(),
         acp_command: Some(amux::AcpCommand {
             command: Some(amux::acp_command::Command::StartAgent(
                 amux::AcpStartAgent {
@@ -307,9 +307,9 @@ pub async fn run_start_agent(
 
 pub async fn run_announce(_config: DaemonConfig, _token: &str) -> anyhow::Result<()> {
     // The legacy /collab PeerAnnounce flow was retired in Phase 3 — the daemon
-    // no longer subscribes to `device/{id}/collab`. Use the RPC equivalent
-    // (`AuthenticatePeer` on `device/{id}/rpc/req`) from iOS instead.
-    println!("⚠️  `test-client announce` is deprecated: daemon no longer subscribes to device/{{id}}/collab.");
+    // no longer subscribes to `{actor}/collab`. Use the RPC equivalent
+    // (`AuthenticatePeer` on `{actor}/rpc/req`) from iOS instead.
+    println!("⚠️  `test-client announce` is deprecated: daemon no longer subscribes to {{actor}}/collab.");
     println!("    Use the RPC-based authentication flow from the iOS client.");
     Ok(())
 }
@@ -325,9 +325,9 @@ pub async fn run_e2e(
     tc.subscribe_all().await?;
 
     let peer_id = tc.peer_id.clone();
-    let device_id = tc.config.device.id.clone();
+    let actor_id = tc.config.actor.id.clone();
 
-    println!("🚀 E2E test (peer_id={}, device={})\n", peer_id, device_id);
+    println!("🚀 E2E test (peer_id={}, actor={})\n", peer_id, actor_id);
     println!("⚠️  Legacy PeerAnnounce step skipped: daemon no longer accepts /collab.");
     println!("    This run assumes broker-level JWT auth is already established.\n");
 
@@ -350,12 +350,12 @@ pub async fn run_e2e(
     println!("\n--- Phase 2: Start Agent ---");
     let start_cmd = amux::RuntimeCommandEnvelope {
         runtime_id: String::new(),
-        device_id: device_id.clone(),
+        actor_id: actor_id.clone(),
         peer_id: peer_id.clone(),
         command_id: Uuid::new_v4().to_string(),
         timestamp: chrono::Utc::now().timestamp(),
         sender_actor_id: String::new(),
-        reply_to_device_id: device_id.clone(),
+        reply_to_actor_id: actor_id.clone(),
         acp_command: Some(amux::AcpCommand {
             command: Some(amux::acp_command::Command::StartAgent(
                 amux::AcpStartAgent {
@@ -485,10 +485,10 @@ fn print_publish(publish: &rumqttc::Publish) {
                 amux::AgentStatus::try_from(info.status).unwrap_or(amux::AgentStatus::Unknown),
                 retained
             );
-        } else if let Ok(s) = amux::DeviceState::decode(payload.as_ref()) {
+        } else if let Ok(s) = amux::ActorPresence::decode(payload.as_ref()) {
             println!(
-                "📌 DeviceState {{ online: {}, name: \"{}\" }}{}",
-                s.online, s.device_name, retained
+                "📌 ActorPresence {{ online: {}, name: \"{}\" }}{}",
+                s.online, s.display_name, retained
             );
         }
     }

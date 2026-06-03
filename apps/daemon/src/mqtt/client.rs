@@ -5,7 +5,7 @@ use teamclaw_transport::MqttBroker;
 use tracing::{info, warn};
 
 use crate::config::DaemonConfig;
-use crate::proto::amux::DeviceState;
+use crate::proto::amux::ActorPresence;
 
 use super::Topics;
 
@@ -68,7 +68,7 @@ impl MqttClient {
     pub fn new(config: &DaemonConfig, actor_id: &str, token: &str) -> crate::error::Result<Self> {
         let client_id = format!(
             "amuxd-{}",
-            &config.device.id[..8.min(config.device.id.len())]
+            &config.actor.id[..8.min(config.actor.id.len())]
         );
 
         let broker = MqttBroker::parse(&config.mqtt.broker_url);
@@ -100,17 +100,17 @@ impl MqttClient {
 
         // LWT: publish offline status if daemon disconnects unexpectedly
         let team_id = config.team_id.as_deref().unwrap_or("teamclaw");
-        let topics = Topics::new(team_id, &config.device.id);
-        let lwt_payload = DeviceState {
+        let topics = Topics::new(team_id, &config.actor.id);
+        let lwt_payload = ActorPresence {
             online: false,
-            device_name: config.device.name.clone(),
+            display_name: config.actor.name.clone(),
             timestamp: chrono::Utc::now().timestamp(),
         };
-        // Phase 3: LWT now fires on device/{id}/state. Legacy /status topic
-        // has been retired; iOS dual-subscribes during the migration window
-        // and treats offline-on-/state as authoritative (offline-wins merge).
+        // LWT fires on amux/{team}/{actor}/state. Legacy /status topic has
+        // been retired; subscribers treat offline-on-/state as authoritative
+        // (offline-wins merge).
         let lwt = rumqttc::LastWill::new(
-            topics.device_state(),
+            topics.actor_state(),
             lwt_payload.encode_to_vec(),
             QoS::AtLeastOnce,
             true,
@@ -136,15 +136,15 @@ impl MqttClient {
     }
 
     #[allow(dead_code)]
-    pub async fn announce_online(&self, device_name: &str) -> Result<(), rumqttc::ClientError> {
-        let status = DeviceState {
+    pub async fn announce_online(&self, display_name: &str) -> Result<(), rumqttc::ClientError> {
+        let status = ActorPresence {
             online: true,
-            device_name: device_name.into(),
+            display_name: display_name.into(),
             timestamp: chrono::Utc::now().timestamp(),
         };
         self.client
             .publish(
-                self.topics.device_state(),
+                self.topics.actor_state(),
                 QoS::AtLeastOnce,
                 true,
                 status.encode_to_vec(),
@@ -164,11 +164,11 @@ impl MqttClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AgentsConfig, DaemonConfig, DeviceConfig, MqttConfig};
+    use crate::config::{AgentsConfig, DaemonConfig, ActorConfig, MqttConfig};
 
     fn test_config() -> DaemonConfig {
         DaemonConfig {
-            device: DeviceConfig {
+            actor: ActorConfig {
                 id: "abc123defg".into(),
                 name: "test-device".into(),
             },

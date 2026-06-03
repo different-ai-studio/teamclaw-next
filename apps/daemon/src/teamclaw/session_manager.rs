@@ -25,7 +25,7 @@ pub struct SessionManager {
     pub(crate) sessions: TeamclawSessionStore,
     sessions_path: PathBuf,
     pub(crate) config_dir: PathBuf,
-    device_id: String,
+    config_actor_id: String,
     team_id: String,
     actor_id: Option<String>,
     recent_event_keys: HashSet<String>,
@@ -39,15 +39,15 @@ impl SessionManager {
     pub fn new(
         client: Arc<dyn MessagePublisher>,
         team_id: &str,
-        device_id: &str,
+        config_actor_id: &str,
         actor_id: Option<String>,
         config_dir: PathBuf,
     ) -> crate::error::Result<Self> {
-        let topics = Topics::new(team_id, device_id);
+        let topics = Topics::new(team_id, config_actor_id);
         let live_publisher =
-            LivePublisher::new(client.clone(), team_id.to_string(), device_id.to_string());
+            LivePublisher::new(client.clone(), team_id.to_string(), config_actor_id.to_string());
         let notify_publisher = NotifyPublisher::new(client.clone(), team_id.to_string());
-        let rpc_server = RpcServer::new(client.clone(), team_id.to_string(), device_id.to_string());
+        let rpc_server = RpcServer::new(client.clone(), team_id.to_string(), config_actor_id.to_string());
         let sessions_path = TeamclawSessionStore::default_path(&config_dir);
         let sessions = TeamclawSessionStore::load(&sessions_path)?;
 
@@ -60,7 +60,7 @@ impl SessionManager {
             sessions,
             sessions_path,
             config_dir,
-            device_id: device_id.to_string(),
+            config_actor_id: config_actor_id.to_string(),
             team_id: team_id.to_string(),
             actor_id,
             recent_event_keys: HashSet::new(),
@@ -148,7 +148,6 @@ impl SessionManager {
                     error: "method not handled by SessionManager".to_string(),
                     requester_client_id: request.requester_client_id,
                     requester_actor_id: request.requester_actor_id,
-                    requester_device_id: request.requester_device_id,
                     result: None,
                 }
             }
@@ -172,7 +171,7 @@ impl SessionManager {
             created_by: if !r.sender_actor_id.is_empty() {
                 r.sender_actor_id.clone()
             } else {
-                req.sender_device_id.clone()
+                req.requester_actor_id.clone()
             },
             created_at: Utc::now(),
             summary: r.summary.clone(),
@@ -203,7 +202,6 @@ impl SessionManager {
             error: String::new(),
             requester_client_id: String::new(),
             requester_actor_id: String::new(),
-            requester_device_id: String::new(),
             result: session_info.map(|s| teamclaw::rpc_response::Result::SessionInfo(s)),
         }
     }
@@ -220,7 +218,6 @@ impl SessionManager {
                 error: String::new(),
                 requester_client_id: String::new(),
                 requester_actor_id: String::new(),
-                requester_device_id: String::new(),
                 result: Some(teamclaw::rpc_response::Result::SessionInfo(info)),
             },
             None => RpcResponse {
@@ -229,7 +226,6 @@ impl SessionManager {
                 error: format!("session {} not found", r.session_id),
                 requester_client_id: String::new(),
                 requester_actor_id: String::new(),
-                requester_device_id: String::new(),
                 result: None,
             },
         }
@@ -249,7 +245,6 @@ impl SessionManager {
                     error: e.to_string(),
                     requester_client_id: String::new(),
                     requester_actor_id: String::new(),
-                    requester_device_id: String::new(),
                     result: None,
                 };
             }
@@ -272,7 +267,6 @@ impl SessionManager {
             error: String::new(),
             requester_client_id: String::new(),
             requester_actor_id: String::new(),
-            requester_device_id: String::new(),
             result: Some(teamclaw::rpc_response::Result::SessionMessagePage(page)),
         }
     }
@@ -291,7 +285,6 @@ impl SessionManager {
                     error: "missing participant".to_string(),
                     requester_client_id: String::new(),
                     requester_actor_id: String::new(),
-                    requester_device_id: String::new(),
                     result: None,
                 };
             }
@@ -329,7 +322,6 @@ impl SessionManager {
                     error: format!("session {} not found", r.session_id),
                     requester_client_id: String::new(),
                     requester_actor_id: String::new(),
-                    requester_device_id: String::new(),
                     result: None,
                 };
             }
@@ -355,16 +347,16 @@ impl SessionManager {
                 e
             );
         }
-        for target_device_id in
-            self.membership_refresh_targets(&r.session_id, Some(&req.sender_device_id))
+        for target_actor_id in
+            self.membership_refresh_targets(&r.session_id, Some(&req.requester_actor_id))
         {
             if let Err(e) = self
                 .notify_publisher
-                .publish_membership_refresh(&target_device_id, &r.session_id, "participant_joined")
+                .publish_membership_refresh(&target_actor_id, &r.session_id, "participant_joined")
                 .await
             {
                 warn!(
-                    target_device_id = %target_device_id,
+                    target_actor_id = %target_actor_id,
                     "handle_join_session: failed to publish notify event: {}",
                     e
                 );
@@ -380,7 +372,6 @@ impl SessionManager {
             error: String::new(),
             requester_client_id: String::new(),
             requester_actor_id: String::new(),
-            requester_device_id: String::new(),
             result: session_info.map(|s| teamclaw::rpc_response::Result::SessionInfo(s)),
         }
     }
@@ -399,7 +390,6 @@ impl SessionManager {
                     error: "missing participant".to_string(),
                     requester_client_id: String::new(),
                     requester_actor_id: String::new(),
-                    requester_device_id: String::new(),
                     result: None,
                 };
             }
@@ -436,7 +426,6 @@ impl SessionManager {
                     error: format!("session {} not found", r.session_id),
                     requester_client_id: String::new(),
                     requester_actor_id: String::new(),
-                    requester_device_id: String::new(),
                     result: None,
                 };
             }
@@ -462,16 +451,16 @@ impl SessionManager {
                 e
             );
         }
-        for target_device_id in
-            self.membership_refresh_targets(&r.session_id, Some(&req.sender_device_id))
+        for target_actor_id in
+            self.membership_refresh_targets(&r.session_id, Some(&req.requester_actor_id))
         {
             if let Err(e) = self
                 .notify_publisher
-                .publish_membership_refresh(&target_device_id, &r.session_id, "participant_added")
+                .publish_membership_refresh(&target_actor_id, &r.session_id, "participant_added")
                 .await
             {
                 warn!(
-                    target_device_id = %target_device_id,
+                    target_actor_id = %target_actor_id,
                     "handle_add_participant: failed to publish notify event: {}",
                     e
                 );
@@ -487,7 +476,6 @@ impl SessionManager {
             error: String::new(),
             requester_client_id: String::new(),
             requester_actor_id: String::new(),
-            requester_device_id: String::new(),
             result: session_info.map(|s| teamclaw::rpc_response::Result::SessionInfo(s)),
         }
     }
@@ -514,7 +502,6 @@ impl SessionManager {
                     error: format!("session {} not found", r.session_id),
                     requester_client_id: String::new(),
                     requester_actor_id: String::new(),
-                    requester_device_id: String::new(),
                     result: None,
                 };
             }
@@ -543,16 +530,16 @@ impl SessionManager {
                 );
             }
         }
-        for target_device_id in
-            self.membership_refresh_targets(&r.session_id, Some(&req.sender_device_id))
+        for target_actor_id in
+            self.membership_refresh_targets(&r.session_id, Some(&req.requester_actor_id))
         {
             if let Err(e) = self
                 .notify_publisher
-                .publish_membership_refresh(&target_device_id, &r.session_id, "participant_removed")
+                .publish_membership_refresh(&target_actor_id, &r.session_id, "participant_removed")
                 .await
             {
                 warn!(
-                    target_device_id = %target_device_id,
+                    target_actor_id = %target_actor_id,
                     "handle_remove_participant: failed to publish notify event: {}",
                     e
                 );
@@ -568,7 +555,6 @@ impl SessionManager {
             error: String::new(),
             requester_client_id: String::new(),
             requester_actor_id: String::new(),
-            requester_device_id: String::new(),
             result: session_info.map(|s| teamclaw::rpc_response::Result::SessionInfo(s)),
         }
     }
@@ -680,13 +666,12 @@ impl SessionManager {
         r: teamclaw::CreateIdeaRequest,
     ) -> RpcResponse {
         let idea_id = Uuid::new_v4().to_string();
-        // Prefer the sender's actor/member id when the client supplies it.
-        // Older clients that only set sender_device_id still work, they'll
-        // just render as "Unknown" on the current UI.
+        // Prefer the request's `sender_actor_id` when supplied, otherwise
+        // fall back to the RPC envelope's `requester_actor_id`.
         let created_by = if !r.sender_actor_id.is_empty() {
             r.sender_actor_id.clone()
         } else {
-            req.sender_device_id.clone()
+            req.requester_actor_id.clone()
         };
         let stored_item = StoredIdea {
             idea_id: idea_id.clone(),
@@ -713,7 +698,6 @@ impl SessionManager {
                     error: e.to_string(),
                     requester_client_id: String::new(),
                     requester_actor_id: String::new(),
-                    requester_device_id: String::new(),
                     result: None,
                 };
             }
@@ -754,7 +738,6 @@ impl SessionManager {
             error: String::new(),
             requester_client_id: String::new(),
             requester_actor_id: String::new(),
-            requester_device_id: String::new(),
             result: idea.map(|t| teamclaw::rpc_response::Result::Idea(t)),
         }
     }
@@ -774,7 +757,6 @@ impl SessionManager {
                     error: e.to_string(),
                     requester_client_id: String::new(),
                     requester_actor_id: String::new(),
-                    requester_device_id: String::new(),
                     result: None,
                 };
             }
@@ -784,7 +766,7 @@ impl SessionManager {
         let actor_id = if !r.sender_actor_id.is_empty() {
             r.sender_actor_id.clone()
         } else {
-            req.sender_device_id.clone()
+            req.requester_actor_id.clone()
         };
         let claim = StoredClaim {
             claim_id: claim_id.clone(),
@@ -836,7 +818,6 @@ impl SessionManager {
             error: String::new(),
             requester_client_id: String::new(),
             requester_actor_id: String::new(),
-            requester_device_id: String::new(),
             result: Some(teamclaw::rpc_response::Result::Claim(proto_claim)),
         }
     }
@@ -856,7 +837,6 @@ impl SessionManager {
                     error: e.to_string(),
                     requester_client_id: String::new(),
                     requester_actor_id: String::new(),
-                    requester_device_id: String::new(),
                     result: None,
                 };
             }
@@ -866,7 +846,7 @@ impl SessionManager {
         let actor_id = if !r.sender_actor_id.is_empty() {
             r.sender_actor_id.clone()
         } else {
-            req.sender_device_id.clone()
+            req.requester_actor_id.clone()
         };
         let submission = StoredSubmission {
             submission_id: submission_id.clone(),
@@ -927,7 +907,6 @@ impl SessionManager {
             error: String::new(),
             requester_client_id: String::new(),
             requester_actor_id: String::new(),
-            requester_device_id: String::new(),
             result: Some(teamclaw::rpc_response::Result::Submission(proto_submission)),
         }
     }
@@ -952,7 +931,6 @@ impl SessionManager {
                     error: e.to_string(),
                     requester_client_id: String::new(),
                     requester_actor_id: String::new(),
-                    requester_device_id: String::new(),
                     result: None,
                 };
             }
@@ -981,7 +959,6 @@ impl SessionManager {
                     error: format!("idea {} not found", r.idea_id),
                     requester_client_id: String::new(),
                     requester_actor_id: String::new(),
-                    requester_device_id: String::new(),
                     result: None,
                 };
             }
@@ -1004,7 +981,7 @@ impl SessionManager {
                     .publish_idea_event(
                         "idea.updated",
                         &r.session_id,
-                        &req.sender_device_id,
+                        &req.requester_actor_id,
                         &event,
                     )
                     .await
@@ -1030,7 +1007,6 @@ impl SessionManager {
             error: String::new(),
             requester_client_id: String::new(),
             requester_actor_id: String::new(),
-            requester_device_id: String::new(),
             result: idea.map(|t| teamclaw::rpc_response::Result::Idea(t)),
         }
     }
@@ -1431,9 +1407,9 @@ impl SessionManager {
 
     fn base_subscription_topics(&self) -> Vec<String> {
         vec![
-            self.topics.device_rpc_req(),
-            self.topics.device_notify(),
-            self.topics.device_rpc_res(),
+            self.topics.actor_rpc_req(),
+            self.topics.actor_notify(),
+            self.topics.actor_rpc_res(),
         ]
     }
 
@@ -1485,19 +1461,19 @@ impl SessionManager {
     fn membership_refresh_targets(
         &self,
         _session_id: &str,
-        requester_device_id: Option<&str>,
+        requester_actor_id: Option<&str>,
     ) -> Vec<String> {
         let mut targets = Vec::new();
 
-        if let Some(requester_device_id) = requester_device_id {
-            if !requester_device_id.is_empty() && requester_device_id != self.device_id {
-                targets.push(requester_device_id.to_string());
+        if let Some(requester_actor_id) = requester_actor_id {
+            if !requester_actor_id.is_empty() && requester_actor_id != self.config_actor_id {
+                targets.push(requester_actor_id.to_string());
             }
         }
 
         // The current request shapes only identify actors being invited/removed,
-        // not the target device for those actors, so direct invitee targeting
-        // is not possible here without additional membership/device mapping.
+        // not the target actor for those actors, so direct invitee targeting
+        // is not possible here without additional membership/actor mapping.
         targets
     }
 }
@@ -1918,9 +1894,9 @@ mod tests {
 
         let topics = sm.base_subscription_topics();
 
-        assert!(topics.contains(&"amux/team1/device/dev-a/rpc/req".to_string()));
-        assert!(topics.contains(&"amux/team1/device/dev-a/rpc/res".to_string()));
-        assert!(topics.contains(&"amux/team1/device/dev-a/notify".to_string()));
+        assert!(topics.contains(&"amux/team1/dev-a/rpc/req".to_string()));
+        assert!(topics.contains(&"amux/team1/dev-a/rpc/res".to_string()));
+        assert!(topics.contains(&"amux/team1/dev-a/notify".to_string()));
         assert!(!topics.contains(&"amux/team1/sessions".to_string()));
         assert!(!topics
             .iter()

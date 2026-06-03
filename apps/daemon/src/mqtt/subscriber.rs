@@ -6,7 +6,7 @@ use tracing::warn;
 use crate::proto::amux;
 
 pub enum IncomingMessage {
-    // Phase 1a variant: decoded from device/{id}/runtime/+/commands.
+    // Decoded from amux/{team}/{actor}/runtime/+/commands.
     RuntimeCommand {
         runtime_id: String,
         envelope: amux::RuntimeCommandEnvelope,
@@ -16,7 +16,7 @@ pub enum IncomingMessage {
         payload: Vec<u8>,
     },
     TeamclawNotify {
-        device_id: String,
+        actor_id: String,
         payload: Vec<u8>,
     },
     TeamclawSessionLive {
@@ -44,25 +44,23 @@ pub fn parse_frame(frame: &IncomingFrame) -> Option<IncomingMessage> {
         });
     }
 
-    // Team-scoped collaboration topics are matched before device-scoped topics.
-    if topic.starts_with("amux/") && !topic.contains("/device/") {
+    // Team-scoped collaboration live topic: amux/{team}/session/{sid}/live.
+    if topic.starts_with("amux/") {
         let parts: Vec<&str> = topic.split('/').collect();
-        if parts.len() == 5 && parts[2] == "session" {
-            let session_id = parts[3].to_string();
-            if parts[4] == "live" {
-                return Some(IncomingMessage::TeamclawSessionLive {
-                    session_id,
-                    payload: payload.clone(),
-                });
-            }
+        if parts.len() == 5 && parts[2] == "session" && parts[4] == "live" {
+            return Some(IncomingMessage::TeamclawSessionLive {
+                session_id: parts[3].to_string(),
+                payload: payload.clone(),
+            });
         }
     }
 
-    if topic.starts_with("amux/") && topic.contains("/device/") {
+    // Actor notify: amux/{team}/{actor}/notify (4 segments).
+    if topic.starts_with("amux/") && topic.ends_with("/notify") {
         let parts: Vec<&str> = topic.split('/').collect();
-        if parts.len() == 5 && parts[2] == "device" && parts[4] == "notify" {
+        if parts.len() == 4 {
             return Some(IncomingMessage::TeamclawNotify {
-                device_id: parts[3].to_string(),
+                actor_id: parts[2].to_string(),
                 payload: payload.clone(),
             });
         }
@@ -70,10 +68,10 @@ pub fn parse_frame(frame: &IncomingFrame) -> Option<IncomingMessage> {
 
     if topic.contains("/runtime/") && topic.ends_with("/commands") {
         let parts: Vec<&str> = topic.split('/').collect();
-        // amux / {team} / device / {device_id} / runtime / {runtime_id} / commands
-        // = 7 segments
-        if parts.len() == 7 && parts[4] == "runtime" {
-            let runtime_id = parts[5].to_string();
+        // amux / {team} / {actor} / runtime / {runtime_id} / commands
+        // = 6 segments
+        if parts.len() == 6 && parts[3] == "runtime" {
+            let runtime_id = parts[4].to_string();
             match amux::RuntimeCommandEnvelope::decode(payload.as_slice()) {
                 Ok(envelope) => {
                     return Some(IncomingMessage::RuntimeCommand {
@@ -99,11 +97,11 @@ mod tests {
     fn parse_runtime_commands_routes_to_new_variant() {
         let envelope = amux::RuntimeCommandEnvelope {
             runtime_id: "rt1".to_string(),
-            device_id: "dev-a".to_string(),
+            actor_id: "actor-a".to_string(),
             ..Default::default()
         };
         let p = Publish::new(
-            "amux/team1/device/dev-a/runtime/rt1/commands",
+            "amux/team1/actor-a/runtime/rt1/commands",
             rumqttc::QoS::AtLeastOnce,
             envelope.encode_to_vec(),
         );

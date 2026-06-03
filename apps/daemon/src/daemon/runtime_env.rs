@@ -38,8 +38,8 @@ impl DaemonServer {
         crate::runtime::env_assembly::assemble_spawn_runtime_env(
             Path::new(worktree),
             team_id.as_deref(),
-            &self.config.device.id,
-            &self.config.device.name,
+            &self.config.actor.id,
+            &self.config.actor.name,
         )
         .map_err(|e| e.to_string())
     }

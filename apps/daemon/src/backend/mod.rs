@@ -157,9 +157,6 @@ pub trait Backend: Send + Sync {
         default_agent_type: &str,
     ) -> BackendResult<()>;
 
-    /// Record this daemon's MQTT device identifier on its `agents` row.
-    async fn set_agent_device_id(&self, device_id: &str) -> BackendResult<()>;
-
     /// Look up `agent_member_access.permission_level` for a caller.
     /// Returns `Some("admin" | "write" | "view")` or `None`.
     async fn check_agent_permission(
