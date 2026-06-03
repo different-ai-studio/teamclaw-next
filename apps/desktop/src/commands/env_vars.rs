@@ -339,7 +339,7 @@ fn mark_workspace_legacy_migration_complete_best_effort(workspace_path: &str) {
 
 /// Context available to system env var default generators.
 struct SystemEnvVarContext {
-    device_id: String,
+    actor_id: String,
 }
 
 /// How a system env var's default value should be applied on startup.
@@ -347,7 +347,7 @@ struct SystemEnvVarContext {
 pub(crate) enum DefaultPolicy {
     /// Re-derive on every startup; overwrite the stored value if it differs.
     /// Use when the default depends on system state that may change
-    /// (e.g. `tc_api_key` is derived from `device_id`).
+    /// (e.g. `tc_api_key` is derived from `actor_id`).
     RegenerateAlways,
     /// Write the default only when the key is missing from the blob.
     /// Empty user-set values are preserved (treated as "user has decided to leave blank").
@@ -373,12 +373,15 @@ pub(crate) const SYSTEM_ENV_VARS: &[SystemEnvVarDef] = &[SystemEnvVarDef {
     key: "tc_api_key",
     description: "Team LLM API Key",
     default_fn: |ctx| {
-        if ctx.device_id.is_empty() {
+        if ctx.actor_id.is_empty() {
             return None;
         }
-        let id = &ctx.device_id;
-        // 40 chars: matches the LiteLLM virtual key suffix length limit
-        Some(format!("sk-tc-{}", &id[..id.len().min(40)]))
+        // 40 chars: matches the LiteLLM virtual key suffix length limit.
+        // Use char-based truncation so a non-ASCII actor_id can't panic on a
+        // mid-codepoint byte boundary (actor_id is ASCII in practice, but the
+        // type no longer guarantees it the way the old hex device_id did).
+        let suffix: String = ctx.actor_id.chars().take(40).collect();
+        Some(format!("sk-tc-{suffix}"))
     },
     policy: DefaultPolicy::RegenerateAlways,
     shared_default: false,
@@ -794,9 +797,9 @@ pub async fn env_var_resolve(
 /// If a key is missing from the blob, its default value is generated and written.
 /// If a key already has a value (user customized), it is left unchanged.
 /// This must be called on a blocking thread (disk I/O).
-pub(crate) fn ensure_system_env_vars(workspace_path: &str, device_id: &str) -> Result<(), String> {
+pub(crate) fn ensure_system_env_vars(workspace_path: &str, actor_id: &str) -> Result<(), String> {
     let ctx = SystemEnvVarContext {
-        device_id: device_id.to_string(),
+        actor_id: actor_id.to_string(),
     };
     let mut blob = read_env_blob(workspace_path)?;
     let mut json = read_teamclaw_json(workspace_path)?;
@@ -816,7 +819,7 @@ pub(crate) fn ensure_system_env_vars(workspace_path: &str, device_id: &str) -> R
             match def.policy {
                 DefaultPolicy::RegenerateAlways => {
                     // Re-derive on every startup; overwrite if the result differs.
-                    // Used when the default depends on mutable system state (e.g. device_id).
+                    // Used when the default depends on mutable system state (e.g. actor_id).
                     if let Some(new_value) = (def.default_fn)(&ctx) {
                         if existing_value != new_value {
                             if !existing_value.is_empty() {
@@ -853,7 +856,7 @@ pub(crate) fn ensure_system_env_vars(workspace_path: &str, device_id: &str) -> R
         //   - shared_default:                always register (key shows in UI; value lives in shared_secrets).
         //   - SetIfAbsent (local):           always register so the key shows even before a value is set.
         //   - RegenerateAlways (local):      only when the blob holds a non-empty value
-        //                                    (skip when the generator yielded nothing, e.g. device_id not ready).
+        //                                    (skip when the generator yielded nothing, e.g. actor_id not ready).
         let should_index = if def.shared_default {
             true
         } else {

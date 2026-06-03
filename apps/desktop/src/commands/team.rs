@@ -1098,16 +1098,20 @@ async fn team_git_join_impl(
         }
     };
 
-    // 7. Dedup: update existing member or add new
-    let node_id = match crate::commands::device_identity::get_device_id() {
-        Ok(id) => id,
-        Err(e) => {
-            let _ = std::fs::remove_dir_all(&team_dir);
-            return Err(e);
-        }
-    };
+    // 7. Dedup: update existing member or add new.
+    // Member identity is the daemon's actor_id (persisted in ~/.amuxd/backend.toml
+    // at onboarding). The members.json wire field stays `node_id`/`nodeId` (consumed
+    // by FC) but now carries the actor_id value.
+    let actor_id = crate::commands::daemon_http::read_daemon_actor_id();
+    if actor_id.is_empty() {
+        let _ = std::fs::remove_dir_all(&team_dir);
+        return Err(
+            "Daemon actor_id unavailable (daemon not onboarded); cannot add team member"
+                .to_string(),
+        );
+    }
     let now = chrono::Utc::now().to_rfc3339();
-    if let Some(existing) = manifest.members.iter_mut().find(|m| m.node_id == node_id) {
+    if let Some(existing) = manifest.members.iter_mut().find(|m| m.node_id == actor_id) {
         existing.name = member_name.clone();
         existing.platform = std::env::consts::OS.to_string();
         existing.arch = std::env::consts::ARCH.to_string();
@@ -1115,7 +1119,7 @@ async fn team_git_join_impl(
     } else {
         use crate::commands::team_unified::{MemberRole, TeamMember};
         manifest.members.push(TeamMember {
-            node_id: node_id.clone(),
+            node_id: actor_id.clone(),
             name: member_name.clone(),
             role: MemberRole::Editor,
             shortcuts_role: Vec::new(),
@@ -1145,7 +1149,7 @@ async fn team_git_join_impl(
             "user.email",
             &format!(
                 "{}@teamclaw.local",
-                node_id.chars().take(8).collect::<String>()
+                actor_id.chars().take(8).collect::<String>()
             ),
         ],
         &team_dir,
@@ -1229,7 +1233,8 @@ async fn team_git_join_impl(
         let body = serde_json::json!({
             "teamId": team_id,
             "teamSecret": team_secret,
-            "nodeId": node_id,
+            // FC `/ai/add-member` wire field stays `nodeId`; value is the actor_id.
+            "nodeId": actor_id,
             "memberName": member_name,
         });
         println!("[Team Join] Scheduling LiteLLM add-member via FC: {}", url);
