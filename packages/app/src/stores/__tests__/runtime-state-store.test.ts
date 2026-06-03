@@ -31,10 +31,10 @@ afterEach(async () => {
 })
 
 describe('runtime-state-store', () => {
-  it('subscribes to the device/runtime/state wildcard for the team', async () => {
+  it('subscribes to the runtime/state wildcard for the team', async () => {
     const { initRuntimeStateStore } = await import('../runtime-state-store')
     await initRuntimeStateStore('team-1')
-    expect(mockSubscribe).toHaveBeenCalledWith('amux/team-1/device/+/runtime/+/state')
+    expect(mockSubscribe).toHaveBeenCalledWith('amux/team-1/+/runtime/+/state')
   })
 
   it('decodes RuntimeInfo retained messages and upserts into store', async () => {
@@ -50,7 +50,7 @@ describe('runtime-state-store', () => {
       currentModel: 'claude-opus-4-7',
     })
     envelopeHandler!({
-      topic: 'amux/team-1/device/dev-a/runtime/rt-1/state',
+      topic: 'amux/team-1/dev-a/runtime/rt-1/state',
       bytes: Array.from(toBinary(RuntimeInfoSchema, info)),
     })
 
@@ -73,7 +73,7 @@ describe('runtime-state-store', () => {
       availableModels: [{ id: 'opencode/mimo-v2.5-free', displayName: 'Mimo' }],
     })
     envelopeHandler!({
-      topic: 'amux/team-1/device/b3cbc44e-92fc-46c3-a5d1-27fd70bc3d83/runtime/ff679fef/state',
+      topic: 'amux/team-1/b3cbc44e-92fc-46c3-a5d1-27fd70bc3d83/runtime/ff679fef/state',
       bytes: Array.from(toBinary(RuntimeInfoSchema, info)),
     })
 
@@ -98,7 +98,7 @@ describe('runtime-state-store', () => {
 
     const info = create(RuntimeInfoSchema, { runtimeId: 'rt-other' })
     envelopeHandler!({
-      topic: 'amux/team-2/device/dev-x/runtime/rt-other/state',
+      topic: 'amux/team-2/dev-x/runtime/rt-other/state',
       bytes: Array.from(toBinary(RuntimeInfoSchema, info)),
     })
 

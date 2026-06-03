@@ -2002,7 +2002,7 @@
       "managedGit": "Managed Git",
       "managedGitDesc": "Auto-create repo, no Git account needed",
       "modelNamePlaceholder": "Display name",
-      "myDeviceId": "My Device ID",
+      "myDaemonActorId": "My Daemon Actor ID",
       "orManualEntry": "or enter manually",
       "reconnecting": "Connecting to team...",
       "retryConnect": "Retry",

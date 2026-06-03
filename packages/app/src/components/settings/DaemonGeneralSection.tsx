@@ -337,8 +337,6 @@ export function DaemonGeneralSection() {
               <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-6 gap-y-2.5 border-t border-border-soft pt-4 text-[12px]">
                 <dt className="text-muted-foreground">{t('settings.daemonGeneral.agentId', 'Agent ID')}</dt>
                 <dd className="truncate font-mono text-foreground">{agent.id}</dd>
-                <dt className="text-muted-foreground">{t('settings.daemonGeneral.deviceId', 'Device ID')}</dt>
-                <dd className="truncate font-mono text-foreground">{agent.deviceId || '—'}</dd>
                 <dt className="text-muted-foreground">{t('settings.daemonGeneral.lastActive', 'Last active')}</dt>
                 <dd className="font-mono text-ink-2">{formatRelative(agent.lastActiveAt)}</dd>
               </dl>

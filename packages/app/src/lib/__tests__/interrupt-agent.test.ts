@@ -74,7 +74,7 @@ describe("interruptAgentActor", () => {
 
     expect(mqttPublish).toHaveBeenCalledTimes(1);
     const [topic, bytes] = mqttPublish.mock.calls[0] as [string, Uint8Array];
-    expect(topic).toBe("amux/team-1/device/agent-a/runtime/rt-abcd/commands");
+    expect(topic).toBe("amux/team-1/agent-a/runtime/rt-abcd/commands");
 
     const envelope = fromBinary(RuntimeCommandEnvelopeSchema, bytes);
     expect(envelope.acpCommand?.command.case).toBe("cancel");

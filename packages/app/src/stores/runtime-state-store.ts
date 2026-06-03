@@ -78,12 +78,11 @@ export function parseRuntimeStateTopic(
   topic: string
 ): { teamId: string; daemonDeviceId: string; runtimeId: string } | null {
   const parts = topic.split('/')
-  if (parts.length !== 7) return null
+  if (parts.length !== 6) return null
   if (parts[0] !== 'amux') return null
-  if (parts[2] !== 'device') return null
-  if (parts[4] !== 'runtime') return null
-  if (parts[6] !== 'state') return null
-  return { teamId: parts[1], daemonDeviceId: parts[3], runtimeId: parts[5] }
+  if (parts[3] !== 'runtime') return null
+  if (parts[5] !== 'state') return null
+  return { teamId: parts[1], daemonDeviceId: parts[2], runtimeId: parts[4] }
 }
 
 let unlisten: (() => void) | null = null
@@ -94,7 +93,7 @@ export async function initRuntimeStateStore(teamId: string): Promise<void> {
     console.info('[runtime-state] init skipped: already initialized', { teamId })
     return
   }
-  const topic = `amux/${teamId}/device/+/runtime/+/state`
+  const topic = `amux/${teamId}/+/runtime/+/state`
   await mqttSubscribe(topic)
   console.info('[runtime-state] subscribed', { teamId, topic })
   unlisten = await listenForEnvelopes((env: IncomingEnvelope) => {

@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockGetLocalDaemonDeviceId = vi.fn();
+const mockGetLocalDaemonActorId = vi.fn();
 const mockProbeDaemonHttp = vi.fn();
 
 vi.mock("@/lib/daemon-agent-admin", () => ({
-  getLocalDaemonDeviceId: () => mockGetLocalDaemonDeviceId(),
+  getLocalDaemonActorId: () => mockGetLocalDaemonActorId(),
 }));
 
 vi.mock("@/lib/daemon-local-client", () => ({
@@ -18,21 +18,21 @@ vi.mock("@/lib/utils", () => ({
 describe("resolveAgentDevicePresence", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    mockGetLocalDaemonDeviceId.mockReset();
+    mockGetLocalDaemonActorId.mockReset();
     mockProbeDaemonHttp.mockReset();
   });
 
   afterEach(async () => {
     vi.useRealTimers();
-    const { useDevicePresenceStore } = await import("@/stores/device-presence-store");
-    useDevicePresenceStore.setState({ byDeviceId: {} });
+    const { useActorPresenceStore } = await import("@/stores/actor-presence-store");
+    useActorPresenceStore.setState({ byActorId: {} });
   });
 
   it("returns online when MQTT retain is already present", async () => {
     const { resolveAgentDevicePresence } = await import("../ensure-agent-runtime");
-    const { useDevicePresenceStore } = await import("@/stores/device-presence-store");
+    const { useActorPresenceStore } = await import("@/stores/actor-presence-store");
 
-    useDevicePresenceStore.getState().upsert("agent-1", {
+    useActorPresenceStore.getState().upsert("agent-1", {
       online: true,
       deviceName: "b001-agent",
       lastUpdated: Date.now(),
@@ -43,13 +43,13 @@ describe("resolveAgentDevicePresence", () => {
 
   it("waits for MQTT retain before treating presence as unknown", async () => {
     const { resolveAgentDevicePresence } = await import("../ensure-agent-runtime");
-    const { useDevicePresenceStore } = await import("@/stores/device-presence-store");
+    const { useActorPresenceStore } = await import("@/stores/actor-presence-store");
 
-    mockGetLocalDaemonDeviceId.mockResolvedValue(null);
+    mockGetLocalDaemonActorId.mockResolvedValue(null);
 
     const promise = resolveAgentDevicePresence("agent-1", { timeoutMs: 300 });
     await vi.advanceTimersByTimeAsync(100);
-    useDevicePresenceStore.getState().upsert("agent-1", {
+    useActorPresenceStore.getState().upsert("agent-1", {
       online: true,
       deviceName: "b001-agent",
       lastUpdated: Date.now(),
@@ -60,9 +60,9 @@ describe("resolveAgentDevicePresence", () => {
 
   it("returns offline only when MQTT explicitly reports offline", async () => {
     const { resolveAgentDevicePresence } = await import("../ensure-agent-runtime");
-    const { useDevicePresenceStore } = await import("@/stores/device-presence-store");
+    const { useActorPresenceStore } = await import("@/stores/actor-presence-store");
 
-    useDevicePresenceStore.getState().upsert("agent-1", {
+    useActorPresenceStore.getState().upsert("agent-1", {
       online: false,
       deviceName: "b001-agent",
       lastUpdated: Date.now(),
@@ -74,7 +74,7 @@ describe("resolveAgentDevicePresence", () => {
   it("returns unknown when retain is missing and agent is not the local daemon", async () => {
     const { resolveAgentDevicePresence } = await import("../ensure-agent-runtime");
 
-    mockGetLocalDaemonDeviceId.mockResolvedValue("local-device");
+    mockGetLocalDaemonActorId.mockResolvedValue("local-device");
     mockProbeDaemonHttp.mockResolvedValue({ ok: true, reason: null });
 
     await expect(resolveAgentDevicePresence("remote-agent", { timeoutMs: 0 })).resolves.toBe("unknown");
@@ -84,7 +84,7 @@ describe("resolveAgentDevicePresence", () => {
   it("uses local HTTP probe for the desktop daemon when MQTT retain is still missing", async () => {
     const { resolveAgentDevicePresence } = await import("../ensure-agent-runtime");
 
-    mockGetLocalDaemonDeviceId.mockResolvedValue("local-agent");
+    mockGetLocalDaemonActorId.mockResolvedValue("local-agent");
     mockProbeDaemonHttp.mockResolvedValue({ ok: true, reason: null });
 
     await expect(resolveAgentDevicePresence("local-agent", { timeoutMs: 0 })).resolves.toBe("online");

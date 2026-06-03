@@ -21,20 +21,20 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
-  const mod = await import('../device-presence-store')
-  mod.disposeDevicePresenceStore()
+  const mod = await import('../actor-presence-store')
+  mod.disposeActorPresenceStore()
 })
 
-describe('device-presence-store', () => {
-  it('subscribes to the device/state wildcard for the team', async () => {
-    const { initDevicePresenceStore } = await import('../device-presence-store')
-    await initDevicePresenceStore('team-1')
-    expect(mockSubscribe).toHaveBeenCalledWith('amux/team-1/device/+/state')
+describe('actor-presence-store', () => {
+  it('subscribes to the state wildcard for the team', async () => {
+    const { initActorPresenceStore } = await import('../actor-presence-store')
+    await initActorPresenceStore('team-1')
+    expect(mockSubscribe).toHaveBeenCalledWith('amux/team-1/+/state')
   })
 
-  it('decodes DeviceState retains and upserts presence by deviceId', async () => {
-    const { initDevicePresenceStore, useDevicePresenceStore } = await import('../device-presence-store')
-    await initDevicePresenceStore('team-1')
+  it('decodes DeviceState retains and upserts presence by actorId', async () => {
+    const { initActorPresenceStore, useActorPresenceStore } = await import('../actor-presence-store')
+    await initActorPresenceStore('team-1')
 
     const onlineState = create(DeviceStateSchema, {
       online: true,
@@ -42,47 +42,47 @@ describe('device-presence-store', () => {
       timestamp: 1700000000n,
     })
     envelopeHandler!({
-      topic: 'amux/team-1/device/dev-mac/state',
+      topic: 'amux/team-1/actor-mac/state',
       bytes: Array.from(toBinary(DeviceStateSchema, onlineState)),
     })
 
-    const entry = useDevicePresenceStore.getState().byDeviceId['dev-mac']
+    const entry = useActorPresenceStore.getState().byActorId['actor-mac']
     expect(entry).toBeTruthy()
     expect(entry.online).toBe(true)
     expect(entry.deviceName).toBe('Macmini')
   })
 
   it('reflects LWT offline transition', async () => {
-    const { initDevicePresenceStore, useDevicePresenceStore } = await import('../device-presence-store')
-    await initDevicePresenceStore('team-1')
+    const { initActorPresenceStore, useActorPresenceStore } = await import('../actor-presence-store')
+    await initActorPresenceStore('team-1')
 
     const online = create(DeviceStateSchema, { online: true, deviceName: 'Macmini', timestamp: 1n })
     envelopeHandler!({
-      topic: 'amux/team-1/device/dev-mac/state',
+      topic: 'amux/team-1/actor-mac/state',
       bytes: Array.from(toBinary(DeviceStateSchema, online)),
     })
-    expect(useDevicePresenceStore.getState().byDeviceId['dev-mac'].online).toBe(true)
+    expect(useActorPresenceStore.getState().byActorId['actor-mac'].online).toBe(true)
 
     // LWT publish replaces retain with online:false.
     const offline = create(DeviceStateSchema, { online: false, deviceName: 'Macmini', timestamp: 2n })
     envelopeHandler!({
-      topic: 'amux/team-1/device/dev-mac/state',
+      topic: 'amux/team-1/actor-mac/state',
       bytes: Array.from(toBinary(DeviceStateSchema, offline)),
     })
-    expect(useDevicePresenceStore.getState().byDeviceId['dev-mac'].online).toBe(false)
+    expect(useActorPresenceStore.getState().byActorId['actor-mac'].online).toBe(false)
   })
 
   it('ignores envelopes for other teams and malformed topics', async () => {
-    const { initDevicePresenceStore, useDevicePresenceStore } = await import('../device-presence-store')
-    await initDevicePresenceStore('team-1')
+    const { initActorPresenceStore, useActorPresenceStore } = await import('../actor-presence-store')
+    await initActorPresenceStore('team-1')
 
     const state = create(DeviceStateSchema, { online: true })
     envelopeHandler!({
-      topic: 'amux/team-2/device/d2/state',
+      topic: 'amux/team-2/a2/state',
       bytes: Array.from(toBinary(DeviceStateSchema, state)),
     })
     envelopeHandler!({ topic: 'amux/team-1/session/x/live', bytes: [1, 2, 3] })
 
-    expect(Object.keys(useDevicePresenceStore.getState().byDeviceId)).toHaveLength(0)
+    expect(Object.keys(useActorPresenceStore.getState().byActorId)).toHaveLength(0)
   })
 })

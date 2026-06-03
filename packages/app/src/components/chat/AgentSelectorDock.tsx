@@ -465,7 +465,7 @@ function AgentPill({
     // startAgentRuntimesAsync → setModel.
     try {
       const result = await setModel({
-        targetDeviceId: agent.id, // daemon device_id == agent actor_id convention
+        targetActorId: agent.id, // route by the agent's actor_id
         runtimeId: liveRuntimeId,
         modelId: rpcModelId,
       })
@@ -490,7 +490,7 @@ function AgentPill({
           if (!retryRuntimeId || retryRuntimeId === liveRuntimeId) return false
           try {
             await setModel({
-              targetDeviceId: agent.id,
+              targetActorId: agent.id,
               runtimeId: retryRuntimeId,
               modelId: rpcModelId,
             })

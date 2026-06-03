@@ -88,7 +88,7 @@ describe("replyAcpPermission", () => {
     expect(mocks.mqttPublish).toHaveBeenCalledTimes(1);
     const topic = mocks.mqttPublish.mock.calls[0][0] as string;
     expect(topic).toBe(
-      "amux/team-1/device/agent-live/runtime/live-spawn/commands",
+      "amux/team-1/agent-live/runtime/live-spawn/commands",
     );
   });
 });

@@ -438,7 +438,7 @@ describe('SessionActorSheet', () => {
     await waitFor(() => {
         expect(mockRuntimeStart).toHaveBeenCalledWith(
           expect.objectContaining({
-            targetDeviceId: 'a-2',
+            targetActorId: 'a-2',
             workspaceId: 'ws-open',
             worktree: '',
             agentType: AgentType.OPENCODE,

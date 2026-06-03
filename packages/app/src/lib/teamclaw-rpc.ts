@@ -56,10 +56,10 @@ export async function waitForTeamclawRpcReady(timeoutMs = 15_000): Promise<boole
 export async function initTeamclawRpc(teamIdArg: string): Promise<void> {
   if (initialized) return
   teamId = teamIdArg
-  // Daemon publishes RPC responses to `amux/{team}/device/{daemon_device_id}/rpc/res`.
+  // Daemon publishes RPC responses to `amux/{team}/{daemon_actor_id}/rpc/res`.
   // Subscribe with a wildcard so any daemon in the team can answer; we correlate
-  // by request_id inside the response, so the device segment doesn't matter for routing.
-  await mqttSubscribe(`amux/${teamIdArg}/device/+/rpc/res`)
+  // by request_id inside the response, so the actor segment doesn't matter for routing.
+  await mqttSubscribe(`amux/${teamIdArg}/+/rpc/res`)
   unlisten = await listenForEnvelopes(handleEnvelope)
   initialized = true
 }
@@ -82,8 +82,8 @@ export function disposeTeamclawRpc(): void {
 
 function handleEnvelope(env: IncomingEnvelope): void {
   if (!teamId) return
-  // Match `amux/{team}/device/{any}/rpc/res`.
-  const expectedPrefix = `amux/${teamId}/device/`
+  // Match `amux/{team}/{any}/rpc/res`.
+  const expectedPrefix = `amux/${teamId}/`
   const expectedSuffix = `/rpc/res`
   if (!env.topic.startsWith(expectedPrefix) || !env.topic.endsWith(expectedSuffix)) return
   let response: RpcResponse
@@ -109,14 +109,14 @@ function handleEnvelope(env: IncomingEnvelope): void {
 
 async function sendRequest(
   build: (req: RpcRequest) => void,
-  targetDeviceId: string,
+  targetActorId: string,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<RpcResponse> {
   if (!initialized || !teamId) {
     throw new Error('teamclaw-rpc not initialized')
   }
-  if (!targetDeviceId) {
-    throw new Error('teamclaw-rpc: targetDeviceId required')
+  if (!targetActorId) {
+    throw new Error('teamclaw-rpc: targetActorId required')
   }
   const requestId = crypto.randomUUID()
   const session = useAuthStore.getState().session
@@ -140,7 +140,7 @@ async function sendRequest(
 
     pending.set(requestId, { resolve, reject, timer })
 
-    const topic = `amux/${teamId!}/device/${targetDeviceId}/rpc/req`
+    const topic = `amux/${teamId!}/${targetActorId}/rpc/req`
     mqttPublish(topic, toBinary(RpcRequestSchema, req), false).catch((err) => {
       clearTimeout(timer)
       pending.delete(requestId)
@@ -177,7 +177,7 @@ function fetchWorkspacesResponseError(response: RpcResponse): Error | null {
 // ---------------------------------------------------------------------------
 
 export interface FetchWorkspacesArgs {
-  targetDeviceId: string
+  targetActorId: string
   timeoutMs?: number
 }
 
@@ -187,7 +187,7 @@ export async function fetchWorkspaces(args: FetchWorkspacesArgs): Promise<FetchW
       case: 'fetchWorkspaces',
       value: create(FetchWorkspacesRequestSchema, {}),
     }
-  }, args.targetDeviceId, args.timeoutMs)
+  }, args.targetActorId, args.timeoutMs)
 
   const error = fetchWorkspacesResponseError(response)
   if (error) throw error
@@ -199,7 +199,7 @@ export async function fetchWorkspaces(args: FetchWorkspacesArgs): Promise<FetchW
 // ---------------------------------------------------------------------------
 
 export interface AddWorkspaceArgs {
-  targetDeviceId: string
+  targetActorId: string
   path: string
   timeoutMs?: number
 }
@@ -215,7 +215,7 @@ export async function addWorkspace(args: AddWorkspaceArgs): Promise<AddWorkspace
       case: 'addWorkspace',
       value: create(AddWorkspaceRequestSchema, { path }),
     }
-  }, args.targetDeviceId, args.timeoutMs)
+  }, args.targetActorId, args.timeoutMs)
 
   const error = addWorkspaceResponseError(response)
   if (error) throw error
@@ -227,7 +227,7 @@ export async function addWorkspace(args: AddWorkspaceArgs): Promise<AddWorkspace
 // ---------------------------------------------------------------------------
 
 export interface RuntimeStartArgs {
-  targetDeviceId: string    // daemon device_id to route the RPC to
+  targetActorId: string    // daemon actor_id to route the RPC to
   workspaceId: string       // supabase workspace id (or empty for bare spawn)
   worktree: string          // leave empty — target daemon resolves local path from workspaceId
   sessionId: string         // supabase session id
@@ -248,7 +248,7 @@ export async function runtimeStart(args: RuntimeStartArgs): Promise<RuntimeStart
       modelId: args.modelId ?? '',
     })
     req.method = { case: 'runtimeStart', value: start }
-  }, args.targetDeviceId, args.timeoutMs)
+  }, args.targetActorId, args.timeoutMs)
 
   if (!response.success) {
     throw new Error(response.error || 'runtimeStart rejected')
@@ -264,7 +264,7 @@ export async function runtimeStart(args: RuntimeStartArgs): Promise<RuntimeStart
 // ---------------------------------------------------------------------------
 
 export interface RuntimeStopArgs {
-  targetDeviceId: string
+  targetActorId: string
   runtimeId: string
   timeoutMs?: number
 }
@@ -273,7 +273,7 @@ export async function runtimeStop(args: RuntimeStopArgs): Promise<RuntimeStopRes
   const response = await sendRequest((req) => {
     const stop = create(RuntimeStopRequestSchema, { runtimeId: args.runtimeId })
     req.method = { case: 'runtimeStop', value: stop }
-  }, args.targetDeviceId, args.timeoutMs)
+  }, args.targetActorId, args.timeoutMs)
 
   if (!response.success) {
     throw new Error(response.error || 'runtimeStop rejected')
@@ -289,7 +289,7 @@ export async function runtimeStop(args: RuntimeStopArgs): Promise<RuntimeStopRes
 // ---------------------------------------------------------------------------
 
 export interface SetModelArgs {
-  targetDeviceId: string
+  targetActorId: string
   runtimeId: string
   modelId: string
   timeoutMs?: number
@@ -302,7 +302,7 @@ export async function setModel(args: SetModelArgs): Promise<SetModelResult> {
       modelId: args.modelId,
     })
     req.method = { case: 'setModel', value: sm }
-  }, args.targetDeviceId, args.timeoutMs)
+  }, args.targetActorId, args.timeoutMs)
 
   if (!response.success) {
     throw new Error(response.error || 'setModel rejected')

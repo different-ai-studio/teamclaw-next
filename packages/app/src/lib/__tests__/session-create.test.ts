@@ -195,7 +195,7 @@ describe('startAgentRuntimesAsync', () => {
 
     expect(mockRuntimeStart).toHaveBeenCalledWith(
       expect.objectContaining({
-        targetDeviceId: 'agent-1',
+        targetActorId: 'agent-1',
         workspaceId: 'ws-opencode',
         worktree: '',
         agentType: AgentType.OPENCODE,
@@ -218,7 +218,7 @@ describe('startAgentRuntimesAsync', () => {
 
     expect(mockRuntimeStart).toHaveBeenCalledWith(
       expect.objectContaining({
-        targetDeviceId: 'agent-2',
+        targetActorId: 'agent-2',
         workspaceId: '',
         worktree: '',
         agentType: AgentType.CLAUDE_CODE,
@@ -241,7 +241,7 @@ describe('startAgentRuntimesAsync', () => {
 
     expect(mockRuntimeStart).toHaveBeenCalledWith(
       expect.objectContaining({
-        targetDeviceId: 'agent-daemon',
+        targetActorId: 'agent-daemon',
         workspaceId: '',
         worktree: '',
         agentType: AgentType.OPENCODE,
@@ -266,7 +266,7 @@ describe('startAgentRuntimesAsync', () => {
 
     expect(mockRuntimeStart).toHaveBeenCalledWith(
       expect.objectContaining({
-        targetDeviceId: 'agent-3',
+        targetActorId: 'agent-3',
         agentType: AgentType.CODEX,
       }),
     )
@@ -288,7 +288,7 @@ describe('startAgentRuntimesAsync', () => {
 
     expect(mockRuntimeStart).toHaveBeenCalledWith(
       expect.objectContaining({
-        targetDeviceId: 'agent-4',
+        targetActorId: 'agent-4',
         modelId: 'claude-opus-4-7',
       }),
     )
@@ -309,7 +309,7 @@ describe('startAgentRuntimesAsync', () => {
     })
 
     expect(mockSetModel).toHaveBeenCalledWith({
-      targetDeviceId: 'agent-6',
+      targetActorId: 'agent-6',
       runtimeId: 'rt-1',
       modelId: 'opencode/deepseek-v4-flash-free',
     })
@@ -332,7 +332,7 @@ describe('startAgentRuntimesAsync', () => {
 
     expect(mockRuntimeStart).toHaveBeenCalledWith(
       expect.objectContaining({
-        targetDeviceId: 'agent-5',
+        targetActorId: 'agent-5',
         agentType: AgentType.CLAUDE_CODE,
         modelId: 'claude-sonnet-4-6',
       }),
@@ -372,7 +372,7 @@ describe('startAgentRuntimesAsync', () => {
     )
     expect(mockRuntimeStart).toHaveBeenCalledWith(
       expect.objectContaining({
-        targetDeviceId: 'agent-7',
+        targetActorId: 'agent-7',
         workspaceId: 'ws-created',
         agentType: AgentType.CLAUDE_CODE,
       }),
@@ -421,7 +421,7 @@ describe('startAgentRuntimesAsync', () => {
 
     expect(mockRuntimeStart).toHaveBeenCalledWith(
       expect.objectContaining({
-        targetDeviceId: 'agent-8',
+        targetActorId: 'agent-8',
         workspaceId: 'ws-this-session',
         worktree: '',
         agentType: AgentType.OPENCODE,
@@ -444,7 +444,7 @@ describe('startAgentRuntimesAsync', () => {
 
     expect(mockRuntimeStart).toHaveBeenCalledWith(
       expect.objectContaining({
-        targetDeviceId: 'agent-9',
+        targetActorId: 'agent-9',
         workspaceId: 'ws-default',
         worktree: '',
       }),
@@ -468,7 +468,7 @@ describe('startAgentRuntimesAsync', () => {
 
     expect(mockRuntimeStart).toHaveBeenCalledWith(
       expect.objectContaining({
-        targetDeviceId: 'agent-10',
+        targetActorId: 'agent-10',
         workspaceId: 'ws-from-send',
         worktree: '',
       }),
@@ -491,7 +491,7 @@ describe('startAgentRuntimesAsync', () => {
 
     expect(mockEnsureDaemonWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
-        targetDeviceId: 'agent-11',
+        targetActorId: 'agent-11',
         cloudWorkspaceId: 'ws-missing',
       }),
     )
@@ -514,7 +514,7 @@ describe('startAgentRuntimesAsync', () => {
 
     expect(mockRuntimeStart).toHaveBeenCalledWith(
       expect.objectContaining({
-        targetDeviceId: 'agent-12',
+        targetActorId: 'agent-12',
         workspaceId: 'local-ws-1',
         worktree: '',
       }),

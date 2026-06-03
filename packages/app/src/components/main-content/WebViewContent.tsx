@@ -131,13 +131,11 @@ export function WebViewContent({ url: rawUrl }: WebViewContentProps) {
             // Create new native webview
             setIsLoading(true)
 
-            // Device ID is derived from a local persistent key file.
-            let deviceNo: string | undefined
-            try {
-              deviceNo = await invoke<string>("get_persistent_device_id")
-            } catch (err) {
-              console.error("[WebView] get_persistent_device_id failed:", err)
-            }
+            // Identity injection is vestigial now: `window.teamclaw.deviceToken`
+            // is always null and the `get_persistent_device_id` command was
+            // removed. Pass no deviceNo so the native side skips injecting the
+            // (empty) identity script.
+            const deviceNo: string | undefined = undefined
 
             // Device name is purely a display value and must NOT gate injection:
             // prefer cloud profile display name, fall back to hostname, accept empty if unavailable.

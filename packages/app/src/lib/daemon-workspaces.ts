@@ -16,7 +16,6 @@ export interface DaemonWorkspace {
 export interface DaemonAgent {
   id: string
   displayName: string
-  deviceId: string | null
   agentTypes: string[]
   defaultAgentType: string | null
   defaultWorkspaceId: string | null
@@ -49,9 +48,6 @@ export async function listDaemonAgents(teamId: string): Promise<DaemonAgent[]> {
   const connectedIds = connectedRows
     .map((row) => row.agent_id ?? row.id)
     .filter((id: unknown): id is string => typeof id === 'string')
-  const deviceIdByAgentId = new Map(
-    connectedRows.map((row) => [row.agent_id ?? row.id, row.device_id ?? null]),
-  )
 
   if (connectedIds.length === 0) return []
 
@@ -62,7 +58,6 @@ export async function listDaemonAgents(teamId: string): Promise<DaemonAgent[]> {
   return data.map((row) => ({
     id: row.id,
     displayName: row.display_name || row.id,
-    deviceId: deviceIdByAgentId.get(row.id) ?? null,
     agentTypes: normalizeAgentTypes(row.agent_types),
     defaultAgentType: row.default_agent_type ?? null,
     defaultWorkspaceId: row.default_workspace_id ?? null,
@@ -77,7 +72,6 @@ export async function getCurrentDaemonWorkspaceAgent(teamId: string): Promise<Da
   return {
     id: agent.id,
     displayName: agent.displayName,
-    deviceId: agent.deviceId,
     agentTypes: agent.agentTypes,
     defaultAgentType: agent.defaultAgentType,
     defaultWorkspaceId: agent.defaultWorkspaceId,

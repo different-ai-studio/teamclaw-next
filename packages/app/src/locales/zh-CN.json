@@ -2002,7 +2002,7 @@
       "managedGit": "托管 Git",
       "managedGitDesc": "自动创建仓库，无需 Git 账号",
       "modelNamePlaceholder": "显示名称",
-      "myDeviceId": "我的设备 ID",
+      "myDaemonActorId": "我的 Daemon Actor ID",
       "orManualEntry": "或手动输入",
       "reconnecting": "正在连接团队...",
       "retryConnect": "重试",

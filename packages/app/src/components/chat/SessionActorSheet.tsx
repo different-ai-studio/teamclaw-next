@@ -17,7 +17,7 @@ import { syncActorsForTeam } from '@/lib/sync/actor-sync'
 import { syncParticipantsForSession } from '@/lib/sync/session-participant-sync'
 import { cn } from '@/lib/utils'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
-import { useDevicePresenceStore } from '@/stores/device-presence-store'
+import { useActorPresenceStore } from '@/stores/actor-presence-store'
 import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amux_pb'
 import { resolveAmuxAgentType } from '@/lib/amux-agent-type'
 import { useSessionParticipantStore } from '@/stores/session-participant-store'
@@ -228,11 +228,11 @@ function ActorRowView({
   const { t } = useTranslation()
   const isAgent = actor.actor_type === 'agent'
   const initials = actor.display_name?.slice(0, 2).toUpperCase() || ''
-  // For agents, the daemon's device_id == its actor_id, so look up presence
-  // by actor id. `undefined` (no retain yet) ≠ `false` (LWT fired): only the
-  // explicit `false` should suppress the green dot.
-  const agentDeviceOnline = useDevicePresenceStore((s) =>
-    isAgent ? s.byDeviceId[actor.id]?.online : undefined,
+  // For agents, presence is keyed by the agent's actor id. `undefined` (no
+  // retain yet) ≠ `false` (LWT fired): only the explicit `false` should
+  // suppress the green dot.
+  const agentDeviceOnline = useActorPresenceStore((s) =>
+    isAgent ? s.byActorId[actor.id]?.online : undefined,
   )
   const { color: dotColor, breathing } = computeDotStateAndAnimation(actor, runtimeInfo, agentDeviceOnline)
   // For agents, show "<backend type> · <model>" — e.g. "claude · claude-opus-4-7".
@@ -705,7 +705,7 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
       const { runtimeStart } = await import('@/lib/teamclaw-rpc')
       try {
         const result = await runtimeStart({
-          targetDeviceId: candidate.id,
+          targetActorId: candidate.id,
           ...runtimeStartWorkspaceArgs(workspaceId),
           sessionId,
           agentType,

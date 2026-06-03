@@ -121,14 +121,6 @@ export function isTeamMember(obj: unknown): obj is TeamMember {
   )
 }
 
-/** Device info returned by get_device_info Tauri command */
-export interface DeviceInfo {
-  nodeId: string
-  platform: string
-  arch: string
-  hostname: string
-}
-
 // ─── Skill Source Types ────────────────────────────────────────────────────
 
 /** Source badge for a loaded skill */

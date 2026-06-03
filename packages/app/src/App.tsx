@@ -97,7 +97,7 @@ import { startOutboxSender } from "@/services/outbox-sender";
 import { useAcpDebugStore } from "@/stores/acp-debug-store";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { initRuntimeStateStore, disposeRuntimeStateStore } from "@/stores/runtime-state-store";
-import { initDevicePresenceStore, disposeDevicePresenceStore } from "@/stores/device-presence-store";
+import { initActorPresenceStore, disposeActorPresenceStore } from "@/stores/actor-presence-store";
 import { getBackend } from "@/lib/backend";
 import { create as createMessage } from "@bufbuild/protobuf";
 import { MessageSchema, MessageKind, type Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
@@ -1193,8 +1193,8 @@ function AppContent() {
         await initRuntimeStateStore(mqttTeamId);
         console.log('[runtime-state] initialized for team', mqttTeamId);
 
-        // Device presence: subscribe to daemon LWT-backed online/offline state.
-        await initDevicePresenceStore(mqttTeamId);
+        // Actor presence: subscribe to daemon LWT-backed online/offline state.
+        await initActorPresenceStore(mqttTeamId);
         console.log('[device-presence] initialized for team', mqttTeamId);
 
         // Background: sync actor directory into local cache so display-name
@@ -1232,7 +1232,7 @@ function AppContent() {
       }
       disposeTeamclawRpc();
       disposeRuntimeStateStore();
-      disposeDevicePresenceStore();
+      disposeActorPresenceStore();
     };
   }, [mqttAuthKey, userId, mqttTeamId, mqttAccessToken, mqttReconnectNonce]);
 

@@ -13,7 +13,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { formatDate, formatRelativeTime } from '@/lib/date-format'
-import { useDevicePresenceStore } from '@/stores/device-presence-store'
+import { useActorPresenceStore } from '@/stores/actor-presence-store'
 import { useUIStore } from '@/stores/ui'
 import { isActorOnline, type ActorRow } from '@/components/panel/ActorsView'
 import { cn } from '@/lib/utils'
@@ -31,8 +31,8 @@ export function ActorDetailDialog({ actor, onOpenChange }: Props) {
   const displayActor = actor ?? lastActorRef.current
 
   const isAgent = displayActor?.actor_type === 'agent'
-  const agentPresence = useDevicePresenceStore((s) =>
-    displayActor && isAgent ? s.byDeviceId[displayActor.id] : undefined,
+  const agentPresence = useActorPresenceStore((s) =>
+    displayActor && isAgent ? s.byActorId[displayActor.id] : undefined,
   )
 
   if (!displayActor) return null

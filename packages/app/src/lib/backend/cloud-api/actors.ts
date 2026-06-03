@@ -28,7 +28,6 @@ type CloudActor = {
 
 type CloudConnectedAgent = CloudActor & {
   agentId?: string | null;
-  deviceId?: string | null;
   permissionLevel?: string | null;
   isOwner?: boolean | null;
 };
@@ -71,7 +70,6 @@ function mapConnectedAgent(row: CloudConnectedAgent, teamId: string): ConnectedA
   return {
     ...mapActor({ ...row, teamId: row.teamId ?? teamId }),
     agent_id: row.agentId ?? row.id,
-    device_id: row.deviceId ?? null,
     permission_level: row.permissionLevel ?? null,
     // The connected-agents endpoint computes ownership server-side (owner_member_id
     // === caller's team actor). Without forwarding it, the onboarding "bind existing"

@@ -115,7 +115,7 @@ export function TeamGitConfig() {
     () => (workspacePath ? { workspacePath } : {}),
     [workspacePath],
   )
-  const [deviceInfo, setDeviceInfo] = React.useState<{ nodeId: string } | null>(null)
+  const [daemonActorId, setDaemonActorId] = React.useState<string | null>(null)
   const [state, setState] = React.useState<ConnectionState>('loading')
   const [teamConfig, setTeamConfig] = React.useState<TeamConfig | null>(null)
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
@@ -212,10 +212,14 @@ export function TeamGitConfig() {
     }
   }, [state, llmLoaded, workspaceArgs])
 
-  // Load device info when connected
+  // Load the local daemon actor_id when connected (device_id == actor_id; the
+  // legacy get_device_info command was removed).
   React.useEffect(() => {
     if ((state === 'connected' || state === 'syncing') && isTauri()) {
-      tauriInvoke<{ nodeId: string }>('get_device_info').then(setDeviceInfo).catch(() => {})
+      import('@/lib/daemon-agent-admin')
+        .then(({ getLocalDaemonActorId }) => getLocalDaemonActorId())
+        .then(setDaemonActorId)
+        .catch(() => {})
     }
   }, [state])
 
@@ -592,10 +596,10 @@ export function TeamGitConfig() {
                 </div>
               </div>
 
-              {deviceInfo && (
+              {daemonActorId && (
                 <div className="pt-2 border-t">
-                  <p className="text-xs text-muted-foreground mb-1.5">{t('settings.team.myDeviceId', 'My Device ID')}</p>
-                  <DeviceIdDisplay nodeId={deviceInfo.nodeId} />
+                  <p className="text-xs text-muted-foreground mb-1.5">{t('settings.team.myDaemonActorId', 'My Daemon Actor ID')}</p>
+                  <DeviceIdDisplay nodeId={daemonActorId} />
                 </div>
               )}
             </div>

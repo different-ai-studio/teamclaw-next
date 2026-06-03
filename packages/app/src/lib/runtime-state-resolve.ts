@@ -9,8 +9,8 @@ import { useAgentModelPickStore } from "@/stores/agent-model-pick-store";
  * Canonical agent / runtime identity glossary (read before touching this file):
  *
  *   agentActorId   — UUID. The agent's team `actor_id`. Stable forever.
- *                    Used in: @-mentions, RPC `targetDeviceId`, MQTT topic
- *                    `device/{X}/...`, pick store keys.
+ *                    Used in: @-mentions, RPC `targetActorId`, MQTT topic
+ *                    `amux/{team}/{X}/...`, pick store keys.
  *                    By current daemon convention, daemonDeviceId == agentActorId.
  *
  *   runtimeSpawnId — 8-char hex. Assigned by `RuntimeManager` per spawn.
@@ -70,7 +70,7 @@ export function resolveRuntimeStateEntryForAgent(
 }
 
 export type PermissionCommandTarget = {
-  deviceId: string;
+  actorId: string;
   runtimeId: string;
 };
 
@@ -101,13 +101,13 @@ export function resolvePermissionCommandTarget(args: {
       retain?.daemonDeviceId.trim() === trimmedAgent
         ? retain.info.runtimeId?.trim() || sessionRuntimeId
         : sessionRuntimeId;
-    return { deviceId: trimmedAgent, runtimeId };
+    return { actorId: trimmedAgent, runtimeId };
   }
 
   const freshest = resolveRuntimeStateEntryForAgent(trimmedAgent, byRuntimeId, null);
   const runtimeId = freshest?.info.runtimeId?.trim();
   if (runtimeId) {
-    return { deviceId: trimmedAgent, runtimeId };
+    return { actorId: trimmedAgent, runtimeId };
   }
 
   return null;

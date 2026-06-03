@@ -19,7 +19,7 @@ describe("runtime command sender", () => {
     });
 
     await sender.sendPermissionResponse({
-      targetDeviceId: "device-1",
+      targetActorId: "actor-1",
       runtimeId: "rt-abcd",
       requestId: "perm-1",
       granted: true,
@@ -31,12 +31,12 @@ describe("runtime command sender", () => {
       Uint8Array,
       boolean,
     ];
-    expect(topic).toBe("amux/team-1/device/device-1/runtime/rt-abcd/commands");
+    expect(topic).toBe("amux/team-1/actor-1/runtime/rt-abcd/commands");
     expect(retain).toBe(false);
 
     const envelope = fromBinary(RuntimeCommandEnvelopeSchema, bytes);
     expect(envelope.runtimeId).toBe("rt-abcd");
-    expect(envelope.deviceId).toBe("device-1");
+    expect(envelope.deviceId).toBe("actor-1");
     expect(envelope.peerId).toBe("teamclaw-desktop-member-1");
     expect(envelope.commandId).toBe("command-1");
     expect(envelope.timestamp).toBe(1_779_430_400n);
@@ -60,7 +60,7 @@ describe("runtime command sender", () => {
     });
 
     await sender.sendCancel({
-      targetDeviceId: "device-1",
+      targetActorId: "actor-1",
       runtimeId: "rt-abcd",
     });
 
@@ -70,25 +70,25 @@ describe("runtime command sender", () => {
       Uint8Array,
       boolean,
     ];
-    expect(topic).toBe("amux/team-1/device/device-1/runtime/rt-abcd/commands");
+    expect(topic).toBe("amux/team-1/actor-1/runtime/rt-abcd/commands");
     expect(retain).toBe(false);
 
     const envelope = fromBinary(RuntimeCommandEnvelopeSchema, bytes);
     expect(envelope.runtimeId).toBe("rt-abcd");
-    expect(envelope.deviceId).toBe("device-1");
+    expect(envelope.deviceId).toBe("actor-1");
     expect(envelope.commandId).toBe("command-2");
     expect(envelope.acpCommand?.command.case).toBe("cancel");
   });
 });
 
 describe("resolvePermissionRuntimeTarget", () => {
-  it("chooses the requesting agent live runtime and device when available", () => {
+  it("chooses the requesting agent live runtime and actor when available", () => {
     const target = resolvePermissionRuntimeTarget({
       requestingActorId: "agent-2",
       agentParticipantIds: ["agent-1", "agent-2"],
       connectedAgents: [
-        { agentId: "agent-1", deviceId: "device-1" },
-        { agentId: "agent-2", deviceId: "device-2" },
+        { agentId: "agent-1", actorId: "agent-1" },
+        { agentId: "agent-2", actorId: "agent-2" },
       ],
       runtimeInfoByAgentId: new Map([
         ["agent-1", { runtimeId: "rt-1" }],
@@ -99,7 +99,7 @@ describe("resolvePermissionRuntimeTarget", () => {
 
     expect(target).toEqual({
       agentId: "agent-2",
-      deviceId: "device-2",
+      actorId: "agent-2",
       runtimeId: "rt-2",
     });
   });
