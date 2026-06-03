@@ -9,6 +9,10 @@ import {
   handleSyncVersions,
   handleSyncSetMode,
   handleSyncTeamMode,
+  handleSyncUploadPrepareBatch,
+  handleSyncUploadCompleteBatch,
+  handleSyncDownloadBatch,
+  handleSyncDeleteBatch,
 } from './sync-handlers.js';
 import { json } from './admin-handlers.js';
 
@@ -64,6 +68,20 @@ export async function handleSyncRequest({ path, httpMethod, headers, body }: Syn
         break;
       case "/sync/versions":
         result = await handleSyncVersions(auth, body);
+        break;
+      // Batch endpoints — fan-out over the single-item handlers (whole request
+      // is always 200; per-item status lives inside results[]).
+      case "/sync/upload/prepare-batch":
+        result = await handleSyncUploadPrepareBatch(auth, body);
+        break;
+      case "/sync/upload/complete-batch":
+        result = await handleSyncUploadCompleteBatch(auth, body);
+        break;
+      case "/sync/download-batch":
+        result = await handleSyncDownloadBatch(auth, body);
+        break;
+      case "/sync/delete-batch":
+        result = await handleSyncDeleteBatch(auth, body);
         break;
       default:
         result = json(404, { error: "Not found" });
