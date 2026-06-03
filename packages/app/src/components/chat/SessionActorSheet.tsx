@@ -92,7 +92,7 @@ function computeDotStateAndAnimation(
       breathing: false,
     }
   }
-  // Agent. Offline-wins: MQTT DeviceState (LWT-backed) is authoritative for
+  // Agent. Offline-wins: MQTT ActorPresence (LWT-backed) is authoritative for
   // "is the daemon reachable?". An ACTIVE runtime retain can linger on the
   // broker after the daemon dies, so suppress green when device is offline.
   if (agentDeviceOnline === false) {

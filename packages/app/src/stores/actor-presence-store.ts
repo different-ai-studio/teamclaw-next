@@ -1,6 +1,6 @@
 import { create as createZustand } from 'zustand'
 import { fromBinary } from '@bufbuild/protobuf'
-import { DeviceStateSchema } from '@/lib/proto/amux_pb'
+import { ActorPresenceSchema } from '@/lib/proto/amux_pb'
 import { mqttSubscribe, listenForEnvelopes, type IncomingEnvelope } from '@/lib/mqtt-bridge'
 
 // Per-actor presence. Fed by retained `amux/{team}/{actor}/state` publishes —
@@ -15,7 +15,7 @@ import { mqttSubscribe, listenForEnvelopes, type IncomingEnvelope } from '@/lib/
 
 export type ActorPresenceEntry = {
   online: boolean
-  deviceName: string
+  displayName: string
   lastUpdated: number // ms epoch
 }
 
@@ -59,14 +59,14 @@ export async function initActorPresenceStore(teamId: string): Promise<void> {
     if (!parsed) return
     if (parsed.teamId !== teamId) return
     try {
-      const state = fromBinary(DeviceStateSchema, new Uint8Array(env.bytes))
+      const state = fromBinary(ActorPresenceSchema, new Uint8Array(env.bytes))
       useActorPresenceStore.getState().upsert(parsed.actorId, {
         online: state.online,
-        deviceName: state.deviceName,
+        displayName: state.displayName,
         lastUpdated: Date.now(),
       })
     } catch (e) {
-      console.warn('[actor-presence] failed to decode DeviceState', e)
+      console.warn('[actor-presence] failed to decode ActorPresence', e)
     }
   })
   initialized = true

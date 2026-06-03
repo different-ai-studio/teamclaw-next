@@ -34,7 +34,7 @@ describe("resolveAgentDevicePresence", () => {
 
     useActorPresenceStore.getState().upsert("agent-1", {
       online: true,
-      deviceName: "b001-agent",
+      displayName: "b001-agent",
       lastUpdated: Date.now(),
     });
 
@@ -51,7 +51,7 @@ describe("resolveAgentDevicePresence", () => {
     await vi.advanceTimersByTimeAsync(100);
     useActorPresenceStore.getState().upsert("agent-1", {
       online: true,
-      deviceName: "b001-agent",
+      displayName: "b001-agent",
       lastUpdated: Date.now(),
     });
     await vi.runAllTimersAsync();
@@ -64,7 +64,7 @@ describe("resolveAgentDevicePresence", () => {
 
     useActorPresenceStore.getState().upsert("agent-1", {
       online: false,
-      deviceName: "b001-agent",
+      displayName: "b001-agent",
       lastUpdated: Date.now(),
     });
 

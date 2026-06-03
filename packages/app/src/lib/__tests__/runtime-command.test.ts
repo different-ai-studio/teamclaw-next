@@ -36,7 +36,7 @@ describe("runtime command sender", () => {
 
     const envelope = fromBinary(RuntimeCommandEnvelopeSchema, bytes);
     expect(envelope.runtimeId).toBe("rt-abcd");
-    expect(envelope.deviceId).toBe("actor-1");
+    expect(envelope.actorId).toBe("actor-1");
     expect(envelope.peerId).toBe("teamclaw-desktop-member-1");
     expect(envelope.commandId).toBe("command-1");
     expect(envelope.timestamp).toBe(1_779_430_400n);
@@ -75,7 +75,7 @@ describe("runtime command sender", () => {
 
     const envelope = fromBinary(RuntimeCommandEnvelopeSchema, bytes);
     expect(envelope.runtimeId).toBe("rt-abcd");
-    expect(envelope.deviceId).toBe("actor-1");
+    expect(envelope.actorId).toBe("actor-1");
     expect(envelope.commandId).toBe("command-2");
     expect(envelope.acpCommand?.command.case).toBe("cancel");
   });

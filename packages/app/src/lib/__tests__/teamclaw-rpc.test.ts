@@ -58,7 +58,8 @@ describe('teamclaw-rpc', () => {
     const decoded = fromBinary(RpcRequestSchema, bytes)
     const reqId = decoded.requestId
     expect(reqId).toBeTruthy()
-    expect(decoded.senderDeviceId).toBe(decoded.requesterClientId)
+    expect(decoded.requesterActorId).toBe('user-1')
+    expect(decoded.requesterClientId).toMatch(/^teamclaw-user-1-/)
     expect(decoded.method.case).toBe('runtimeStart')
 
     // Simulate matching response

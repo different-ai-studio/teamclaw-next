@@ -17,7 +17,7 @@ export type AgentDevicePresence = "online" | "offline" | "unknown";
 /**
  * Resolve whether an agent's daemon is reachable.
  *
- * MQTT retained DeviceState can arrive slightly after subscribe — `undefined`
+ * MQTT retained ActorPresence can arrive slightly after subscribe — `undefined`
  * in actor-presence-store means "not yet known", not offline (see
  * SessionActorSheet computeDotStateAndAnimation). Only explicit `online:
  * false` (LWT) counts as offline. For the local desktop agent, HTTP probe

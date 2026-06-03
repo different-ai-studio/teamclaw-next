@@ -84,7 +84,7 @@ export function createRuntimeCommandSender(
       const senderActorId = deps.senderActorId?.trim() ?? "";
       const envelope = create(RuntimeCommandEnvelopeSchema, {
         runtimeId,
-        deviceId: targetActorId,
+        actorId: targetActorId,
         peerId,
         commandId: deps.commandId?.() ?? crypto.randomUUID(),
         timestamp: BigInt(Math.floor(deps.nowSeconds?.() ?? Date.now() / 1000)),
@@ -113,7 +113,7 @@ export function createRuntimeCommandSender(
       const senderActorId = deps.senderActorId?.trim() ?? "";
       const envelope = create(RuntimeCommandEnvelopeSchema, {
         runtimeId,
-        deviceId: targetActorId,
+        actorId: targetActorId,
         peerId,
         commandId: deps.commandId?.() ?? crypto.randomUUID(),
         timestamp: BigInt(Math.floor(deps.nowSeconds?.() ?? Date.now() / 1000)),
