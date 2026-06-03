@@ -191,6 +191,38 @@ fn watch_roots(workspaces: &[WatchedWorkspace], home: Option<&Path>) -> Vec<Watc
     roots
 }
 
+async fn record_classified_changes(
+    refresh: &RuntimeRefreshCoordinator,
+    debounce: &mut RefreshDebounce,
+    workspaces: &[WatchedWorkspace],
+    home: Option<&Path>,
+    path: &Path,
+    now: Instant,
+) {
+    for change in classify_change_path(path, workspaces, home) {
+        if !debounce.recordable(&change.workspace_id, change.kind, now) {
+            continue;
+        }
+        if let Err(error) = refresh
+            .record_change(
+                &change.workspace_id,
+                &change.workspace_path,
+                change.kind,
+                RefreshSource::FilesystemWatch,
+            )
+            .await
+        {
+            warn!(
+                workspace_id = %change.workspace_id,
+                workspace_path = %change.workspace_path.display(),
+                changed_path = %path.display(),
+                error = %error,
+                "failed to record filesystem refresh change"
+            );
+        }
+    }
+}
+
 pub fn start_refresh_watchers(
     refresh: std::sync::Arc<RuntimeRefreshCoordinator>,
     workspaces: Vec<WatchedWorkspace>,
@@ -230,28 +262,15 @@ pub fn start_refresh_watchers(
             changed_paths.dedup();
 
             for path in changed_paths {
-                for change in classify_change_path(&path, &workspaces, home.as_deref()) {
-                    if !debounce.recordable(&change.workspace_id, change.kind, Instant::now()) {
-                        continue;
-                    }
-                    if let Err(error) = refresh
-                        .record_change(
-                            &change.workspace_id,
-                            &change.workspace_path,
-                            change.kind,
-                            RefreshSource::FilesystemWatch,
-                        )
-                        .await
-                    {
-                        warn!(
-                            workspace_id = %change.workspace_id,
-                            workspace_path = %change.workspace_path.display(),
-                            changed_path = %path.display(),
-                            error = %error,
-                            "failed to record filesystem refresh change"
-                        );
-                    }
-                }
+                record_classified_changes(
+                    &refresh,
+                    &mut debounce,
+                    &workspaces,
+                    home.as_deref(),
+                    &path,
+                    Instant::now(),
+                )
+                .await;
             }
         }
     });
@@ -271,38 +290,80 @@ mod tests {
     #[test]
     fn skill_path_change_maps_to_skills_kind() {
         let workspaces = vec![watched_workspace("ws-1", "/tmp/ws-1")];
+        let home = Path::new("/Users/tester");
 
-        let changes = classify_change_path(
-            Path::new("/tmp/ws-1/.teamclaw/skills/demo-skill/SKILL.md"),
-            &workspaces,
-            Some(Path::new("/Users/tester")),
-        );
+        let cases = [
+            (
+                Path::new("/tmp/ws-1/.teamclaw/skills/demo-skill/SKILL.md"),
+                RefreshChangeKind::Skills,
+            ),
+            (
+                Path::new("/tmp/ws-1/.opencode/skills/demo-skill/SKILL.md"),
+                RefreshChangeKind::Skills,
+            ),
+            (
+                Path::new("/Users/tester/.config/teamclaw/skills/global-skill/SKILL.md"),
+                RefreshChangeKind::Skills,
+            ),
+            (
+                Path::new("/Users/tester/.config/opencode/skills/global-skill/SKILL.md"),
+                RefreshChangeKind::Skills,
+            ),
+            (
+                Path::new("/tmp/ws-1/opencode.json"),
+                RefreshChangeKind::OpencodeJson,
+            ),
+        ];
 
-        assert_eq!(
-            changes,
-            vec![ClassifiedChange {
-                workspace_id: "ws-1".to_string(),
-                workspace_path: PathBuf::from("/tmp/ws-1"),
-                kind: RefreshChangeKind::Skills,
-            }]
-        );
+        for (path, kind) in cases {
+            let changes = classify_change_path(path, &workspaces, Some(home));
+            assert_eq!(
+                changes,
+                vec![ClassifiedChange {
+                    workspace_id: "ws-1".to_string(),
+                    workspace_path: PathBuf::from("/tmp/ws-1"),
+                    kind,
+                }],
+                "path {} should classify to {:?}",
+                path.display(),
+                kind
+            );
+        }
     }
 
-    #[test]
-    fn burst_events_are_debounced_into_one_recorded_change() {
+    #[tokio::test]
+    async fn burst_events_are_debounced_into_one_recorded_change() {
+        let coordinator = RuntimeRefreshCoordinator::new();
+        let workspaces = vec![watched_workspace("ws-1", "/tmp/ws-1")];
         let mut debounce = RefreshDebounce::new(Duration::from_millis(250));
         let now = Instant::now();
+        let path = Path::new("/tmp/ws-1/.teamclaw/skills/demo-skill/SKILL.md");
 
-        assert!(debounce.recordable("ws-1", RefreshChangeKind::Skills, now));
-        assert!(!debounce.recordable(
-            "ws-1",
-            RefreshChangeKind::Skills,
-            now + Duration::from_millis(50)
-        ));
-        assert!(debounce.recordable(
-            "ws-1",
-            RefreshChangeKind::Skills,
-            now + Duration::from_millis(300)
-        ));
+        record_classified_changes(&coordinator, &mut debounce, &workspaces, None, path, now).await;
+        record_classified_changes(
+            &coordinator,
+            &mut debounce,
+            &workspaces,
+            None,
+            path,
+            now + Duration::from_millis(50),
+        )
+        .await;
+        record_classified_changes(
+            &coordinator,
+            &mut debounce,
+            &workspaces,
+            None,
+            path,
+            now + Duration::from_millis(100),
+        )
+        .await;
+
+        let state = coordinator.workspace_state("ws-1").await.unwrap();
+        assert_eq!(state.revision, 1);
+        assert_eq!(state.change_kinds.len(), 1);
+        assert!(state.change_kinds.contains(&RefreshChangeKind::Skills));
+        assert_eq!(state.sources.len(), 1);
+        assert!(state.sources.contains(&RefreshSource::FilesystemWatch));
     }
 }
