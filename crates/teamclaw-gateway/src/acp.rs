@@ -13,12 +13,13 @@ pub struct ModelInfo {
 }
 
 /// A slash command advertised by the ACP agent via `AcpAvailableCommands`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AcpAvailableCommand {
     pub name: String,
     pub description: String,
-    /// Non-empty means the command accepts free-form text input.
-    pub input_hint: String,
+    /// `None` means the command takes no input; `Some(hint)` means the command
+    /// accepts free-form text input described by the hint string.
+    pub input_hint: Option<String>,
 }
 
 /// Outcome of a single ACP turn driven by a gateway message.
@@ -26,6 +27,21 @@ pub struct AcpAvailableCommand {
 pub struct AcpTurnOutcome {
     pub reply_text: String,
     pub completed: bool,
+}
+
+/// Agent type entry returned by `list_agents`.
+#[derive(Debug, Clone)]
+pub struct AgentInfo {
+    pub agent_type: String,
+    pub is_current: bool,
+}
+
+/// Workspace entry returned by `list_workspaces`.
+#[derive(Debug, Clone)]
+pub struct WorkspaceInfo {
+    pub workspace_id: String,
+    pub display_name: String,
+    pub is_current: bool,
 }
 
 /// Abstraction over amuxd's in-process ACP runtime. Channels call this
@@ -100,17 +116,17 @@ pub trait AcpHandle: Send + Sync + 'static {
     /// daemon restart). Returns `(session_id, is_current)` pairs.
     async fn list_sessions(
         &self,
-        current: &AmuxSessionId,
+        active_session: &AmuxSessionId,
     ) -> Result<Vec<(AmuxSessionId, bool)>, AcpError>;
 
-    /// List available agent types. Returns `(type_name, is_current)` pairs.
+    /// List available agent types.
     async fn list_agents(
         &self,
         session: &AmuxSessionId,
-    ) -> Result<Vec<(String, bool)>, AcpError>;
+    ) -> Result<Vec<AgentInfo>, AcpError>;
 
-    /// Set agent type for this session. Resets the runtime — conversation
-    /// context is lost (same semantics as `set_model`).
+    /// Set agent type for this session. Restarts the underlying agent —
+    /// conversation context is lost (same semantics as `set_model`).
     async fn set_agent(
         &self,
         session: &AmuxSessionId,
@@ -118,13 +134,13 @@ pub trait AcpHandle: Send + Sync + 'static {
     ) -> Result<(), AcpError>;
 
     /// List workspaces known to the daemon.
-    /// Returns `(workspace_id, display_name, is_current)` triples.
     async fn list_workspaces(
         &self,
         session: &AmuxSessionId,
-    ) -> Result<Vec<(String, String, bool)>, AcpError>;
+    ) -> Result<Vec<WorkspaceInfo>, AcpError>;
 
-    /// Set workspace for this session. Resets the runtime.
+    /// Set workspace for this session. Restarts the underlying agent —
+    /// conversation context is lost (same semantics as `set_model`).
     async fn set_workspace(
         &self,
         session: &AmuxSessionId,
@@ -140,4 +156,6 @@ pub enum AcpError {
     Send(String),
     #[error("acp turn timed out")]
     Timeout,
+    #[error("not found: {0}")]
+    NotFound(String),
 }
