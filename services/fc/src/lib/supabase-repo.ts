@@ -1451,7 +1451,17 @@ export function createSupabaseBusinessRepository(options) {
         .eq("acp_session_id", acpSessionId)
         .maybeSingle();
       if (error) throw error;
-      return data ? mapSessionFull(data) : null;
+      if (!data) return null;
+      // The amuxd daemon (get_gateway_session_by_acp_id) deserializes this into
+      // { sessionId: required String, gatewaySessionId: Option<String> } and
+      // uses gatewaySessionId as the chat binding for the per-session MCP
+      // config. mapSessionFull alone exposes `id`/`binding` (not the camelCase
+      // names the daemon expects), so surface both explicitly.
+      return {
+        ...mapSessionFull(data),
+        sessionId: data.id,
+        gatewaySessionId: data.binding ?? null,
+      };
     },
 
     async ensureGatewaySession(input) {
@@ -1466,9 +1476,17 @@ export function createSupabaseBusinessRepository(options) {
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
       if (!row) throw new ApiError(502, "upstream_unavailable", "ensure_gateway_session returned no row");
+      const acpSessionId = row.acp_session_id ?? row.acpSessionId ?? null;
       return {
         sessionId: row.session_id ?? row.sessionId ?? null,
-        acpSessionId: row.acp_session_id ?? row.acpSessionId ?? null,
+        // The amuxd daemon deserializes `gatewaySessionId` as a REQUIRED field
+        // and uses it as the logical ACP session id it later looks up via
+        // getSessionByAcp (which queries the acp_session_id column) — so it must
+        // equal acp_session_id to round-trip. Omitting it made WeCom inbound
+        // messages fail with "missing field gatewaySessionId". The pg-repo
+        // backend already returns this field; this keeps the two in lockstep.
+        gatewaySessionId: acpSessionId,
+        acpSessionId,
         created: row.created === true,
       };
     },
