@@ -23,6 +23,11 @@ import {
 import { FileMentionPopover } from "./FileMentionPopover";
 import { MentionPopover } from "./MentionPopover";
 import { AgentSelectorDock } from "./AgentSelectorDock";
+import { EngagedAgentOfflineBanner } from "./EngagedAgentOfflineBanner";
+import { OfflineSendConfirmDialog } from "./OfflineSendConfirmDialog";
+import type { EngagedAgentUiEntry } from "@/hooks/use-engaged-agent-ui-states";
+import { allEngagedNonReady } from "@/hooks/use-engaged-agent-ui-states";
+import { useOfflineSendPreferenceStore } from "@/stores/offline-send-preference-store";
 import {
   StreamingAgentsBar,
   type ActiveStreamingAgent,
@@ -159,6 +164,11 @@ interface ChatInputAreaProps {
   bottomOffsetPx?: number;
   headerContent?: React.ReactNode;
   engagedAgents: AttachedAgent[];
+  engagedUiEntries?: EngagedAgentUiEntry[];
+  agentToRuntimeId?: Map<string, string>;
+  agentToBackendType?: Map<string, string>;
+  localDaemonAgent?: AttachedAgent | null;
+  onSwitchToLocalAgent?: (agent: AttachedAgent) => void;
   onEngageAgent: (agent: AttachedAgent) => void;
   onRemoveAgent: (agentId: string) => void;
   activeStreamingAgents?: ReadonlyArray<ActiveStreamingAgent>;
@@ -189,6 +199,11 @@ export function ChatInputArea({
   bottomOffsetPx = 0,
   headerContent,
   engagedAgents = [],
+  engagedUiEntries = [],
+  agentToRuntimeId = new Map(),
+  agentToBackendType = new Map(),
+  localDaemonAgent = null,
+  onSwitchToLocalAgent,
   onEngageAgent = () => {},
   onRemoveAgent = () => {},
   activeStreamingAgents = [],
@@ -252,10 +267,43 @@ export function ChatInputArea({
     };
   }, [imagePreviewUrls]);
 
-  // v2: Plan mode removed. Forward submit unchanged.
-  const handleSubmit = React.useCallback((message: PromptInputMessage) => {
-    onSubmit(message);
-  }, [onSubmit]);
+  const [offlineConfirmOpen, setOfflineConfirmOpen] = React.useState(false);
+  const [pendingSubmitMessage, setPendingSubmitMessage] =
+    React.useState<PromptInputMessage | null>(null);
+  const [dismissConfirmChecked, setDismissConfirmChecked] = React.useState(false);
+  const offlineDismissed = useOfflineSendPreferenceStore((s) =>
+    activeSessionId ? !!s.dismissedBySession[activeSessionId] : false,
+  );
+
+  const flushSubmit = React.useCallback(
+    (message: PromptInputMessage) => {
+      if (dismissConfirmChecked && activeSessionId) {
+        useOfflineSendPreferenceStore.getState().dismissForSession(activeSessionId);
+      }
+      setOfflineConfirmOpen(false);
+      setPendingSubmitMessage(null);
+      setDismissConfirmChecked(false);
+      onSubmit(message);
+    },
+    [onSubmit, dismissConfirmChecked, activeSessionId],
+  );
+
+  const handleSubmit = React.useCallback(
+    (message: PromptInputMessage) => {
+      const needsConfirm =
+        engagedUiEntries.length > 0 &&
+        allEngagedNonReady(engagedUiEntries) &&
+        activeSessionId &&
+        !offlineDismissed;
+      if (needsConfirm) {
+        setPendingSubmitMessage(message);
+        setOfflineConfirmOpen(true);
+        return;
+      }
+      onSubmit(message);
+    },
+    [onSubmit, engagedUiEntries, activeSessionId, offlineDismissed],
+  );
 
   // Measure height and report to parent via ResizeObserver
   // Round to nearest integer to prevent sub-pixel oscillation feedback loops
@@ -450,6 +498,15 @@ export function ChatInputArea({
             </div>
           )}
 
+          {engagedUiEntries.length > 0 ? (
+            <EngagedAgentOfflineBanner
+              entries={engagedUiEntries}
+              localDaemonAgent={localDaemonAgent}
+              onRemoveAgent={onRemoveAgent}
+              onSwitchToLocalAgent={onSwitchToLocalAgent}
+            />
+          ) : null}
+
           <PromptInputBody>
             <PromptInputTextarea
               placeholder={
@@ -494,6 +551,9 @@ export function ChatInputArea({
               <AgentSelectorDock
                 activeSessionId={activeSessionId}
                 engagedAgents={engagedAgents}
+                engagedUiEntries={engagedUiEntries}
+                agentToRuntimeId={agentToRuntimeId}
+                agentToBackendType={agentToBackendType}
                 onRemoveAgent={onRemoveAgent}
               />
             </PromptInputTools>
@@ -514,6 +574,20 @@ export function ChatInputArea({
             </div>
           </PromptInputFooter>
           </PromptInput>
+
+          <OfflineSendConfirmDialog
+            open={offlineConfirmOpen}
+            onOpenChange={(open) => {
+              setOfflineConfirmOpen(open);
+              if (!open) setPendingSubmitMessage(null);
+            }}
+            entries={engagedUiEntries}
+            dismissForSession={dismissConfirmChecked}
+            onDismissForSessionChange={setDismissConfirmChecked}
+            onConfirm={() => {
+              if (pendingSubmitMessage) flushSubmit(pendingSubmitMessage);
+            }}
+          />
         </div>
       </div>
     </div>

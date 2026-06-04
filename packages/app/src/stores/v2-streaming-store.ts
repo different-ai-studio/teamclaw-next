@@ -1,4 +1,8 @@
 import { create } from "zustand";
+import {
+  agentReplyTextsEquivalent,
+  pickCanonicalAgentReplyText,
+} from "@/lib/agent-reply-text";
 import type { MessagePart, ToolCall } from "@/stores/session-types";
 import { toolNameFromKind } from "@/components/chat/tool-calls/tool-call-utils";
 
@@ -284,7 +288,13 @@ function placePostToolTextPart(parts: MessagePart[], text: string): MessagePart[
   if (existingTextIndex !== -1) {
     const existing = parts[existingTextIndex];
     const existingText = existing.text || existing.content || "";
-    if (existingText === text || existingText.includes(text)) return parts;
+    if (
+      existingText === text ||
+      existingText.includes(text) ||
+      agentReplyTextsEquivalent(existingText, text)
+    ) {
+      return parts;
+    }
     if (text.includes(existingText)) {
       return parts.map((part, index) =>
         index === existingTextIndex ? replacePartText(part, text) : part,
@@ -435,6 +445,20 @@ function mergeToolUse(
   };
 }
 
+function reconcileEquivalentPreviewParts(
+  parts: MessagePart[],
+  outputText: string,
+): MessagePart[] {
+  if (parts.some((part) => part.type === "tool-call")) {
+    return replacePostToolTextPart(parts, outputText);
+  }
+  const lastTextIndex = lastIndexWhere(parts, (part) => part.type === "text");
+  if (lastTextIndex === -1) return appendTextPart(parts, outputText);
+  return parts.map((part, index) =>
+    index === lastTextIndex ? replacePartText(part, outputText) : part,
+  );
+}
+
 function previewTextUpdate(
   entry: AgentStreamEntry,
   text: string,
@@ -445,11 +469,26 @@ function previewTextUpdate(
   if (!text) {
     return { outputText: current, parts };
   }
-  if (text === current || current.includes(text)) {
-    return { outputText: current || text, parts };
+  if (
+    text === current ||
+    current.includes(text) ||
+    agentReplyTextsEquivalent(current, text)
+  ) {
+    const outputText = pickCanonicalAgentReplyText(current, text);
+    if (outputText === current) return { outputText: current, parts };
+    return {
+      outputText,
+      parts: reconcileEquivalentPreviewParts(parts, outputText),
+    };
   }
   if (text.startsWith(current)) {
     const suffix = text.slice(current.length);
+    if (!suffix || agentReplyTextsEquivalent(current, text)) {
+      return {
+        outputText: text,
+        parts: reconcileEquivalentPreviewParts(parts, text),
+      };
+    }
     return {
       outputText: text,
       parts: suffix ? appendTextPart(parts, suffix) : parts,

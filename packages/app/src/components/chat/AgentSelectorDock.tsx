@@ -11,11 +11,9 @@ import {
   CommandList,
   CommandSeparator,
 } from '@/components/ui/command'
-import { getBackend } from '@/lib/backend'
 import { useRuntimeStateStore } from '@/stores/runtime-state-store'
-import { useCurrentTeamStore } from '@/stores/current-team'
-import { useSessionListStore } from '@/stores/session-list-store'
 import { setModel } from '@/lib/teamclaw-rpc'
+import { resolveAgentAvailableModels } from '@/lib/agent-available-models'
 import { sessionFlowError, sessionFlowLog } from '@/lib/session-flow-log'
 import { RuntimeLifecycle, AgentStatus, type RuntimeInfo } from '@/lib/proto/amux_pb'
 import {
@@ -31,6 +29,12 @@ import { useAgentModelPickStore } from '@/stores/agent-model-pick-store'
 import { useSessionSelectionStore } from '@/stores/session-selection-store'
 import { cn } from '@/lib/utils'
 import type { AttachedAgent } from '@/packages/ai/prompt-input-insert-hooks'
+import type { EngagedAgentUiEntry } from '@/hooks/use-engaged-agent-ui-states'
+import type { SessionAgentUiState } from '@/lib/session-agent-ui-state'
+import {
+  dotClassesForUiState,
+  pillSuffixForUiState,
+} from '@/components/chat/EngagedAgentOfflineBanner'
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -41,26 +45,17 @@ interface AgentSelectorDockProps {
   activeSessionId: string | null
   /** All agents currently @-mentioned for the active session — one pill each. */
   engagedAgents: AttachedAgent[]
+  /** Precomputed in ChatPanel — shared with banner / send confirm. */
+  engagedUiEntries: EngagedAgentUiEntry[]
+  agentToRuntimeId: Map<string, string>
+  agentToBackendType: Map<string, string>
   /** Remove a single agent (clicked the X on the chip / "Remove" in dropdown). */
   onRemoveAgent: (agentId: string) => void
 }
 
 type AgentModelOption = { id: string; displayName: string }
 
-/** Daemon ACP `RuntimeInfo.available_models` only — no provider store or static fallback. */
-export function resolveAgentAvailableModels(
-  runtimeInfo: RuntimeInfo | undefined,
-): AgentModelOption[] {
-  if (!runtimeInfo?.availableModels.length) return []
-
-  const seen = new Set<string>()
-  return runtimeInfo.availableModels.filter((model) => {
-    const id = model.id?.trim()
-    if (!id || seen.has(id)) return false
-    seen.add(id)
-    return true
-  })
-}
+export { resolveAgentAvailableModels } from '@/lib/agent-available-models'
 
 /** Gray = waiting for init / unknown. Green = idle. Red = active or errored. */
 function dotClasses(info: RuntimeInfo | undefined): { color: string; pulse: boolean } {
@@ -91,188 +86,16 @@ function dotClasses(info: RuntimeInfo | undefined): { color: string; pulse: bool
 export function AgentSelectorDock({
   activeSessionId,
   engagedAgents,
+  engagedUiEntries,
+  agentToRuntimeId,
+  agentToBackendType,
   onRemoveAgent,
 }: AgentSelectorDockProps) {
-  const [agentToRuntimeId, setAgentToRuntimeId] = React.useState<Map<string, string>>(new Map())
-  const [agentToBackendType, setAgentToBackendType] = React.useState<Map<string, string>>(new Map())
   const runtimeStates = useRuntimeStateStore((s) => s.byRuntimeId)
-  const currentTeamId = useCurrentTeamStore((s) => s.team?.id ?? null)
-  const sessionTeamId = useSessionListStore((s) =>
-    activeSessionId ? s.rows.find((row) => row.id === activeSessionId)?.team_id ?? null : null,
+  const uiStateByAgentId = React.useMemo(
+    () => new Map(engagedUiEntries.map((e) => [e.agent.id, e.uiState])),
+    [engagedUiEntries],
   )
-  const teamId = sessionTeamId ?? currentTeamId
-  const engagedAgentIds = React.useMemo(() => engagedAgents.map((agent) => agent.id), [engagedAgents])
-  const engagedAgentIdSignature = React.useMemo(() => engagedAgentIds.join(','), [engagedAgentIds])
-
-  // Load agent → runtime mapping for the active session. Refetched whenever
-  // a daemon retain arrives for an engaged agent we don't yet know about
-  // (covers the race where the daemon's INSERT into agent_runtimes hasn't
-  // landed when this component mounts).
-  React.useEffect(() => {
-    if (!activeSessionId || !teamId || engagedAgentIds.length === 0) {
-      setAgentToRuntimeId(new Map())
-      setAgentToBackendType(new Map())
-      return
-    }
-    let cancelled = false
-    void (async () => {
-      let rtRows: Awaited<ReturnType<ReturnType<typeof getBackend>['runtime']['listLatestAgentRuntimeHints']>>
-      try {
-        rtRows = await getBackend().runtime.listLatestAgentRuntimeHints(teamId, engagedAgentIds)
-      } catch (error) {
-        sessionFlowError('agent_selector.runtime_map.load_failed', error, {
-          sessionId: activeSessionId,
-        })
-        rtRows = []
-      }
-      if (cancelled) return
-      const map = new Map<string, string>()
-      const btMap = new Map<string, string>()
-      for (const r of rtRows.filter((row) => row.session_id === activeSessionId)) {
-        if (r.agent_id && r.runtime_id && !map.has(r.agent_id)) map.set(r.agent_id, r.runtime_id)
-        if (r.agent_id && r.backend_type && !btMap.has(r.agent_id)) btMap.set(r.agent_id, r.backend_type)
-      }
-      sessionFlowLog('agent_selector.runtime_map.loaded', {
-        sessionId: activeSessionId,
-        rowCount: rtRows.length,
-        runtimeAgentIds: Array.from(map.keys()),
-        backendAgentIds: Array.from(btMap.keys()),
-      })
-      setAgentToRuntimeId(map)
-      setAgentToBackendType(btMap)
-    })()
-    return () => { cancelled = true }
-  }, [activeSessionId, teamId, engagedAgentIdSignature])
-
-  // Retain-driven refetch: if any engaged agent has a retain but we haven't
-  // mapped its runtime_id yet, re-pull agent_runtimes. Guarded so we only try
-  // once per (missing agents, retain snapshot) — agentToRuntimeId must not be
-  // in the effect deps or setState retriggers an infinite refetch loop.
-  const missingAgentIdSignature = React.useMemo(() => {
-    return engagedAgents
-      .filter((a) => !agentToRuntimeId.has(a.id))
-      .map((a) => a.id)
-      .sort()
-      .join(',')
-  }, [engagedAgents, agentToRuntimeId])
-
-  const retainSignature = React.useMemo(() => {
-    const ids = engagedAgents.map((a) => a.id)
-    return Object.entries(runtimeStates)
-      .filter(([, e]) => ids.includes(e.daemonActorId))
-      .map(([rid]) => rid)
-      .sort()
-      .join(',')
-  }, [runtimeStates, engagedAgents])
-
-  const runtimeMapRefetchKeyRef = React.useRef<string | null>(null)
-
-  React.useEffect(() => {
-    runtimeMapRefetchKeyRef.current = null
-  }, [activeSessionId, engagedAgentIdSignature])
-
-  React.useEffect(() => {
-    if (!activeSessionId || !teamId || !missingAgentIdSignature) return
-    if (!retainSignature) return
-
-    const refetchKey = `${missingAgentIdSignature}|${retainSignature}`
-    if (runtimeMapRefetchKeyRef.current === refetchKey) return
-    runtimeMapRefetchKeyRef.current = refetchKey
-
-    let cancelled = false
-    void (async () => {
-      let rtRows: Awaited<ReturnType<ReturnType<typeof getBackend>['runtime']['listLatestAgentRuntimeHints']>>
-      try {
-        rtRows = await getBackend().runtime.listLatestAgentRuntimeHints(teamId, engagedAgentIds)
-      } catch (error) {
-        sessionFlowError('agent_selector.runtime_map.refetch_failed', error, {
-          sessionId: activeSessionId,
-          retainSignature,
-        })
-        rtRows = []
-      }
-      if (cancelled) return
-
-      const sessionRows = rtRows.filter((row) => row.session_id === activeSessionId)
-      const mappedAgentIds: string[] = []
-      setAgentToRuntimeId((prev) => {
-        const next = new Map(prev)
-        for (const r of sessionRows) {
-          if (r.agent_id && r.runtime_id && !next.has(r.agent_id)) {
-            next.set(r.agent_id, r.runtime_id)
-            mappedAgentIds.push(r.agent_id)
-          }
-        }
-        return mappedAgentIds.length > 0 ? next : prev
-      })
-      setAgentToBackendType((prev) => {
-        const next = new Map(prev)
-        let changed = false
-        for (const r of sessionRows) {
-          if (r.agent_id && r.backend_type && !next.has(r.agent_id)) {
-            next.set(r.agent_id, r.backend_type)
-            changed = true
-          }
-        }
-        return changed ? next : prev
-      })
-      if (mappedAgentIds.length > 0) {
-        sessionFlowLog('agent_selector.runtime_map.refetched', {
-          sessionId: activeSessionId,
-          rowCount: rtRows.length,
-          mappedAgentIds,
-          missingAgentIds: missingAgentIdSignature.split(','),
-          retainSignature,
-        })
-      }
-    })()
-    return () => { cancelled = true }
-  }, [
-    activeSessionId,
-    teamId,
-    missingAgentIdSignature,
-    retainSignature,
-    engagedAgentIds,
-  ])
-
-  // Backfill backend_type from the agent's most recent historical runtime
-  // when we have no live entry yet — mirrors iOS CachedAgentRuntime fallback.
-  React.useEffect(() => {
-    const missing = engagedAgents.filter((a) => !agentToBackendType.has(a.id))
-    if (missing.length === 0 || !teamId) return
-    let cancelled = false
-    void (async () => {
-      let rows: Awaited<ReturnType<ReturnType<typeof getBackend>['runtime']['listLatestAgentRuntimeHints']>>
-      try {
-        rows = await getBackend().runtime.listLatestAgentRuntimeHints(teamId, missing.map((a) => a.id))
-      } catch (error) {
-        sessionFlowError('agent_selector.backend_type.backfill_failed', error, {
-          sessionId: activeSessionId,
-          missingAgentIds: missing.map((a) => a.id),
-        })
-        rows = []
-      }
-      if (cancelled) return
-      const latestByAgent = new Map<string, string>()
-      for (const r of rows) {
-        if (r.agent_id && r.backend_type && !latestByAgent.has(r.agent_id)) {
-          latestByAgent.set(r.agent_id, r.backend_type)
-        }
-      }
-      if (latestByAgent.size > 0) {
-        sessionFlowLog('agent_selector.backend_type.backfilled', {
-          sessionId: activeSessionId,
-          backendTypesByAgent: Object.fromEntries(latestByAgent),
-        })
-        setAgentToBackendType((prev) => {
-          const next = new Map(prev)
-          latestByAgent.forEach((bt, id) => next.set(id, bt))
-          return next
-        })
-      }
-    })()
-    return () => { cancelled = true }
-  }, [engagedAgents, agentToBackendType, teamId, activeSessionId])
 
   if (engagedAgents.length === 0) return null
 
@@ -297,6 +120,7 @@ export function AgentSelectorDock({
             dbRuntimeId={dbRuntimeId}
             backendType={backendType}
             runtimeInfo={runtimeEntry?.info}
+            uiState={uiStateByAgentId.get(agent.id) ?? 'connecting'}
             onRemove={() => {
               if (activeSessionId) {
                 useAgentModelPickStore.getState().clearPick(activeSessionId, agent.id)
@@ -320,6 +144,7 @@ function AgentPill({
   dbRuntimeId,
   backendType,
   runtimeInfo,
+  uiState,
   onRemove,
 }: {
   sessionIdProp: string | null
@@ -327,6 +152,7 @@ function AgentPill({
   dbRuntimeId: string | undefined
   backendType: string | undefined
   runtimeInfo: RuntimeInfo | undefined
+  uiState: SessionAgentUiState
   onRemove: () => void
 }) {
   const { t } = useTranslation()
@@ -342,13 +168,18 @@ function AgentPill({
     [agent.id, byRuntimeId, dbRuntimeId],
   )
   const liveRuntimeInfo = liveRuntimeEntry?.info ?? runtimeInfo
-  const { color: dotColor, pulse } = dotClasses(liveRuntimeInfo)
+  const runtimeDot = dotClasses(liveRuntimeInfo)
+  const { color: dotColor, pulse } =
+    uiState === 'ready' ? runtimeDot : dotClassesForUiState(uiState)
 
   const availableModels = React.useMemo(
     () => resolveAgentAvailableModels(liveRuntimeInfo),
     [liveRuntimeInfo],
   )
+  const statusSuffix = pillSuffixForUiState(uiState, t)
+  const showModelPicker = uiState === 'ready' || uiState === 'connecting'
   const runtimeInfoLoading =
+    showModelPicker &&
     availableModels.length === 0 &&
     (!liveRuntimeInfo || liveRuntimeInfo.state === RuntimeLifecycle.STARTING)
   // Subscribe to the pick entry so explicit user picks immediately drive the
@@ -532,13 +363,30 @@ function AgentPill({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-7 gap-1.5 rounded-full bg-muted/40 px-2 text-xs font-medium"
+          className={cn(
+            'h-7 gap-1.5 rounded-full bg-muted/40 px-2 text-xs font-medium',
+            uiState === 'stale' && 'border border-dashed border-border',
+          )}
         >
           <span
             className={cn('h-2 w-2 rounded-full', dotColor, pulse && 'animate-pulse')}
           />
           <span className="truncate max-w-[8rem]">{agent.displayName}</span>
-          {runtimeInfoLoading && !displayedModel ? (
+          {statusSuffix ? (
+            <>
+              <span className="text-muted-foreground/70">·</span>
+              <span className="truncate max-w-[8rem] text-[11px] text-faint">
+                {uiState === 'connecting' && runtimeInfoLoading ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {statusSuffix}
+                  </span>
+                ) : (
+                  statusSuffix
+                )}
+              </span>
+            </>
+          ) : runtimeInfoLoading && !displayedModel ? (
             <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
           ) : displayedModel ? (
             <>
@@ -576,7 +424,13 @@ function AgentPill({
             />
           ) : null}
           <CommandList className="max-h-[18rem]">
-            {runtimeInfoLoading ? (
+            {uiState === 'offline' || uiState === 'stale' ? (
+              <div className="px-2 py-3 text-xs text-muted-foreground">
+                {uiState === 'stale'
+                  ? t('chat.sessionAgent.dropdownStale')
+                  : t('chat.sessionAgent.dropdownOffline')}
+              </div>
+            ) : runtimeInfoLoading ? (
               <div className="px-2 py-3 text-xs text-muted-foreground">
                 {t('chat.agentSelector.loading', 'Loading…')}
               </div>

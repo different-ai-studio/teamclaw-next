@@ -16,7 +16,7 @@ import {
   selectAgentModel,
   shortAgentModelId,
 } from "@/lib/runtime-state-resolve";
-import { resolveAgentAvailableModels } from "@/components/chat/AgentSelectorDock";
+import { resolveAgentAvailableModels } from "@/lib/agent-available-models";
 
 /** Same as AgentSelectorDock CommandItem checkmark branch (post-fix). */
 function dropdownCheckedRows(

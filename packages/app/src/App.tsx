@@ -986,11 +986,9 @@ function AppContent() {
               if (!streamEntry.active) {
                 streamingStore.markActorStreamActive(sid, senderActorId);
               }
-              streamingStore.ingestReplyPreview(
-                sid,
-                senderActorId,
-                msg.content,
-              );
+              // Live text comes from acp.event output only (iOS alignment).
+              // ingestReplyPreview here duplicated stream when message.created
+              // content differed slightly from accumulated deltas.
               const pendingReplies =
                 pendingStreamRepliesRef.current[streamKey] ?? [];
               if (

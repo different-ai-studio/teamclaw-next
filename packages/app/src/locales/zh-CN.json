@@ -320,6 +320,38 @@
       "modelPickSaved": "已选择模型",
       "modelPickSavedHint": "将在发送消息或 runtime 就绪后应用到 Agent"
     },
+    "sessionAgent": {
+      "bannerStaleOne": "{{name}} 已与当前本机 Agent 断开 — 消息可能不会由 Agent 处理",
+      "bannerOfflineOne": "{{name}} 离线 — 消息可能不会由 Agent 处理",
+      "bannerOfflineMany": "{{count}} 个 Agent 离线 — 消息可能不会由 Agent 处理",
+      "bannerStaleMany": "{{count}} 个 Agent 需重新绑定本机 — 消息可能不会由 Agent 处理",
+      "bannerMixed": "{{offlineCount}} 个 Agent 离线、{{staleCount}} 个需重新绑定 — 消息可能不会由 Agent 处理",
+      "switchToLocal": "换本机 Agent",
+      "removeMention": "移除",
+      "removeAllOffline": "全部移除",
+      "pillOffline": "离线",
+      "pillStale": "需重新绑定",
+      "pillConnecting": "连接中…",
+      "mentionOffline": "离线",
+      "mentionStale": "需重新绑定",
+      "mentionConnecting": "连接中…",
+      "dropdownStale": "Agent 需重新绑定本机身份",
+      "dropdownOffline": "Agent 离线 — 可选模型将在上线后可用",
+      "sendConfirmTitle": "{{name}} 当前离线",
+      "sendConfirmTitleFallback": "Agent",
+      "sendConfirmBody": "消息会进入会话，Agent 上线后可能处理，但不保证。",
+      "sendConfirmDismiss": "本会话不再提示",
+      "sendConfirmAction": "仍要发送",
+      "metaOffline": "→ {{name}}（离线）",
+      "metaStale": "→ {{name}}（需重新绑定）"
+    },
+    "sessionNotice": {
+      "sentStaleOne": "已发送。{{name}} 已与当前本机 Agent 断开，建议重新 @ 本机 Agent。",
+      "sentStaleMany": "已发送。{{count}} 个 Agent 需重新绑定。",
+      "sentOfflineOne": "已发送。{{name}} 当前离线，将在上线后尝试处理（不保证）。",
+      "sentOfflineMany": "已发送。{{count}} 个 Agent 当前离线，将在上线后尝试处理（不保证）。",
+      "sentMixed": "已发送。{{offlineCount}} 个 Agent 离线、{{staleCount}} 个需重新绑定 — 上线或重绑后再确认是否送达。"
+    },
     "newSessionDialog": {
       "title": "新会话",
       "subtitle": "从一条消息开始",
