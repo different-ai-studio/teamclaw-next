@@ -56,6 +56,14 @@ export type SessionRow = {
   syncedAt: string;
 };
 
+export type SessionWorkspaceRow = {
+  sessionId: string;
+  teamId: string;
+  workspaceId?: string | null;
+  workspacePath?: string | null;
+  updatedAt: string;
+};
+
 export type SessionParticipantRow = {
   id: string;
   sessionId: string;
@@ -217,6 +225,20 @@ export async function softDeleteSession(
 ): Promise<void> {
   if (!isTauri()) return;
   await invoke("local_cache_session_soft_delete", { id, deletedAt });
+}
+
+export async function upsertSessionWorkspacesBatch(
+  rows: SessionWorkspaceRow[],
+): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("local_cache_session_workspace_upsert_batch", { rows });
+}
+
+export async function loadSessionWorkspacesForTeam(
+  teamId: string,
+): Promise<SessionWorkspaceRow[]> {
+  if (!isTauri()) return [];
+  return invoke("local_cache_session_workspace_load_team", { teamId });
 }
 
 // ── session_participant ────────────────────────────────────────────────────

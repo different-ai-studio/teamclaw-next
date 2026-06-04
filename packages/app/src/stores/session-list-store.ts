@@ -4,6 +4,7 @@ import { useAuthStore } from "./auth-store";
 import { useCurrentTeamStore } from "./current-team";
 import { isTauri } from "@/lib/utils";
 import { loadPinnedSessionIds, savePinnedSessionIds } from "./session-pins";
+import { syncSessionWorkspaces } from "@/lib/session-workspace-sync";
 import {
   loadSessionsForTeam,
   softDeleteSession,
@@ -239,6 +240,11 @@ export const useSessionListStore = create<State>((set, get) => ({
         syncedAt: new Date().toISOString(),
       }));
       await upsertSessionsBatch(cacheRows);
+      // Fire-and-forget: pull session → workspace links from the cloud
+      // daemon-runtimes list into the local cache so the session-list
+      // workspace filter keeps working offline. Non-fatal: offline / no
+      // daemon stays silent.
+      void syncSessionWorkspaces(teamId).catch(() => {});
     }
 
     set({

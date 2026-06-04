@@ -6,6 +6,8 @@ import { getBackend } from '@/lib/backend'
 import { useActorsForTeam, type ActorRow as ActorRowData } from '@/components/panel/ActorsView'
 import { InviteActorDialog } from '@/components/sidebar/InviteActorDialog'
 import { ActorRow } from '@/components/sidebar/ActorRow'
+import { LocalDaemonRow } from '@/components/sidebar/LocalDaemonRow'
+import { getCurrentDaemonAgent } from '@/lib/daemon-agent-admin'
 import { ActorDetailDialog } from '@/components/sidebar/ActorDetailDialog'
 import {
   AlertDialog,
@@ -40,9 +42,25 @@ export function ActorsSection() {
     if (teamId) void ensureDefaultAgentLoaded(teamId)
   }, [teamId, ensureDefaultAgentLoaded])
 
+  const [localDaemonAgentId, setLocalDaemonAgentId] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    if (!teamId) { setLocalDaemonAgentId(null); return }
+    let cancelled = false
+    void getCurrentDaemonAgent(teamId).then((a) => { if (!cancelled) setLocalDaemonAgentId(a?.id ?? null) })
+    return () => { cancelled = true }
+  }, [teamId])
+
   const recentActors = React.useMemo(
-    () => getRecentContactActors(actors, defaultAgentId),
-    [actors, defaultAgentId],
+    () => getRecentContactActors(actors, defaultAgentId).filter((a) => a.id !== localDaemonAgentId),
+    [actors, defaultAgentId, localDaemonAgentId],
+  )
+
+  // The local daemon's full actor row (for the pinned LocalDaemonRow + its
+  // shared right-click menu). Resolved from the team actor list by the id we
+  // looked up via getCurrentDaemonAgent.
+  const localDaemonActor = React.useMemo(
+    () => actors.find((a) => a.id === localDaemonAgentId) ?? null,
+    [actors, localDaemonAgentId],
   )
 
   const handleSelect = (actor: ActorRowData) => {
@@ -152,6 +170,14 @@ export function ActorsSection() {
       </AlertDialog>
       {!collapsed && (
         <div className="flex flex-col">
+          <LocalDaemonRow
+            actor={localDaemonActor}
+            isDefault={!!localDaemonActor && localDaemonActor.id === defaultAgentId}
+            onViewDetail={setDetailFor}
+            onCopyName={handleCopyName}
+            onCopyId={handleCopyId}
+            onRequestRemove={setRemoveFor}
+          />
           {loading && (
             <div className="px-[9px] py-1 text-[12px] text-faint">{t('actors.loading', 'Loading actors...')}</div>
           )}

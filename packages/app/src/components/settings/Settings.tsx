@@ -58,7 +58,7 @@ const primarySections: Section[] = [
   { id: 'cache', label: 'Local Cache', labelKey: 'settings.nav.cache', icon: Database },
 ]
 
-// Daemon-owned sections shown under the Daemon group
+// Daemon-owned sections (the amuxd process for this machine).
 const daemonSections: Section[] = [
   { id: 'daemonGeneral', label: 'General', labelKey: 'settings.nav.daemonGeneral', icon: Bot },
   { id: 'daemonWorkspaces', label: 'Workspace', labelKey: 'settings.nav.daemonWorkspaces', icon: FolderOpen },
@@ -67,7 +67,7 @@ const daemonSections: Section[] = [
   { id: 'channels', label: 'Channels', labelKey: 'settings.nav.channels', icon: MessageSquare },
 ]
 
-// Local Agent sections shown under the Local Agent group
+// Local Agent (opencode) config sections.
 const localAgentSections: Section[] = [
   { id: 'llm', label: 'LLM Model', labelKey: 'settings.nav.llm', icon: Brain },
   { id: 'envVars', label: 'Env Variables', labelKey: 'settings.nav.envVars', icon: KeyRound },
@@ -132,7 +132,6 @@ function UpdateButton() {
 export function Settings(_props?: SettingsProps) {
   const { t } = useTranslation()
   const settingsInitialSection = useUIStore(s => s.settingsInitialSection)
-  const [activeView, setActiveView] = React.useState<SettingsSection>(settingsInitialSection ?? 'general')
   const appVersion = useAppVersion()
 
   // Filter sections based on build config feature flags
@@ -141,10 +140,7 @@ export function Settings(_props?: SettingsProps) {
     daemonSections.filter(s => s.id !== 'channels' || hasAnyChannel(buildConfig.features.channels)),
     []
   )
-  const filteredLocalAgentSections = React.useMemo(() =>
-    localAgentSections,
-    []
-  )
+  const filteredLocalAgentSections = React.useMemo(() => localAgentSections, [])
 
   type AccordionGroup = 'client' | 'daemon' | 'localAgent'
   const groupForSection = (id: SettingsSection): AccordionGroup => {
@@ -152,6 +148,19 @@ export function Settings(_props?: SettingsProps) {
     if (filteredLocalAgentSections.some(s => s.id === id)) return 'localAgent'
     return 'client'
   }
+
+  const [activeView, setActiveView] = React.useState<SettingsSection>(
+    settingsInitialSection ?? 'general',
+  )
+
+  // Settings is split into two independent dialogs by entry point: the regular
+  // entry shows the Client group; the local-daemon row's "Settings" shows the
+  // Daemon + Local Agent (opencode) groups together (Client hidden). Which
+  // dialog renders is derived from the active section's group.
+  const clientGroup = { id: 'client' as const, label: 'Client', labelKey: 'settings.nav.client', icon: Laptop, sections: filteredPrimarySections, testid: 'client-subnav' }
+  const daemonGroup = { id: 'daemon' as const, label: 'Daemon', labelKey: 'settings.nav.daemon', icon: Server, sections: filteredDaemonSections, testid: 'daemon-subnav' }
+  const localAgentGroup = { id: 'localAgent' as const, label: 'Local Agent', labelKey: 'settings.nav.localAgent', icon: SlidersHorizontal, sections: filteredLocalAgentSections, testid: 'local-agent-subnav' }
+  const navGroups = groupForSection(activeView) === 'client' ? [clientGroup] : [daemonGroup, localAgentGroup]
   const [expandedGroup, setExpandedGroup] = React.useState<AccordionGroup | null>(() => groupForSection(activeView))
   const toggleGroup = (group: AccordionGroup) => {
     setExpandedGroup(prev => (prev === group ? null : group))
@@ -169,11 +178,7 @@ export function Settings(_props?: SettingsProps) {
       <div className="flex w-60 flex-col border-r border-border bg-background">
         <ScrollArea className="flex-1 overflow-hidden py-3">
           <div className="space-y-0.5 px-2">
-            {([
-              { id: 'client', label: 'Client', labelKey: 'settings.nav.client', icon: Laptop, sections: filteredPrimarySections, testid: 'client-subnav' },
-              { id: 'daemon', label: 'Daemon', labelKey: 'settings.nav.daemon', icon: Server, sections: filteredDaemonSections, testid: 'daemon-subnav' },
-              { id: 'localAgent', label: 'Local Agent', labelKey: 'settings.nav.localAgent', icon: SlidersHorizontal, sections: filteredLocalAgentSections, testid: 'local-agent-subnav' },
-            ] as const).map((group) => {
+            {navGroups.map((group) => {
               const GroupIcon = group.icon
               const isExpanded = expandedGroup === group.id
               return (

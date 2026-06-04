@@ -448,6 +448,8 @@ impl Backend for CloudApiBackend {
             backend_session_id: Option<&'a str>,
             #[serde(rename = "backendType")]
             backend_type: &'a str,
+            #[serde(rename = "workspaceId", skip_serializing_if = "Option::is_none")]
+            workspace_id: Option<&'a str>,
             status: &'a str,
         }
         #[derive(serde::Deserialize)]
@@ -463,6 +465,7 @@ impl Backend for CloudApiBackend {
                     runtime_id: row.runtime_id,
                     backend_session_id: row.backend_session_id,
                     backend_type: row.backend_type,
+                    workspace_id: row.workspace_id,
                     status: row.status,
                 },
                 None,
@@ -1631,6 +1634,33 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(id, Some("runtime-row-1".to_string()));
+    }
+
+    #[test]
+    fn upsert_runtime_body_includes_workspace_id() {
+        #[derive(serde::Serialize)]
+        struct Body<'a> {
+            #[serde(rename = "agentActorId")]
+            agent_actor_id: &'a str,
+            #[serde(rename = "workspaceId", skip_serializing_if = "Option::is_none")]
+            workspace_id: Option<&'a str>,
+            status: &'a str,
+        }
+        let with = serde_json::to_value(&Body {
+            agent_actor_id: "a1",
+            workspace_id: Some("ws-uuid"),
+            status: "starting",
+        })
+        .unwrap();
+        assert_eq!(with["workspaceId"], "ws-uuid");
+
+        let without = serde_json::to_value(&Body {
+            agent_actor_id: "a1",
+            workspace_id: None,
+            status: "starting",
+        })
+        .unwrap();
+        assert!(without.get("workspaceId").is_none(), "None must be omitted");
     }
 
     #[tokio::test]

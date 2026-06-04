@@ -74,50 +74,54 @@ vi.mock('../section-registry', () => ({
 }))
 
 describe('Settings navigation', () => {
-  it('nests daemon settings above Local Agent and keeps LLM Model first locally', async () => {
+  it('default (client) entry shows only the Client group — no Daemon/Local Agent', async () => {
     const { Settings } = await import('../Settings')
 
     render(<Settings />)
 
-    expect(screen.queryByRole('button', { name: 'Channels' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Automation' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'General' })).toBeInTheDocument()
+    // Client group present, expanded by default to a client section.
+    expect(screen.getByRole('button', { name: 'Client' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'General' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Team Shared' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Team' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Workspace' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Runtimes' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Env Variables' })).toBeNull()
+    expect(screen.getByTestId('client-subnav')).toBeInTheDocument()
 
+    // The Daemon + Local Agent settings are a SEPARATE dialog — not shown here.
+    expect(screen.queryByRole('button', { name: 'Daemon' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Local Agent' })).toBeNull()
+    expect(screen.queryByTestId('local-agent-subnav')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Workspace' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'LLM Model' })).toBeNull()
+  })
+
+  it('daemon entry shows the Daemon + Local Agent groups together (Client hidden)', async () => {
+    vi.resetModules()
+    vi.doMock('@/stores/ui', () => ({
+      useUIStore: (selector: (state: unknown) => unknown) =>
+        selector({ settingsInitialSection: 'daemonGeneral' }),
+    }))
+    const { Settings } = await import('../Settings')
+
+    render(<Settings />)
+
+    // The Client group is a separate dialog — not shown here.
+    expect(screen.queryByRole('button', { name: 'Client' })).toBeNull()
+    expect(screen.queryByTestId('client-subnav')).toBeNull()
+
+    // Both Daemon and Local Agent groups are present (daemon is NOT missing).
     const daemonButton = screen.getByRole('button', { name: 'Daemon' })
     const localAgentButton = screen.getByRole('button', { name: 'Local Agent' })
     const topLevelButtons = screen.getAllByRole('button')
     expect(topLevelButtons.indexOf(daemonButton)).toBeLessThan(topLevelButtons.indexOf(localAgentButton))
 
-    fireEvent.click(daemonButton)
+    // The Daemon group is expanded by default (active section is daemonGeneral).
     const daemonSubnav = screen.getByTestId('daemon-subnav')
-    expect(within(daemonSubnav).getByRole('button', { name: 'General' })).toBeInTheDocument()
-    expect(within(daemonSubnav).getByRole('button', { name: 'Workspace' })).toBeInTheDocument()
-    expect(within(daemonSubnav).getByRole('button', { name: 'Runtimes' })).toBeInTheDocument()
-    expect(within(daemonSubnav).getByRole('button', { name: 'Automation' })).toBeInTheDocument()
-    expect(within(daemonSubnav).getByRole('button', { name: 'Channels' })).toBeInTheDocument()
     expect(
       within(daemonSubnav).getAllByRole('button').map((button) => button.textContent)
-    ).toEqual([
-      'General',
-      'Workspace',
-      'Runtimes',
-      'Automation',
-      'Channels',
-    ])
+    ).toEqual(['General', 'Workspace', 'Runtimes', 'Automation', 'Channels'])
 
+    // Local Agent starts collapsed (accordion) — expand it to read its sections.
     fireEvent.click(localAgentButton)
-
     const localAgentSubnav = screen.getByTestId('local-agent-subnav')
-    expect(within(localAgentSubnav).queryByRole('button', { name: 'Basic Info' })).toBeNull()
-    expect(within(localAgentSubnav).getByRole('button', { name: 'LLM Model' })).toBeInTheDocument()
-    expect(within(localAgentSubnav).queryByRole('button', { name: 'Automation' })).toBeNull()
-    expect(within(localAgentSubnav).getByRole('button', { name: 'Env Variables' })).toBeInTheDocument()
-    expect(within(localAgentSubnav).queryByRole('button', { name: 'Channels' })).toBeNull()
     expect(
       within(localAgentSubnav).getAllByRole('button').map((button) => button.textContent)
     ).toEqual([
@@ -131,5 +135,6 @@ describe('Settings navigation', () => {
       'Knowledge Base',
       'Dependencies',
     ])
+    vi.doUnmock('@/stores/ui')
   })
 })
