@@ -31,6 +31,6 @@ export function composerStackFormSlotClass(hasTopChrome: boolean): string {
     "[&_form]:border-0 [&_form]:shadow-none [&_form]:bg-paper",
     hasTopChrome
       ? "[&_form]:rounded-none [&_form]:rounded-b-[14px]"
-      : "[&_form]:rounded-none",
+      : "[&_form]:rounded-[14px]",
   );
 }
