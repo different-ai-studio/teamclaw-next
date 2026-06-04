@@ -76,6 +76,7 @@ pub struct AmuxdAcpHandle {
     /// Path to workspaces.toml — read by `list_workspaces` on demand.
     pub workspaces_path: std::path::PathBuf,
     /// Per-session workspace override: logical_session_id → workspace_id.
+    /// In-memory only — cleared across daemon restarts.
     pub workspace_override: Arc<Mutex<HashMap<String, String>>>,
 }
 
@@ -459,13 +460,15 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
             None => return Ok(vec![]),
         };
         drop(map);
-        let mgr = self.manager.lock().await;
-        let agent_id = match mgr.agent_id_by_acp_session(&real) {
-            Some(id) => id,
-            None => return Ok(vec![]),
-        };
-        Ok(mgr
-            .get_available_commands(&agent_id)
+        let proto_commands = {
+            let mgr = self.manager.lock().await;
+            let agent_id = match mgr.agent_id_by_acp_session(&real) {
+                Some(id) => id,
+                None => return Ok(vec![]),
+            };
+            mgr.get_available_commands(&agent_id)
+        }; // manager lock dropped here
+        Ok(proto_commands
             .into_iter()
             .map(|c| AcpAvailableCommand {
                 name: c.name,
@@ -532,9 +535,19 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
             let mut overrides = self.agent_type_override.lock().await;
             overrides.insert(session.to_string(), t);
         }
-        let _ = self.cancel(session).await;
-        let mut map = self.logical_to_acp.lock().await;
-        map.remove(session);
+        // Acquire the map, extract + remove the entry atomically, then cancel
+        // via the manager. This prevents a concurrent send_prompt from
+        // re-inserting between the cancel and remove (TOCTOU).
+        let real_sid = {
+            let mut map = self.logical_to_acp.lock().await;
+            let sid = map.get(session).map(|s| s.real_acp_sid.clone());
+            map.remove(session);
+            sid
+        };
+        if let Some(real) = real_sid {
+            let mut mgr = self.manager.lock().await;
+            let _ = mgr.cancel_by_acp_session(&real).await;
+        }
         Ok(())
     }
 
@@ -544,7 +557,7 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
     ) -> Result<Vec<WorkspaceInfo>, AcpError> {
         use crate::config::WorkspaceStore;
         let store = WorkspaceStore::load(&self.workspaces_path)
-            .map_err(|e| AcpError::Send(format!("workspace load: {e}")))?;
+            .map_err(|e| AcpError::Internal(format!("workspace load: {e}")))?;
         let current_id = {
             let overrides = self.workspace_override.lock().await;
             overrides
@@ -570,7 +583,7 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
     ) -> Result<(), AcpError> {
         use crate::config::WorkspaceStore;
         let store = WorkspaceStore::load(&self.workspaces_path)
-            .map_err(|e| AcpError::Send(format!("workspace load: {e}")))?;
+            .map_err(|e| AcpError::Internal(format!("workspace load: {e}")))?;
         if !store.workspaces.iter().any(|w| w.workspace_id == workspace_id) {
             return Err(AcpError::NotFound(format!(
                 "workspace '{workspace_id}' not found"
@@ -580,9 +593,17 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
             let mut overrides = self.workspace_override.lock().await;
             overrides.insert(session.to_string(), workspace_id.to_string());
         }
-        let _ = self.cancel(session).await;
-        let mut map = self.logical_to_acp.lock().await;
-        map.remove(session);
+        // Atomically remove entry then cancel to avoid TOCTOU race.
+        let real_sid = {
+            let mut map = self.logical_to_acp.lock().await;
+            let sid = map.get(session).map(|s| s.real_acp_sid.clone());
+            map.remove(session);
+            sid
+        };
+        if let Some(real) = real_sid {
+            let mut mgr = self.manager.lock().await;
+            let _ = mgr.cancel_by_acp_session(&real).await;
+        }
         Ok(())
     }
 }
