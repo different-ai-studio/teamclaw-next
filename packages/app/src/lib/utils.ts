@@ -13,6 +13,18 @@ export function isTauri() {
   )
 }
 
+/**
+ * Tear down the static `#skeleton` loading shell (see index.html). Idempotent —
+ * safe to call from multiple hand-off points. The skeleton mirrors the real
+ * three-column shell and stays up through every pure-loading startup gate; it is
+ * removed only at the moment real or interactive UI is about to paint, so the
+ * hand-off to React is seamless instead of flashing a blank background.
+ */
+export function removeStartupSkeleton(): void {
+  if (typeof document === "undefined") return
+  document.getElementById("skeleton")?.remove()
+}
+
 export async function copyToClipboard(text: string, successMessage?: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text)

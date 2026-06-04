@@ -1,6 +1,31 @@
 import { create } from 'zustand'
 import { isTauri } from '@/lib/utils'
 import { markStartup } from '@/lib/startup-perf'
+import { appShortName } from '@/lib/build-config'
+
+// Cache the last-known "all required deps satisfied" verdict so a returning user
+// (deps already installed) is never gated behind the cold `setup_list_requirements`
+// probe, which spawns `amuxd doctor` and costs ~4s on first launch (macOS
+// Gatekeeper). The probe still runs in the background to refresh this flag; the
+// daemon-onboarding gate remains the real backstop if a dependency is missing.
+const SETUP_OK_KEY = `${appShortName}-setup-ok`
+
+/** True if a prior probe confirmed all required deps were present. Sync, cheap. */
+export function setupPreviouslySatisfied(): boolean {
+  try {
+    return localStorage.getItem(SETUP_OK_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function persistSetupSatisfied(ok: boolean): void {
+  try {
+    localStorage.setItem(SETUP_OK_KEY, ok ? '1' : '0')
+  } catch {
+    /* private mode / storage disabled — optimistic skip just won't apply */
+  }
+}
 
 export type RequirementStatus = {
   id: string
@@ -51,6 +76,8 @@ export const useSetupStore = create<SetupState>((set, get) => ({
     const requirements = await invoke<RequirementStatus[]>('setup_list_requirements')
     markStartup('setup-list:end')
     set({ requirements, loaded: true })
+    // Refresh the optimistic-skip cache for the next launch.
+    persistSetupSatisfied(get().requiredSatisfied())
   },
 
   install: async (id: string, opts?: { minDurationMs?: number }) => {

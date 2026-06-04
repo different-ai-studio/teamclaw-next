@@ -11,6 +11,7 @@ import './lib/i18n'; // Initialize i18n
 import { appShortName, buildConfig } from './lib/build-config'
 import { initJwtBridge } from './lib/jwt-bridge'
 import { markStartup } from './lib/startup-perf'
+import { removeStartupSkeleton } from './lib/utils'
 
 markStartup('main:start')
 
@@ -98,3 +99,9 @@ createRoot(document.getElementById('root')!).render(
     </ErrorBoundary>
   </StrictMode>,
 )
+
+// Backstop: the skeleton is normally handed off by AuthGate/App once real UI is
+// ready (see removeStartupSkeleton call sites). If startup wedges before any of
+// those fire, force it down after a generous deadline so the user is never stuck
+// staring at a frozen skeleton with no way forward.
+setTimeout(() => removeStartupSkeleton(), 20000)

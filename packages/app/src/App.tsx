@@ -8,7 +8,7 @@ import {
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Toaster, toast } from "sonner";
-import { cn, isTauri } from "@/lib/utils";
+import { cn, isTauri, removeStartupSkeleton } from "@/lib/utils";
 import { buildConfig } from "@/lib/build-config";
 import { markStartup } from "@/lib/startup-perf";
 import {
@@ -687,10 +687,16 @@ function AppContent() {
     void useSessionListStore.getState().load();
   }, []);
 
-  // Stamp the first frame where the real three-column shell renders (workspace
-  // resolved + a workspace selected) — the end of the post-skeleton blank gap.
+  // Hand off from the static #skeleton the moment the workspace resolves — to
+  // real three-column content (workspacePath set) or the workspace picker
+  // (none). AuthGate keeps the skeleton up through every loading gate and lets
+  // App own the final removal, so the cold-start hand-off is skeleton → real UI
+  // with no intermediate blank or spinner. Also stamp first-content for the perf
+  // timeline on the happy path.
   useEffect(() => {
-    if (initialWorkspaceResolved && workspacePath) markStartup("first-content");
+    if (!initialWorkspaceResolved) return;
+    removeStartupSkeleton();
+    if (workspacePath) markStartup("first-content");
   }, [initialWorkspaceResolved, workspacePath]);
 
   // Boot the outbox: hydrate any pending/failed rows from libsql so a
@@ -1890,6 +1896,13 @@ function App() {
   // Dismissing it (Get started) is what unblocks the dependency initialization.
   const [welcomeAck, setWelcomeAck] = useState(() => !isTauri() || hasSeenWelcome());
   const showWelcome = isTauri() && !welcomeAck;
+
+  // Welcome / dependency-setup are immediately-interactive first-run screens — if
+  // either shows, hand off from the static skeleton right away (AppContent owns
+  // the removal on the normal path; this covers the screens that render instead).
+  useEffect(() => {
+    if (showWelcome || showSetupGuide) removeStartupSkeleton();
+  }, [showWelcome, showSetupGuide]);
 
   const mainContent = showWelcome ? (
     <WelcomeScreen

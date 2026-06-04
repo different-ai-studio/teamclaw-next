@@ -1,17 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@/stores/auth-store";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { getBackend } from "@/lib/backend";
-import { isTauri } from "@/lib/utils";
+import { isTauri, removeStartupSkeleton } from "@/lib/utils";
 import { devSkipDaemonOnboarding, devSkipSetup } from "@/lib/dev-onboarding-flags";
 import { generateRandomTeamName } from "@/lib/random-team-name";
 import { resolveDefaultDisplayName } from "@/lib/default-display-name";
 import { DesktopOnboarding } from "./DesktopOnboarding";
 import { LoginScreen } from "./LoginScreen";
-import { LobsterLoader } from "./LobsterLoader";
 import { SetupWizard } from "@/components/auth/SetupWizard";
-import { useSetupStore } from "@/stores/setup";
+import { useSetupStore, setupPreviouslySatisfied } from "@/stores/setup";
 import { DaemonOnboardingWizard } from "@/components/auth/DaemonOnboardingWizard";
 import { useDaemonOnboardingStore } from "@/stores/daemon-onboarding";
 import { markStartup } from "@/lib/startup-perf";
@@ -23,7 +21,6 @@ interface AuthGateProps {
 type BootstrapState = "idle" | "checking" | "ready";
 
 export function AuthGate({ children }: AuthGateProps) {
-  const { t } = useTranslation();
   const { session, loading, authFlow, hydrate } = useAuthStore();
   const [bootstrap, setBootstrap] = useState<BootstrapState>("idle");
   const [authHydrated, setAuthHydrated] = useState(false);
@@ -32,7 +29,12 @@ export function AuthGate({ children }: AuthGateProps) {
   const setupLoaded = useSetupStore((s) => s.loaded);
   const setupRequiredSatisfied = useSetupStore((s) => s.requiredSatisfied());
   const listSetup = useSetupStore((s) => s.listRequirements);
-  const [setupAck, setSetupAck] = useState(() => devSkipSetup());
+  // Optimistic skip: if a prior launch confirmed all required deps, don't gate
+  // first paint behind the cold `setup_list_requirements` probe (~4s on macOS
+  // first launch — it spawns `amuxd doctor`). The probe still runs in the
+  // background (effect below) to refresh the cache, and the daemon-onboarding
+  // gate is the real backstop if a dependency actually went missing.
+  const [setupAck, setSetupAck] = useState(() => devSkipSetup() || setupPreviouslySatisfied());
 
   const daemonStatus = useDaemonOnboardingStore((s) => s.status);
   const daemonLoaded = useDaemonOnboardingStore((s) => s.loaded);
@@ -55,8 +57,6 @@ export function AuthGate({ children }: AuthGateProps) {
 
   useEffect(() => {
     markStartup("authgate:mount");
-    document.getElementById("skeleton")?.remove();
-    markStartup("skeleton-removed");
   }, []);
 
   useEffect(() => {
@@ -132,51 +132,45 @@ export function AuthGate({ children }: AuthGateProps) {
     })();
   }, [loading, session]);
 
+  // Each gate below either (a) is a pure-loading state — return null so the
+  // static #skeleton (z-9999, mirrors the real shell) keeps showing through an
+  // empty #root, no blank flash; or (b) renders real/interactive UI — tear the
+  // skeleton down first so the screen is visible and clickable. The happy path
+  // (children) deliberately does NOT remove the skeleton here: App removes it
+  // once the workspace resolves, so the hand-off goes skeleton → real UI with
+  // no intermediate spinner.
+
   // First-run: in Tauri, ensure local prerequisites (amuxd/opencode) before auth.
   if (isTauri() && !setupAck) {
     if (!setupLoaded) {
-      return <div className="flex h-screen items-center justify-center bg-background" />;
+      return null;
     }
     if (!setupRequiredSatisfied) {
+      removeStartupSkeleton();
       return <SetupWizard onDone={() => setSetupAck(true)} />;
     }
   }
 
   if (isTauri() && loading && authFlow === "invite") {
+    removeStartupSkeleton();
     return <DesktopOnboarding />;
   }
 
   if (!authHydrated && loading) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-5 bg-background">
-        <LobsterLoader size={120} />
-        <p className="text-[13px] text-muted-foreground">{t("auth.loading", "Loading…")}</p>
-      </div>
-    );
+    return null;
   }
 
   if (!session) {
+    removeStartupSkeleton();
     return isTauri() ? <DesktopOnboarding /> : <LoginScreen />;
   }
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-5 bg-background">
-        <LobsterLoader size={120} />
-        <p className="text-[13px] text-muted-foreground">{t("auth.loading", "Loading…")}</p>
-      </div>
-    );
+    return null;
   }
 
   if (isTauri() && bootstrap !== "ready") {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-5 bg-background">
-        <LobsterLoader size={120} />
-        <p className="text-[13px] text-muted-foreground">
-          {t("auth.settingUpWorkspace", "Setting up your workspace…")}
-        </p>
-      </div>
-    );
+    return null;
   }
 
   // Daemon readiness gate: after login + workspace bootstrap, ensure the local
@@ -185,7 +179,7 @@ export function AuthGate({ children }: AuthGateProps) {
   // error) auto-recover or offer retry. 'ready'/'unknown' fall through.
   if (isTauri() && !daemonOnboardingAck) {
     if (!daemonLoaded) {
-      return <div className="flex h-screen items-center justify-center bg-background" />;
+      return null;
     }
     if (
       daemonStatus === 'needs-onboard' ||
@@ -193,6 +187,7 @@ export function AuthGate({ children }: AuthGateProps) {
       daemonStatus === 'starting' ||
       daemonStatus === 'error'
     ) {
+      removeStartupSkeleton();
       return <DaemonOnboardingWizard onDone={() => setDaemonOnboardingAck(true)} />;
     }
   }
