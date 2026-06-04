@@ -20,7 +20,7 @@ export function createPgBusinessRepository({ db, accessToken, userId, callerActo
   // for authz flows exclusively through ctx.userId.
   void accessToken;
   const ctx = { userId, callerActorId };
-  const teamsRepo = makeTeamsRepo(db, { provisionLiteLlm });
+  const teamsRepo = makeTeamsRepo(db, { provisionLiteLlm }, { userId });
   const teamsCtx = { userId };
   const ideasRepo = makeIdeasRepo(db, ctx);
   const sessionsRepo = makeSessionsRepo(db, ctx);

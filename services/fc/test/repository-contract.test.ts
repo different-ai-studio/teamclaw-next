@@ -83,19 +83,32 @@ function contractRepo() {
   const skillStore = [];
   return {
     async enableShareMode(teamId, mode, gitConfig) {
-      if (shareModeStore[teamId]?.shareMode) {
-        throw new Error(`team ${teamId} share_mode is locked once enabled`);
-      }
       const row = {
         id: teamId,
         shareMode: mode,
         shareEnabledAt: "2026-05-28T00:00:00Z",
-        gitRemoteUrl: gitConfig?.remoteUrl ?? null,
-        gitAuthKind: gitConfig?.authKind ?? null,
-        gitCredentialRef: gitConfig?.credentialRef ?? null,
+        gitRemoteUrl: mode === "oss" ? null : (gitConfig?.remoteUrl ?? null),
+        gitAuthKind: mode === "oss" ? null : (gitConfig?.authKind ?? null),
+        gitCredentialRef: mode === "oss" ? null : (gitConfig?.credentialRef ?? null),
       };
       shareModeStore[teamId] = row;
       return row;
+    },
+    async disableShareMode(teamId) {
+      shareModeStore[teamId] = {
+        id: teamId,
+        shareMode: null,
+        shareEnabledAt: null,
+        gitRemoteUrl: null,
+        gitAuthKind: null,
+        gitCredentialRef: null,
+      };
+      return {
+        mode: null,
+        enabledAt: null,
+        gitRemoteUrl: null,
+        gitAuthKind: null,
+      };
     },
     async getShareMode(teamId) {
       const row = shareModeStore[teamId];

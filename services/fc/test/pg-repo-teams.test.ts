@@ -59,12 +59,14 @@ test("getShareMode null for fresh team, reflects enabled mode", async () => {
   assert.equal(typeof sm.enabledAt, "string");
 });
 
-test("enableShareMode locks once (second enable rejects)", async () => {
+test("enableShareMode can switch modes on the same team", async () => {
   const { db } = await makeTestDb();
   const t = await seedTeam(db);
   const repo = createPgBusinessRepository({ db, accessToken: "x" });
   await repo.enableShareMode(t.id, "oss", null);
-  await assert.rejects(() => repo.enableShareMode(t.id, "oss", null), /share_mode|locked|already/i);
+  await repo.enableShareMode(t.id, "managed_git", null);
+  const sm = await repo.getShareMode(t.id);
+  assert.equal(sm.mode, "managed_git");
 });
 
 test("enableShareMode custom_git stores git fields", async () => {

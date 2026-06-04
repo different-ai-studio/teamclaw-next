@@ -143,6 +143,43 @@ impl FcClient {
     }
 }
 
+/// Extract a human-readable message from the Cloud API error envelope.
+/// FC returns `{ error: { code, message, requestId, details? } }` (not a bare string).
+fn fc_api_error_message(body: &Value) -> String {
+    if let Some(obj) = body.get("error").and_then(|v| v.as_object()) {
+        let msg = obj
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let code = obj.get("code").and_then(|v| v.as_str()).unwrap_or("");
+        let upstream = obj
+            .get("details")
+            .and_then(|d| d.get("upstreamCode"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let mut parts = Vec::new();
+        if !msg.is_empty() {
+            parts.push(msg.to_string());
+        }
+        if !code.is_empty() {
+            parts.push(format!("code={code}"));
+        }
+        if !upstream.is_empty() {
+            parts.push(format!("upstream={upstream}"));
+        }
+        if !parts.is_empty() {
+            return parts.join("; ");
+        }
+    }
+    if let Some(s) = body.get("error").and_then(|v| v.as_str()) {
+        return s.to_string();
+    }
+    if let Some(s) = body.as_str() {
+        return s.to_string();
+    }
+    serde_json::to_string(body).unwrap_or_else(|_| "<unparseable error body>".to_string())
+}
+
 /// Map an HTTP response to `T` or `SyncError`, handling FC custom error codes.
 async fn map_fc_response<T: serde::de::DeserializeOwned>(
     resp: reqwest::Response,
@@ -157,9 +194,12 @@ async fn map_fc_response<T: serde::de::DeserializeOwned>(
         serde_json::from_slice(&bytes)
             .map_err(|e| SyncError::Internal(format!("response parse failed: {e}")))
     } else {
-        // Try to parse FC error envelope { error, code, reason, remoteVersion, remoteHash, ... }
+        // Legacy /sync/* envelope uses top-level `code`; /v1 uses nested `error.code`.
         let body: Value = serde_json::from_slice(&bytes).unwrap_or_default();
-        let code = body["code"].as_str().unwrap_or("");
+        let code = body["code"]
+            .as_str()
+            .or_else(|| body["error"]["code"].as_str())
+            .unwrap_or("");
         let reason = body["reason"].as_str().unwrap_or("");
 
         // 409 CAS mismatch
@@ -174,32 +214,28 @@ async fn map_fc_response<T: serde::de::DeserializeOwned>(
 
         // Auth errors
         if status.as_u16() == 403 || code == "P0403" {
-            return Err(SyncError::Auth(
-                body["error"].as_str().unwrap_or("forbidden").to_string(),
-            ));
+            return Err(SyncError::Auth(fc_api_error_message(&body)));
         }
 
         // Session expired / gone
         if status.as_u16() == 410 || code == "P0410" {
-            return Err(SyncError::SessionExpired(
-                body["error"]
-                    .as_str()
-                    .unwrap_or("session expired")
-                    .to_string(),
-            ));
+            return Err(SyncError::SessionExpired(fc_api_error_message(&body)));
         }
 
         // Path validation
         if status.as_u16() == 422 {
-            return Err(SyncError::InvalidPath(
-                body["error"].as_str().unwrap_or("invalid path").to_string(),
-            ));
+            return Err(SyncError::InvalidPath(fc_api_error_message(&body)));
         }
 
+        let detail = fc_api_error_message(&body);
         Err(SyncError::Internal(format!(
             "FC returned HTTP {}: {}",
             status,
-            body["error"].as_str().unwrap_or("<no error message>")
+            if detail.is_empty() {
+                "<no error message>".to_string()
+            } else {
+                detail
+            }
         )))
     }
 }

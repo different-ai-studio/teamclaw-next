@@ -262,20 +262,39 @@ test("createSupabaseAuthRepository refreshAccessToken throws on auth failure", a
 });
 
 function createRepo(supabase, extra = {}) {
+  const admin = extra.createServiceRoleClient?.() ?? supabase;
   return createSupabaseBusinessRepository({
     supabaseUrl: "https://example.supabase.co",
     publishableKey: "publishable-key",
     accessToken: "caller-token",
     createClient: () => supabase,
+    createServiceRoleClient: () => admin,
     ...extra,
+  });
+}
+
+const OWNER_AUTH = {
+  auth: {
+    async getUser() {
+      return { data: { user: { id: "user-owner-1" } }, error: null };
+    },
+  },
+};
+
+function fakeSupabaseForShareMode(rpcData, rpcCalls = []) {
+  return fakeSupabase({
+    rpcCalls,
+    rpcData,
+    tableData: {
+      team_members: [{ role: "owner", members: { user_id: "user-owner-1" } }],
+    },
+    auth: OWNER_AUTH.auth,
   });
 }
 
 test("enableShareMode oss calls enable_team_share rpc with null git fields", async () => {
   const rpcCalls = [];
-  const repo = createRepo(fakeSupabase({
-    rpcCalls,
-    rpcData: {
+  const repo = createRepo(fakeSupabaseForShareMode({
       enable_team_share: [{
         id: "team-1",
         name: "Acme",
@@ -286,8 +305,7 @@ test("enableShareMode oss calls enable_team_share rpc with null git fields", asy
         git_remote_url: null,
         git_auth_kind: null,
       }],
-    },
-  }));
+  }, rpcCalls));
 
   const result = await repo.enableShareMode("team-1", "oss", null);
 
@@ -309,9 +327,7 @@ test("enableShareMode oss calls enable_team_share rpc with null git fields", asy
 
 test("enableShareMode custom_git passes through git config", async () => {
   const rpcCalls = [];
-  const repo = createRepo(fakeSupabase({
-    rpcCalls,
-    rpcData: {
+  const repo = createRepo(fakeSupabaseForShareMode({
       enable_team_share: [{
         id: "team-2",
         name: "Beta",
@@ -322,8 +338,7 @@ test("enableShareMode custom_git passes through git config", async () => {
         git_remote_url: "git@example.com:beta/repo.git",
         git_auth_kind: "ssh_key",
       }],
-    },
-  }));
+  }, rpcCalls));
 
   const result = await repo.enableShareMode("team-2", "custom_git", {
     remoteUrl: "git@example.com:beta/repo.git",
@@ -545,6 +560,7 @@ function fakeSupabase({
   rpcErrors = {},
   tableData = {},
   tableErrors = {},
+  auth = null,
   // Extended hooks for telemetry tests
   onRpc = null,
   onInsert = null,
@@ -552,6 +568,11 @@ function fakeSupabase({
   upsertData = null,
 } = {}) {
   return {
+    auth: auth ?? {
+      async getUser() {
+        return { data: { user: null }, error: null };
+      },
+    },
     async rpc(name, args) {
       rpcCalls.push({ name, args });
       if (onRpc) onRpc(name, args);

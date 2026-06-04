@@ -12,6 +12,7 @@ import { useCurrentTeamStore } from '@/stores/current-team'
 import { useTeamShareStore } from '@/stores/team-share'
 import { useTeamPermissions } from '@/lib/team-permissions'
 import { TEAMCLAW_DIR, TEAM_REPO_DIR } from '@/lib/build-config'
+import { humanizeFcError } from '@/lib/fc-error'
 import { cn, isTauri } from '@/lib/utils'
 
 function SettingCard({
@@ -65,7 +66,7 @@ export function TeamShareDisconnect({
       })
       onDisconnected?.()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(humanizeFcError(err))
     } finally {
       setBusy(false)
     }

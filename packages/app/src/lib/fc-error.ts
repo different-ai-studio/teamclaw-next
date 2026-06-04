@@ -14,6 +14,12 @@ export function humanizeFcError(err: unknown): string {
   if (isNotLoggedInError(raw)) {
     return i18n.t('errors.loginRequired')
   }
+  if (/disable_team_share RPC is missing|PGRST202/i.test(raw)) {
+    return i18n.t('settings.team.disconnectMigrationRequired')
+  }
+  if (/schema_drift/i.test(raw)) {
+    return i18n.t('settings.team.disconnectSchemaDrift')
+  }
   return raw
 }
 

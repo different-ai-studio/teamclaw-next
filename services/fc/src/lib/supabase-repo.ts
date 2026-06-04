@@ -40,6 +40,7 @@ export function createSupabaseBusinessRepository(options) {
     publishableKey,
     accessToken,
     createClient = defaultCreateClient,
+    createServiceRoleClient: createServiceRoleClientOpt,
     provisionLiteLlm,
   } = options;
 
@@ -56,6 +57,50 @@ export function createSupabaseBusinessRepository(options) {
       },
     },
   });
+
+  async function requireCallerTeamOwner(targetTeamId) {
+    const { data: authData, error: authErr } = await supabase.auth.getUser();
+    if (authErr || !authData?.user?.id) {
+      throw new ApiError(401, "missing_auth", "authenticated user required");
+    }
+    const { data: membership, error: memberErr } = await supabase
+      .from("team_members")
+      .select("role, members!inner(user_id)")
+      .eq("team_id", targetTeamId)
+      .eq("members.user_id", authData.user.id)
+      .maybeSingle();
+    if (memberErr) throw memberErr;
+    if (!membership || membership.role !== "owner") {
+      throw new ApiError(403, "forbidden", "only team owners may change team share mode");
+    }
+  }
+
+  async function shareModeServiceRpc(rpcName, args) {
+    let admin;
+    if (createServiceRoleClientOpt) {
+      admin = createServiceRoleClientOpt();
+    } else {
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+      if (!serviceKey) {
+        throw new Error(
+          "SUPABASE_SERVICE_ROLE_KEY is not configured on FC; cannot change team share mode",
+        );
+      }
+      const { createServiceRoleClient } = await import("./supabase.js");
+      admin = createServiceRoleClient();
+    }
+    const { data, error } = await admin.rpc(rpcName, args);
+    if (error) {
+      const code = error?.code || "";
+      if (code === "PGRST202") {
+        throw new Error(
+          `${rpcName} RPC is missing on the database (apply migration 20260604120000_disable_team_share)`,
+        );
+      }
+      throw error;
+    }
+    return data;
+  }
 
   return {
     async listTeams({ limit = 50 } = {}) {
@@ -171,15 +216,15 @@ export function createSupabaseBusinessRepository(options) {
     // --- Team share mode (Task 3 of share-onboarding refactor) ---
 
     async enableShareMode(teamId, mode, gitConfig) {
+      await requireCallerTeamOwner(teamId);
       const args = {
         p_team_id: teamId,
         p_mode: mode,
-        p_git_remote_url: gitConfig?.remoteUrl ?? null,
-        p_git_auth_kind: gitConfig?.authKind ?? null,
-        p_git_credential_ref: gitConfig?.credentialRef ?? null,
+        p_git_remote_url: mode === "oss" ? null : (gitConfig?.remoteUrl ?? null),
+        p_git_auth_kind: mode === "oss" ? null : (gitConfig?.authKind ?? null),
+        p_git_credential_ref: mode === "oss" ? null : (gitConfig?.credentialRef ?? null),
       };
-      const { data, error } = await supabase.rpc("enable_team_share", args);
-      if (error) throw error;
+      const data = await shareModeServiceRpc("enable_team_share", args);
       const row = requiredRow(data, "teams.enableShareMode");
       return mapTeam(row);
     },
@@ -208,10 +253,10 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async disableShareMode(teamId) {
-      const { data, error } = await supabase.rpc("disable_team_share", {
+      await requireCallerTeamOwner(teamId);
+      const data = await shareModeServiceRpc("disable_team_share", {
         p_team_id: teamId,
       });
-      if (error) throw error;
       if (data) requiredRow(data, "teams.disableShareMode");
       return {
         mode: null,
