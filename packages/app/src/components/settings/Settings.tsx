@@ -21,6 +21,7 @@ import {
   ChevronDown,
   Loader2,
   Database,
+  Server,
   FolderOpen,
   Activity,
   Bot,
@@ -57,14 +58,17 @@ const primarySections: Section[] = [
   { id: 'cache', label: 'Local Cache', labelKey: 'settings.nav.cache', icon: Database },
 ]
 
-// Local Agent group = this machine's daemon + its opencode agent, merged into
-// one group. Daemon-owned sections first, then the opencode agent config.
-const localAgentSections: Section[] = [
+// Daemon-owned sections (the amuxd process for this machine).
+const daemonSections: Section[] = [
   { id: 'daemonGeneral', label: 'General', labelKey: 'settings.nav.daemonGeneral', icon: Bot },
   { id: 'daemonWorkspaces', label: 'Workspace', labelKey: 'settings.nav.daemonWorkspaces', icon: FolderOpen },
   { id: 'daemonRuntimes', label: 'Runtimes', labelKey: 'settings.nav.daemonRuntimes', icon: Activity },
   { id: 'automation', label: 'Automation', labelKey: 'settings.nav.automation', icon: Clock },
   { id: 'channels', label: 'Channels', labelKey: 'settings.nav.channels', icon: MessageSquare },
+]
+
+// Local Agent (opencode) config sections.
+const localAgentSections: Section[] = [
   { id: 'llm', label: 'LLM Model', labelKey: 'settings.nav.llm', icon: Brain },
   { id: 'envVars', label: 'Env Variables', labelKey: 'settings.nav.envVars', icon: KeyRound },
   { id: 'prompt', label: 'Prompt', labelKey: 'settings.nav.prompt', icon: MessageSquareText },
@@ -132,13 +136,15 @@ export function Settings(_props?: SettingsProps) {
 
   // Filter sections based on build config feature flags
   const filteredPrimarySections = primarySections
-  const filteredLocalAgentSections = React.useMemo(() =>
-    localAgentSections.filter(s => s.id !== 'channels' || hasAnyChannel(buildConfig.features.channels)),
+  const filteredDaemonSections = React.useMemo(() =>
+    daemonSections.filter(s => s.id !== 'channels' || hasAnyChannel(buildConfig.features.channels)),
     []
   )
+  const filteredLocalAgentSections = React.useMemo(() => localAgentSections, [])
 
-  type AccordionGroup = 'client' | 'localAgent'
+  type AccordionGroup = 'client' | 'daemon' | 'localAgent'
   const groupForSection = (id: SettingsSection): AccordionGroup => {
+    if (filteredDaemonSections.some(s => s.id === id)) return 'daemon'
     if (filteredLocalAgentSections.some(s => s.id === id)) return 'localAgent'
     return 'client'
   }
@@ -148,12 +154,13 @@ export function Settings(_props?: SettingsProps) {
   )
 
   // Settings is split into two independent dialogs by entry point: the regular
-  // entry opens the Client group; the local-daemon row's "Settings" opens the
-  // Daemon + Local Agent (opencode) group. Which one shows is derived from the
-  // active section's group, so every caller lands in the right place.
+  // entry shows the Client group; the local-daemon row's "Settings" shows the
+  // Daemon + Local Agent (opencode) groups together (Client hidden). Which
+  // dialog renders is derived from the active section's group.
   const clientGroup = { id: 'client' as const, label: 'Client', labelKey: 'settings.nav.client', icon: Laptop, sections: filteredPrimarySections, testid: 'client-subnav' }
+  const daemonGroup = { id: 'daemon' as const, label: 'Daemon', labelKey: 'settings.nav.daemon', icon: Server, sections: filteredDaemonSections, testid: 'daemon-subnav' }
   const localAgentGroup = { id: 'localAgent' as const, label: 'Local Agent', labelKey: 'settings.nav.localAgent', icon: SlidersHorizontal, sections: filteredLocalAgentSections, testid: 'local-agent-subnav' }
-  const navGroups = groupForSection(activeView) === 'localAgent' ? [localAgentGroup] : [clientGroup]
+  const navGroups = groupForSection(activeView) === 'client' ? [clientGroup] : [daemonGroup, localAgentGroup]
   const [expandedGroup, setExpandedGroup] = React.useState<AccordionGroup | null>(() => groupForSection(activeView))
   const toggleGroup = (group: AccordionGroup) => {
     setExpandedGroup(prev => (prev === group ? null : group))

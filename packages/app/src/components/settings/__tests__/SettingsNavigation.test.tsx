@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('react-i18next', () => ({
@@ -93,7 +93,7 @@ describe('Settings navigation', () => {
     expect(screen.queryByRole('button', { name: 'LLM Model' })).toBeNull()
   })
 
-  it('daemon entry (initial daemon section) shows only the merged Local Agent group', async () => {
+  it('daemon entry shows the Daemon + Local Agent groups together (Client hidden)', async () => {
     vi.resetModules()
     vi.doMock('@/stores/ui', () => ({
       useUIStore: (selector: (state: unknown) => unknown) =>
@@ -107,17 +107,24 @@ describe('Settings navigation', () => {
     expect(screen.queryByRole('button', { name: 'Client' })).toBeNull()
     expect(screen.queryByTestId('client-subnav')).toBeNull()
 
-    expect(screen.getByRole('button', { name: 'Local Agent' })).toBeInTheDocument()
+    // Both Daemon and Local Agent groups are present (daemon is NOT missing).
+    const daemonButton = screen.getByRole('button', { name: 'Daemon' })
+    const localAgentButton = screen.getByRole('button', { name: 'Local Agent' })
+    const topLevelButtons = screen.getAllByRole('button')
+    expect(topLevelButtons.indexOf(daemonButton)).toBeLessThan(topLevelButtons.indexOf(localAgentButton))
+
+    // The Daemon group is expanded by default (active section is daemonGeneral).
+    const daemonSubnav = screen.getByTestId('daemon-subnav')
+    expect(
+      within(daemonSubnav).getAllByRole('button').map((button) => button.textContent)
+    ).toEqual(['General', 'Workspace', 'Runtimes', 'Automation', 'Channels'])
+
+    // Local Agent starts collapsed (accordion) — expand it to read its sections.
+    fireEvent.click(localAgentButton)
     const localAgentSubnav = screen.getByTestId('local-agent-subnav')
-    // Daemon sections first, then the opencode agent config — all in one group.
     expect(
       within(localAgentSubnav).getAllByRole('button').map((button) => button.textContent)
     ).toEqual([
-      'General',
-      'Workspace',
-      'Runtimes',
-      'Automation',
-      'Channels',
       'LLM Model',
       'Env Variables',
       'Prompt',
