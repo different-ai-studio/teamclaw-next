@@ -107,6 +107,36 @@ async function ensureHealthy(): Promise<boolean> {
   return false
 }
 
+/**
+ * Ensure the team's default workspace (`~/.amuxd/teams/<teamId>`) is registered
+ * in the daemon's local registry (`~/.amuxd/workspaces.toml`) AND the cloud
+ * `public.workspaces` table.
+ *
+ * The desktop auto-selects this dir as the workspace on first launch (see
+ * `useAppInit`), but the daemon only learns about a workspace when one is
+ * explicitly registered — so without this the default workspace would be
+ * absent from both lists. We run it right after confirming the daemon is bound
+ * to the current team and healthy, i.e. at the same point we verify daemon and
+ * actor share a team.
+ *
+ * Idempotent + best-effort: the daemon dedupes by canonical path and tops up
+ * whichever side (local/cloud) is missing; `register_daemon_workspace` returns
+ * `null` when the daemon HTTP listener isn't up yet. Any failure here must not
+ * break onboarding.
+ */
+async function ensureDefaultWorkspaceRegistered(teamId: string | null): Promise<void> {
+  if (!isTauri() || !teamId) return
+  try {
+    const { homeDir, join } = await import('@tauri-apps/api/path')
+    const home = await homeDir()
+    const workspacePath = await join(home, '.amuxd', 'teams', teamId)
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('register_daemon_workspace', { workspacePath })
+  } catch (e) {
+    console.warn('[daemon-onboarding] default workspace registration failed (non-critical)', e)
+  }
+}
+
 export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get) => ({
   status: 'unknown',
   loaded: false,
@@ -131,6 +161,9 @@ export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get)
     const first = await probeDaemonHttp()
     if (first.ok) {
       set({ status: 'ready', loaded: true })
+      // Daemon and actor share a team — ensure the default team workspace is
+      // registered locally + in the cloud (idempotent, best-effort).
+      void ensureDefaultWorkspaceRegistered(currentTeamId)
       return
     }
     set({ status: 'starting', loaded: true, error: null })
@@ -140,6 +173,7 @@ export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get)
       loaded: true,
       error: ok ? null : 'amuxd 启动失败：请确认本机 amuxd 可运行后重试。',
     })
+    if (ok) void ensureDefaultWorkspaceRegistered(currentTeamId)
   },
 
   loadOwnedAgents: async () => {

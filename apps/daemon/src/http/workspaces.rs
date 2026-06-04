@@ -831,6 +831,94 @@ pub async fn reload_runtime(
     Ok(apply_ok(outcome))
 }
 
+// ── POST /v1/workspaces — register a workspace (local registry + cloud) ────────
+
+#[derive(Debug, Deserialize)]
+pub struct RegisterWorkspaceBody {
+    /// Absolute workspace path to register. The caller is responsible for
+    /// expanding `~` (the desktop passes a fully-resolved path).
+    pub path: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RegisterWorkspaceResponseBody {
+    /// Local 8-char registry id (`StoredWorkspace::workspace_id`).
+    pub workspace_id: String,
+    pub path: String,
+    pub display_name: String,
+}
+
+/// `POST /v1/workspaces` — register `path` into the daemon's local registry
+/// (`~/.amuxd/workspaces.toml`) and the cloud `public.workspaces` table.
+///
+/// Idempotent: re-registering an existing path returns its current record
+/// without creating a duplicate (the actor's `apply_add_workspace` still tops
+/// up the cloud row + default if either is missing). The desktop calls this on
+/// first launch to ensure its default team workspace (`~/.amuxd/teams/<teamId>`)
+/// exists in both registries.
+///
+/// Requires `workspace:write`. Returns 503 when no daemon actor is wired behind
+/// the HTTP server (focused tests).
+pub async fn register_workspace(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Json(body): Json<RegisterWorkspaceBody>,
+) -> Result<Json<RegisterWorkspaceResponseBody>, HttpError> {
+    require_scope(&principal, "workspace:write")?;
+
+    let path = body.path.trim().to_string();
+    if path.is_empty() {
+        return Err(HttpError::validation("path must not be empty"));
+    }
+
+    let tx = state
+        .register_workspace_tx
+        .as_ref()
+        .ok_or_else(|| HttpError::runtime_unavailable("workspace registration not available"))?;
+
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel::<String>();
+    tx.send(crate::http::state::RegisterWorkspaceRequest { path, reply_tx })
+        .await
+        .map_err(|_| HttpError::runtime_unavailable("daemon actor unavailable"))?;
+
+    let reply = reply_rx
+        .await
+        .map_err(|_| HttpError::internal("daemon actor dropped the request"))?;
+
+    let value: serde_json::Value = serde_json::from_str(&reply)
+        .map_err(|e| HttpError::internal(format!("malformed actor reply: {e}")))?;
+
+    if value.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+        let result = value
+            .get("result")
+            .ok_or_else(|| HttpError::internal("actor reply missing result"))?;
+        Ok(Json(RegisterWorkspaceResponseBody {
+            workspace_id: result
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            path: result
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            display_name: result
+                .get("display_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+        }))
+    } else {
+        let error = value
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("workspace registration failed")
+            .to_string();
+        Err(HttpError::internal(error))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
