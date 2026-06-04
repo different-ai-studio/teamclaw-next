@@ -30,10 +30,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 fn isolate_home(tmp: &TempDir) {
     std::env::set_var("HOME", tmp.path());
     // Prime the legacy disk-fallback env-blob with a non-empty map so
-    // `read_legacy_keychain_blob` returns Ok(Some(..)) instead of bubbling up
-    // the platform-keychain failure surface (Linux/macOS sandboxes without a
-    // default keychain). The personal secret store will migrate this into
-    // its own encrypted blob on first read.
+    // `read_legacy_disk_blob` returns Ok(Some(..)). The personal secret store
+    // will migrate this into its own encrypted blob on first read.
     let fallback_dir = tmp.path().join(".teamclaw");
     std::fs::create_dir_all(&fallback_dir).expect("mkdir ~/.teamclaw");
     std::fs::write(

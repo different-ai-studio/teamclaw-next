@@ -634,11 +634,7 @@ pub async fn download_and_install_update<R: Runtime>(
     let pubkey = get_updater_pubkey();
     verify_signature(&bytes, &signature, pubkey)?;
 
-    // 3. Snapshot legacy keychain env data only for installs that have not yet
-    //    migrated to the local encrypted blob. After migration this hook is a no-op.
-    super::env_vars::snapshot_env_blob_to_disk();
-
-    // 4. Install (extract tar.gz and replace .app bundle)
+    // 3. Install (extract tar.gz and replace .app bundle)
     install_update(&bytes)?;
 
     Ok(())
