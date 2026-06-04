@@ -1,7 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 
 pub mod acp;
-pub use acp::{AcpError, AcpHandle, AcpTurnOutcome, AmuxSessionId, ModelInfo};
+pub use acp::{AcpAvailableCommand, AgentInfo, AcpError, AcpHandle, AcpTurnOutcome, AmuxSessionId, ModelInfo, WorkspaceInfo};
 
 pub mod binding;
 pub mod channel_store;

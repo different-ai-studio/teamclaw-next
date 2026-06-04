@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use teamclaw_gateway::{AcpError, AcpHandle, AcpTurnOutcome, AmuxSessionId, ModelInfo};
+use teamclaw_gateway::{AcpAvailableCommand, AgentInfo, AcpError, AcpHandle, AcpTurnOutcome, AmuxSessionId, ModelInfo, WorkspaceInfo};
 
 use crate::backend::Backend;
 use crate::proto::amux;
@@ -70,6 +70,13 @@ pub struct AmuxdAcpHandle {
     /// working directory instead of a throwaway `/tmp` scratch dir. `None` →
     /// fall back to a scratch dir (the workspace is unset or not synced locally).
     pub default_workspace_dir: Option<String>,
+    /// Per-session agent type override: logical_session_id → AgentType.
+    /// Set by `set_agent`; consulted at lazy-spawn time. In-memory only.
+    pub agent_type_override: Arc<Mutex<HashMap<String, amux::AgentType>>>,
+    /// Path to workspaces.toml — read by `list_workspaces` on demand.
+    pub workspaces_path: std::path::PathBuf,
+    /// Per-session workspace override: logical_session_id → workspace_id.
+    pub workspace_override: Arc<Mutex<HashMap<String, String>>>,
 }
 
 /// Returned by `resolve_or_spawn`. `spawned` is true iff this call was
@@ -441,6 +448,143 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
 
         Ok(())
     }
+
+    async fn available_commands(
+        &self,
+        session: &AmuxSessionId,
+    ) -> Result<Vec<AcpAvailableCommand>, AcpError> {
+        let map = self.logical_to_acp.lock().await;
+        let real = match map.get(session) {
+            Some(s) => s.real_acp_sid.clone(),
+            None => return Ok(vec![]),
+        };
+        drop(map);
+        let mgr = self.manager.lock().await;
+        let agent_id = match mgr.agent_id_by_acp_session(&real) {
+            Some(id) => id,
+            None => return Ok(vec![]),
+        };
+        Ok(mgr
+            .get_available_commands(&agent_id)
+            .into_iter()
+            .map(|c| AcpAvailableCommand {
+                name: c.name,
+                description: c.description,
+                input_hint: if c.input_hint.is_empty() { None } else { Some(c.input_hint) },
+            })
+            .collect())
+    }
+
+    async fn send_slash_command(
+        &self,
+        session: &AmuxSessionId,
+        name: &str,
+        input: Option<&str>,
+    ) -> Result<AcpTurnOutcome, AcpError> {
+        let text = match input {
+            Some(inp) if !inp.is_empty() => format!("/{name} {inp}"),
+            _ => format!("/{name}"),
+        };
+        self.send_prompt(session, "user", &text).await
+    }
+
+    async fn list_sessions(
+        &self,
+        active_session: &AmuxSessionId,
+    ) -> Result<Vec<(AmuxSessionId, bool)>, AcpError> {
+        let map = self.logical_to_acp.lock().await;
+        Ok(map.keys().map(|k| (k.clone(), k == active_session)).collect())
+    }
+
+    async fn list_agents(
+        &self,
+        session: &AmuxSessionId,
+    ) -> Result<Vec<AgentInfo>, AcpError> {
+        let current = {
+            let overrides = self.agent_type_override.lock().await;
+            overrides
+                .get(session.as_str())
+                .copied()
+                .or(self.default_agent_type)
+                .unwrap_or(amux::AgentType::ClaudeCode)
+        };
+        Ok(vec![
+            AgentInfo { agent_type: "claude-code".to_string(), is_current: current == amux::AgentType::ClaudeCode },
+            AgentInfo { agent_type: "opencode".to_string(), is_current: current == amux::AgentType::Opencode },
+            AgentInfo { agent_type: "codex".to_string(), is_current: current == amux::AgentType::Codex },
+        ])
+    }
+
+    async fn set_agent(
+        &self,
+        session: &AmuxSessionId,
+        agent_type: &str,
+    ) -> Result<(), AcpError> {
+        let t = match agent_type {
+            "claude-code" => amux::AgentType::ClaudeCode,
+            "opencode" => amux::AgentType::Opencode,
+            "codex" => amux::AgentType::Codex,
+            other => return Err(AcpError::NotFound(format!(
+                "unknown agent type '{other}'; valid: claude-code, opencode, codex"
+            ))),
+        };
+        {
+            let mut overrides = self.agent_type_override.lock().await;
+            overrides.insert(session.to_string(), t);
+        }
+        let _ = self.cancel(session).await;
+        let mut map = self.logical_to_acp.lock().await;
+        map.remove(session);
+        Ok(())
+    }
+
+    async fn list_workspaces(
+        &self,
+        session: &AmuxSessionId,
+    ) -> Result<Vec<WorkspaceInfo>, AcpError> {
+        use crate::config::WorkspaceStore;
+        let store = WorkspaceStore::load(&self.workspaces_path)
+            .map_err(|e| AcpError::Send(format!("workspace load: {e}")))?;
+        let current_id = {
+            let overrides = self.workspace_override.lock().await;
+            overrides
+                .get(session.as_str())
+                .cloned()
+                .or_else(|| store.default_workspace_id.clone())
+        };
+        Ok(store
+            .workspaces
+            .iter()
+            .map(|w| WorkspaceInfo {
+                workspace_id: w.workspace_id.clone(),
+                display_name: w.display_name.clone(),
+                is_current: current_id.as_deref() == Some(w.workspace_id.as_str()),
+            })
+            .collect())
+    }
+
+    async fn set_workspace(
+        &self,
+        session: &AmuxSessionId,
+        workspace_id: &str,
+    ) -> Result<(), AcpError> {
+        use crate::config::WorkspaceStore;
+        let store = WorkspaceStore::load(&self.workspaces_path)
+            .map_err(|e| AcpError::Send(format!("workspace load: {e}")))?;
+        if !store.workspaces.iter().any(|w| w.workspace_id == workspace_id) {
+            return Err(AcpError::NotFound(format!(
+                "workspace '{workspace_id}' not found"
+            )));
+        }
+        {
+            let mut overrides = self.workspace_override.lock().await;
+            overrides.insert(session.to_string(), workspace_id.to_string());
+        }
+        let _ = self.cancel(session).await;
+        let mut map = self.logical_to_acp.lock().await;
+        map.remove(session);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -461,6 +605,9 @@ mod tests {
             backend: Arc::new(MockBackend::default()),
             default_agent_type: None,
             default_workspace_dir: None,
+            agent_type_override: Arc::new(Mutex::new(HashMap::new())),
+            workspaces_path: std::path::PathBuf::from("/tmp/test-workspaces.toml"),
+            workspace_override: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
