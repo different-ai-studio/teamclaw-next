@@ -28,10 +28,8 @@ import { OfflineSendConfirmDialog } from "./OfflineSendConfirmDialog";
 import type { EngagedAgentUiEntry } from "@/hooks/use-engaged-agent-ui-states";
 import { allEngagedNonReady } from "@/hooks/use-engaged-agent-ui-states";
 import { useOfflineSendPreferenceStore } from "@/stores/offline-send-preference-store";
-import {
-  StreamingAgentsDock,
-  type ActiveStreamingAgent,
-} from "./StreamingAgentsDock";
+import { ComposerStack, type ActiveStreamingAgent } from "./ComposerStack";
+import type { Todo } from "@/stores/session-types";
 import { CommandPopover } from "./CommandPopover";
 import type { Command as ChatCommand } from "./CommandPopover";
 import { FileInputButton } from "./FileInputButton";
@@ -162,7 +160,10 @@ interface ChatInputAreaProps {
   onRemoveFromQueue: (id: string) => void;
   onHeightChange?: (height: number) => void;
   bottomOffsetPx?: number;
-  headerContent?: React.ReactNode;
+  /** Plan + queue rows rendered inside the unified composer stack (above input). */
+  stackTodos?: Todo[];
+  stackQueue?: QueuedMessage[];
+  planSlotHidden?: boolean;
   engagedAgents: AttachedAgent[];
   engagedUiEntries?: EngagedAgentUiEntry[];
   agentToRuntimeId?: Map<string, string>;
@@ -196,7 +197,9 @@ export function ChatInputArea({
   onRemoveFromQueue: _onRemoveFromQueue,
   onHeightChange,
   bottomOffsetPx = 0,
-  headerContent,
+  stackTodos = [],
+  stackQueue = [],
+  planSlotHidden = false,
   engagedAgents = [],
   engagedUiEntries = [],
   agentToRuntimeId = new Map(),
@@ -345,30 +348,27 @@ export function ChatInputArea({
       data-testid="chat-input-area"
       style={bottomOffsetPx ? { bottom: bottomOffsetPx } : undefined}
       className={cn(
-        "z-10",
+        "z-20",
         compact
           ? "absolute bottom-0 left-0 right-0 px-2 pb-2 pt-2 bg-background"
-          : "absolute bottom-0 left-0 right-0 px-4 pb-6 pt-8",
+          : "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background from-[42%] via-background/92 to-transparent px-4 pb-6 pt-8",
       )}
     >
-      <div className={cn("relative w-full", compact ? "" : "mx-auto max-w-3xl")}>
-        {/* Permission & Error UI (rendered above input so it's visible) */}
-        {onInterruptAgent ? (
-          <StreamingAgentsDock
-            agents={activeStreamingAgents}
-            onInterrupt={onInterruptAgent}
+      <div className={cn("relative z-10 w-full", compact ? "" : "mx-auto max-w-3xl")}>
+        {!compact ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-0 -bottom-7 -z-10 bg-background"
           />
         ) : null}
-        {headerContent}
-
-        <div className="relative">
-          {!compact ? (
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute left-[-1px] right-[-1px] top-0 bottom-[-1.75rem] bg-background"
-            />
-          ) : null}
-
+        <ComposerStack
+          agents={onInterruptAgent ? activeStreamingAgents : []}
+          onInterrupt={onInterruptAgent}
+          todos={stackTodos}
+          queue={stackQueue}
+          onRemoveFromQueue={_onRemoveFromQueue}
+          planSlotHidden={planSlotHidden}
+        >
           <PromptInput
             value={inputValue}
             onValueChange={onInputChange}
@@ -400,7 +400,7 @@ export function ChatInputArea({
               setCommandSearchQuery("");
             }}
             multiple
-            className="relative z-10 bg-card shadow-lg"
+            className="relative z-10 w-full"
           >
           {/* Agent chips: removed — agent is shown in AgentSelectorDock (bottom-left) instead */}
 
@@ -579,7 +579,7 @@ export function ChatInputArea({
               if (pendingSubmitMessage) flushSubmit(pendingSubmitMessage);
             }}
           />
-        </div>
+        </ComposerStack>
       </div>
     </div>
   );

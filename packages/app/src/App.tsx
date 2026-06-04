@@ -121,6 +121,11 @@ import {
   streamEntryHasVisibleContent,
   shouldFlushPendingAgentReplyFallback,
 } from "@/lib/live-agent-stream";
+import {
+  mapAcpPlanEntries,
+  syncPlanFromTodoTool,
+  syncPlanFromTodoToolResult,
+} from "@/lib/sync-plan-from-todowrite";
 import { useUIStore } from "@/stores/ui";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useLocalStatsStore } from "@/stores/local-stats";
@@ -1128,6 +1133,11 @@ function AppContent() {
                   void useLocalStatsStore.getState().incrementSkillUsage(wp, tu.params.name);
                 }
               }
+              syncPlanFromTodoTool(sid, actorId, {
+                toolName: tu.toolName,
+                params: tu.params,
+                description: tu.description,
+              });
             } else if (event?.case === "toolResult") {
               const tr = normalizeToolResultEvent(event.value);
               logStreamToolDiag("mqtt.toolResult", {
@@ -1138,6 +1148,11 @@ function AppContent() {
                 success: tr.success,
               });
               useV2StreamingStore.getState().completeToolUse(sid, actorId, {
+                toolId: tr.toolId,
+                success: tr.success,
+                summary: tr.summary,
+              });
+              syncPlanFromTodoToolResult(sid, actorId, {
                 toolId: tr.toolId,
                 success: tr.success,
                 summary: tr.summary,
@@ -1221,22 +1236,11 @@ function AppContent() {
               });
             } else if (event?.case === "planUpdate") {
               const pu = event.value as { entries?: Array<{ content?: string; priority?: string; status?: string }> };
-              const entries: Array<{
-                content: string;
-                priority: "high" | "medium" | "low";
-                status: "pending" | "completed" | "in_progress";
-              }> = (pu.entries ?? []).map((e) => ({
-                content: e.content ?? "",
-                priority: (e.priority === "high" || e.priority === "medium" || e.priority === "low"
-                  ? e.priority
-                  : ("medium" as const)),
-                status: (e.status === "in_progress"
-                  ? ("in_progress" as const)
-                  : e.status === "completed"
-                  ? ("completed" as const)
-                  : ("pending" as const)),
-              }));
-              useV2StreamingStore.getState().setPlan(sid, actorId, entries);
+              useV2StreamingStore.getState().setPlan(
+                sid,
+                actorId,
+                mapAcpPlanEntries(pu.entries ?? []),
+              );
             }
             // statusChange / availableCommands / raw: MVP no-op (RuntimeInfo retain
             // already surfaces agent status; commands TBD; raw is catch-all).
