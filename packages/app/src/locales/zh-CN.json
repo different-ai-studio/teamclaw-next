@@ -632,6 +632,8 @@
     "workspaceSwitchFailed": "切换工作区失败：{{msg}}",
     "workspaceDeleted": "工作区已删除",
     "workspaceDeleteFailed": "删除工作区失败：{{msg}}",
+    "currentWorkspace": "当前工作区",
+    "defaultWorkspace": "默认工作区",
     "deviceSettings": "设置",
     "invite": "邀请成员",
     "newIdea": "新建想法",

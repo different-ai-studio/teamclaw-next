@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeftRight, ChevronDown, ChevronRight, FolderPlus, Loader2, MonitorSmartphone, Settings, Trash2 } from 'lucide-react'
+import { ArrowLeftRight, ChevronDown, ChevronRight, FolderPlus, Loader2, MonitorSmartphone, Settings, Star, Trash2 } from 'lucide-react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { toast } from 'sonner'
 import {
@@ -23,6 +23,7 @@ import { syncSessionWorkspaces } from '@/lib/session-workspace-sync'
 import { useUIStore } from '@/stores/ui'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useCurrentTeamStore } from '@/stores/current-team'
+import { workspacePathsMatch } from '@/stores/session-utils'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -64,8 +65,10 @@ export function LocalDaemonRow({
   const filter = useUIStore((s) => s.sidebarFilter)
   const setFilter = useUIStore((s) => s.setSidebarFilter)
   const openSettings = useUIStore((s) => s.openSettings)
+  const currentWorkspacePath = useWorkspaceStore((s) => s.workspacePath)
 
   const agentId = actor?.id ?? null
+  const defaultWorkspaceId = actor?.default_workspace_id ?? null
   const [workspaces, setWorkspaces] = React.useState<DaemonWorkspace[]>([])
   const [loading, setLoading] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
@@ -211,6 +214,8 @@ export function LocalDaemonRow({
           )}
           {workspaces.map((ws) => {
             const active = filter.kind === 'workspace' && (filter.workspaceId === ws.id || filter.path === (ws.path ?? ''))
+            const isCurrent = !!currentWorkspacePath && !!ws.path && workspacePathsMatch(ws.path, currentWorkspacePath)
+            const isDefault = !!defaultWorkspaceId && ws.id === defaultWorkspaceId
             return (
               <ContextMenu key={ws.id}>
                 <ContextMenuTrigger asChild>
@@ -224,6 +229,19 @@ export function LocalDaemonRow({
                     title={ws.path ?? ws.name}
                   >
                     <span className="min-w-0 flex-1 truncate">{ws.name}</span>
+                    {isCurrent && (
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500"
+                        title={t('sidebar.currentWorkspace', 'Current workspace')}
+                        aria-label={t('sidebar.currentWorkspace', 'Current workspace')}
+                      />
+                    )}
+                    {isDefault && (
+                      <Star
+                        className="h-3 w-3 shrink-0 fill-coral text-coral"
+                        aria-label={t('sidebar.defaultWorkspace', 'Default workspace')}
+                      />
+                    )}
                   </button>
                 </ContextMenuTrigger>
                 <ContextMenuContent className="w-48">

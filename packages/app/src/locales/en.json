@@ -632,6 +632,8 @@
     "workspaceSwitchFailed": "Failed to switch workspace: {{msg}}",
     "workspaceDeleted": "Workspace deleted",
     "workspaceDeleteFailed": "Failed to delete workspace: {{msg}}",
+    "currentWorkspace": "Current workspace",
+    "defaultWorkspace": "Default workspace",
     "deviceSettings": "Settings",
     "invite": "Invite member",
     "newIdea": "New idea",
