@@ -1973,6 +1973,8 @@
       "inviteLinkExpiry": "有效期 7 天。过期后请重新生成。",
       "disabled": "已禁用",
       "token": "令牌",
+      "authSsh": "SSH",
+      "globalSyncDir": "全局副本",
       "lastSynced": "上次同步",
       "syncing": "同步中...",
       "syncNow": "立即同步",
@@ -2758,6 +2760,7 @@
       "enabledPrefix": "已开通:",
       "repositoryPrefix": "仓库：",
       "globalSyncDirPrefix": "全局同步目录：",
+      "workspaceLink": "工作区链接",
       "workspaceLinkPrefix": "本工作区链接：",
       "linkStatus": {
         "linked": "已软链",

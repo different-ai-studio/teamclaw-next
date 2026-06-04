@@ -1973,6 +1973,8 @@
       "inviteLinkExpiry": "Valid for 7 days. Generate a new one if it expires.",
       "disabled": "Disabled",
       "token": "Token",
+      "authSsh": "SSH",
+      "globalSyncDir": "Global Copy",
       "lastSynced": "Last synced",
       "syncing": "Syncing...",
       "syncNow": "Sync Now",
@@ -2758,6 +2760,7 @@
       "enabledPrefix": "Enabled:",
       "repositoryPrefix": "Repository: ",
       "globalSyncDirPrefix": "Global sync directory: ",
+      "workspaceLink": "Workspace Link",
       "workspaceLinkPrefix": "This workspace link: ",
       "linkStatus": {
         "linked": "Linked",
