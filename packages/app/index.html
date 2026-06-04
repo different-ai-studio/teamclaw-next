@@ -5,43 +5,113 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TeamClaw</title>
     <style>
-      /* Skeleton — covers viewport until the workspace is bootstrapped */
+      /* Skeleton — covers the viewport until the workspace is bootstrapped.
+         Mirrors the real three-column shell (sidebar / session list / main)
+         so the hand-off to React is visually seamless. The session-list
+         column only exists in the "workspace" UI variant; the static markup
+         renders it for both variants and CSS hides it for "default".
+         Palette mirrors the Editorial Calm tokens in styles/globals.css —
+         hard-coded here because that stylesheet is not loaded yet at first
+         paint. __UI_VARIANT__ is replaced by Vite transformIndexHtml. */
+
+      /* Editorial Calm — light theme (default) */
+      :root {
+        --sk-bg: #fbfaf7;
+        --sk-panel: #efece4;
+        --sk-border: rgba(26, 26, 20, 0.08);
+        --sk-bone: #dcd6c7;
+      }
+      /* Editorial Calm — dark theme (oklch, matches globals.css .dark) */
+      .dark {
+        --sk-bg: oklch(0.145 0 0);
+        --sk-panel: oklch(0.205 0 0);
+        --sk-border: oklch(1 0 0 / 10%);
+        --sk-bone: oklch(0.3 0 0);
+      }
+
       #skeleton {
         position: fixed;
         inset: 0;
         z-index: 9999;
         display: flex;
         height: 100vh;
+        background: var(--sk-bg);
         font-family: system-ui, -apple-system, sans-serif;
       }
-      #skeleton .sidebar {
-        width: 320px;
-        border-right: 1px solid var(--sk-border);
-        padding: 16px;
+
+      /* Column 1 — primary sidebar (220px workspace / 320px default) */
+      #skeleton .sk-sidebar {
+        width: 220px;
         flex-shrink: 0;
+        padding: 16px 12px;
+        border-right: 1px solid var(--sk-border);
+        background: var(--sk-panel);
       }
-      #skeleton .main {
+      #skeleton[data-variant="default"] .sk-sidebar {
+        width: 320px;
+      }
+
+      /* Column 2 — session list (workspace variant only) */
+      #skeleton .sk-sessions {
+        width: 280px;
+        flex-shrink: 0;
+        padding: 16px 12px;
+        border-right: 1px solid var(--sk-border);
+      }
+      #skeleton[data-variant="default"] .sk-sessions {
+        display: none;
+      }
+
+      /* Column 3 — main content area */
+      #skeleton .sk-main {
+        display: flex;
         flex: 1;
+        min-width: 0;
+        flex-direction: column;
+      }
+      #skeleton .sk-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 48px;
+        flex-shrink: 0;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--sk-border);
+      }
+      #skeleton .sk-header-spacer {
+        flex: 1;
+      }
+      #skeleton .sk-content {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+        justify-content: flex-end;
         padding: 16px;
       }
+
       #skeleton .bone {
         background: var(--sk-bone);
         border-radius: 6px;
-        margin-bottom: 10px;
+        animation: sk-pulse 1.6s ease-in-out infinite;
       }
-      /* Light theme (default) */
-      :root {
-        --sk-bg: #f2f5f9;
-        --sk-border: #e4e4e7;
-        --sk-bone: #e4e7eb;
+      #skeleton .bone.circle {
+        border-radius: 50%;
       }
-      /* Dark theme */
-      .dark {
-        --sk-bg: #09090b;
-        --sk-border: #27272a;
-        --sk-bone: #18181b;
+      @keyframes sk-pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
       }
-      #skeleton { background: var(--sk-bg); }
+      @media (prefers-reduced-motion: reduce) {
+        #skeleton .bone {
+          animation: none;
+        }
+      }
     </style>
     <script>
       // Apply theme before first paint (matches main.tsx logic)
@@ -59,17 +129,40 @@
   </head>
   <body>
     <div id="root"></div>
-    <div id="skeleton">
-      <div class="sidebar">
-        <div class="bone" style="height:20px;width:55%"></div>
-        <div class="bone" style="height:14px;width:80%;margin-top:20px"></div>
-        <div class="bone" style="height:14px;width:65%"></div>
-        <div class="bone" style="height:14px;width:75%"></div>
-        <div class="bone" style="height:14px;width:60%"></div>
+    <div id="skeleton" data-variant="__UI_VARIANT__">
+      <!-- Column 1: primary sidebar -->
+      <div class="sk-sidebar">
+        <div class="bone" style="height:24px;width:60%"></div>
+        <div class="bone" style="height:14px;width:85%;margin-top:24px"></div>
+        <div class="bone" style="height:14px;width:70%;margin-top:12px"></div>
+        <div class="bone" style="height:14px;width:78%;margin-top:12px"></div>
+        <div class="bone" style="height:14px;width:64%;margin-top:28px"></div>
+        <div class="bone" style="height:14px;width:72%;margin-top:12px"></div>
       </div>
-      <div class="main">
-        <div class="bone" style="height:24px;width:35%"></div>
-        <div class="bone" style="height:14px;width:50%;margin-top:24px"></div>
+
+      <!-- Column 2: session list (hidden in the default variant) -->
+      <div class="sk-sessions">
+        <div class="bone" style="height:12px;width:40%;margin-bottom:16px"></div>
+        <div class="bone" style="height:46px;width:100%;margin-bottom:10px"></div>
+        <div class="bone" style="height:46px;width:100%;margin-bottom:10px"></div>
+        <div class="bone" style="height:46px;width:100%;margin-bottom:24px"></div>
+        <div class="bone" style="height:12px;width:32%;margin-bottom:16px"></div>
+        <div class="bone" style="height:46px;width:100%;margin-bottom:10px"></div>
+        <div class="bone" style="height:46px;width:100%"></div>
+      </div>
+
+      <!-- Column 3: main content -->
+      <div class="sk-main">
+        <div class="sk-header">
+          <div class="bone" style="height:16px;width:180px"></div>
+          <div class="sk-header-spacer"></div>
+          <div class="bone circle" style="height:18px;width:18px"></div>
+          <div class="bone circle" style="height:18px;width:18px"></div>
+          <div class="bone circle" style="height:18px;width:18px"></div>
+        </div>
+        <div class="sk-content">
+          <div class="bone" style="height:48px;width:100%;border-radius:12px"></div>
+        </div>
       </div>
     </div>
     <script>
