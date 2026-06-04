@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react"
+import { useTranslation } from "react-i18next"
 import { Loader2, ExternalLink } from "lucide-react"
 import { isTauri } from "@/lib/utils"
 import { normalizeUrl, urlToLabel } from "@/lib/webview-utils"
@@ -47,6 +48,7 @@ function initTabCleanup() {
 }
 
 export function WebViewContent({ url: rawUrl }: WebViewContentProps) {
+  const { t } = useTranslation()
   const url = normalizeUrl(rawUrl)
   const label = urlToLabel(url)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -213,12 +215,12 @@ export function WebViewContent({ url: rawUrl }: WebViewContentProps) {
         <iframe
           src={url}
           className="w-full h-full border-0"
-          title="WebView Content"
+          title={t('webview.iframeTitle', 'Web content')}
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
           onLoad={() => setIsLoading(false)}
           onError={() => {
             setIsLoading(false)
-            setError("Failed to load page")
+            setError(t('webview.loadFailed', 'Failed to load page'))
           }}
         />
         {error && (

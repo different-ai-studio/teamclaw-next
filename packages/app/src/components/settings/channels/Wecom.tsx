@@ -481,7 +481,7 @@ function WeComSetupWizard({
             {t(currentStep.titleKey, currentStep.title)}
           </DialogTitle>
           <DialogDescription>
-            {t(currentStep.descKey, currentStep.description)}
+            {t(currentStep.descKey, { defaultValue: currentStep.description, appName: buildConfig.app.name })}
           </DialogDescription>
         </DialogHeader>
 

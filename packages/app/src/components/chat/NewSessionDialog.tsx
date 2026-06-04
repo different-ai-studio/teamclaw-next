@@ -350,6 +350,7 @@ function ParticipantChip({
   actor: Candidate
   onRemove: () => void
 }) {
+  const { t } = useTranslation()
   const isAgent = actor.actor_type === 'agent'
   const c = actorAvatarColor(actor.id)
   return (
@@ -377,7 +378,7 @@ function ParticipantChip({
         type="button"
         onClick={onRemove}
         className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-        aria-label="Remove participant"
+        aria-label={t('chat.newSessionDialog.removeParticipantAria', 'Remove participant')}
       >
         <X className="h-3 w-3" />
       </button>

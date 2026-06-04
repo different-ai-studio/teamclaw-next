@@ -70,7 +70,7 @@ export function TerminalSearchOverlay({ controller, onClose }: Props) {
       <button
         type="button"
         onClick={() => setCaseSensitive(v => !v)}
-        title="Case sensitive"
+        title={t('terminal.search.caseSensitive', 'Case sensitive')}
         className={cn(
           "rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground",
           caseSensitive && "bg-selected text-foreground",

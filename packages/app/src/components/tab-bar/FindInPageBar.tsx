@@ -93,7 +93,7 @@ export function FindInPageBar({ label, onClose }: FindInPageBarProps) {
       </button>
       <button
         onClick={onClose}
-        title="Close (Escape)"
+        title={t('tabBar.findClose', 'Close (Escape)')}
         className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
       >
         <X className="h-3.5 w-3.5" />
