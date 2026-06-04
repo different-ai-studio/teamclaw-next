@@ -69,7 +69,11 @@ export default defineConfig({
     {
       name: 'inject-app-short-name',
       transformIndexHtml(html) {
-        return html.replace(/__APP_SHORT_NAME__/g, sn as string)
+        const uiVariant =
+          (buildConfig as any).app?.uiVariant === 'workspace' ? 'workspace' : 'default'
+        return html
+          .replace(/__APP_SHORT_NAME__/g, sn as string)
+          .replace(/__UI_VARIANT__/g, uiVariant)
       },
     },
     // Bundle analysis: run with ANALYZE=true pnpm build
