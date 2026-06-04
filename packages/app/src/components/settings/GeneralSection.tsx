@@ -15,6 +15,7 @@ import {
   MessageSquareText,
   Plus,
   Server,
+  User,
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -30,6 +31,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useMqttConnected } from '@/hooks/useMqttConnected'
 import { useMqttReconnectStore } from '@/stores/mqtt-reconnect'
+import { useCurrentTeamStore } from '@/stores/current-team'
 import { SettingCard, SectionHeader, ToggleSwitch } from './shared'
 import { getPermissionPolicy, setPermissionPolicy, type PermissionPolicy } from '@/lib/permission-policy'
 import { useSuggestionsStore } from '@/stores/suggestions'
@@ -92,6 +94,30 @@ export const GeneralSection = React.memo(function GeneralSection() {
       i18next.off('languageChanged', handleLanguageChange);
     };
   }, []);
+  // Account: the current user's own display name (editable).
+  const currentMemberName = useCurrentTeamStore((s) => s.currentMember?.displayName ?? '')
+  const renameCurrentMember = useCurrentTeamStore((s) => s.renameCurrentMember)
+  const memberSaving = useCurrentTeamStore((s) => s.saving)
+  const [displayNameDraft, setDisplayNameDraft] = React.useState(currentMemberName)
+  // Keep the draft in sync when the member loads / changes elsewhere, but don't
+  // clobber an in-progress edit.
+  const [displayNameDirty, setDisplayNameDirty] = React.useState(false)
+  React.useEffect(() => {
+    if (!displayNameDirty) setDisplayNameDraft(currentMemberName)
+  }, [currentMemberName, displayNameDirty])
+
+  const handleSaveDisplayName = React.useCallback(async () => {
+    const trimmed = displayNameDraft.trim()
+    if (!trimmed || trimmed === currentMemberName) return
+    const ok = await renameCurrentMember(trimmed)
+    if (ok) {
+      setDisplayNameDirty(false)
+      toast.success(t('settings.general.displayNameSaved', 'Display name updated'))
+    } else {
+      toast.error(t('settings.general.displayNameError', 'Could not update display name'))
+    }
+  }, [displayNameDraft, currentMemberName, renameCurrentMember, t])
+
   const [autoSave, setAutoSave] = React.useState(true)
   const [notificationLevel, setNotificationLevelState] = React.useState(() => {
     try {
@@ -149,6 +175,47 @@ export const GeneralSection = React.memo(function GeneralSection() {
         description={t('settings.general.description', 'Customize your application preferences')}
         iconColor="text-blue-500"
       />
+
+      {currentMemberName ? (
+        <SettingCard>
+          <div className="space-y-2">
+            <label className="text-[13px] font-medium flex items-center gap-2">
+              <User className="h-4 w-4 text-muted-foreground" />
+              {t('settings.general.displayName', 'Display Name')}
+            </label>
+            <p className="text-xs text-muted-foreground">
+              {t('settings.general.displayNameDesc', 'The name teammates see for you')}
+            </p>
+            <div className="flex items-center gap-2">
+              <Input
+                value={displayNameDraft}
+                onChange={(e) => {
+                  setDisplayNameDraft(e.target.value)
+                  setDisplayNameDirty(true)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleSaveDisplayName()
+                }}
+                placeholder={t('settings.general.displayNamePlaceholder', 'Your name')}
+                maxLength={60}
+                className="h-11"
+                data-testid="display-name-input"
+              />
+              <Button
+                onClick={() => void handleSaveDisplayName()}
+                disabled={
+                  memberSaving ||
+                  !displayNameDraft.trim() ||
+                  displayNameDraft.trim() === currentMemberName
+                }
+                className="h-11 shrink-0"
+              >
+                {t('settings.general.save', 'Save')}
+              </Button>
+            </div>
+          </div>
+        </SettingCard>
+      ) : null}
 
       <SettingCard>
         <h4 className="font-medium mb-4 flex items-center gap-2">

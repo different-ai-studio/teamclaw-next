@@ -6,6 +6,7 @@ import { getBackend } from "@/lib/backend";
 import { isTauri } from "@/lib/utils";
 import { devSkipDaemonOnboarding, devSkipSetup } from "@/lib/dev-onboarding-flags";
 import { generateRandomTeamName } from "@/lib/random-team-name";
+import { resolveDefaultDisplayName } from "@/lib/default-display-name";
 import { DesktopOnboarding } from "./DesktopOnboarding";
 import { LoginScreen } from "./LoginScreen";
 import { LobsterLoader } from "./LobsterLoader";
@@ -101,7 +102,11 @@ export function AuthGate({ children }: AuthGateProps) {
 
         const name = generateRandomTeamName();
         try {
-          const created = await getBackend().teams.createTeam({ name });
+          // Seed the owner's display name from their real identity (OS full
+          // name / email prefix) so they don't land as "You". Omitting it lets
+          // the server synthesize a stable handle.
+          const displayName = await resolveDefaultDisplayName(session?.user?.email);
+          const created = await getBackend().teams.createTeam({ name, displayName });
           if (created?.id) {
             await useCurrentTeamStore.getState().setActiveTeam({
               id: created.id,

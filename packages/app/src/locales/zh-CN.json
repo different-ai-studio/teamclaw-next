@@ -894,6 +894,11 @@
     "general": {
       "title": "通用",
       "description": "自定义应用偏好设置",
+      "displayName": "显示名称",
+      "displayNameDesc": "队友看到的你的名字",
+      "displayNamePlaceholder": "你的名字",
+      "displayNameSaved": "显示名称已更新",
+      "displayNameError": "无法更新显示名称",
       "appearance": "外观",
       "language": "语言",
       "languageDesc": "选择应用界面语言",

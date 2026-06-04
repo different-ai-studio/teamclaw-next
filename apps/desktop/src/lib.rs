@@ -300,6 +300,7 @@ pub fn run() {
         .manage(std::sync::Arc::new(crate::terminal::Registry::new()))
         .invoke_handler(tauri::generate_handler![
             commands::greet,
+            commands::os_full_name,
             commands::daemon_http::get_daemon_http_info,
             commands::daemon_http::get_daemon_team_id,
             commands::daemon_http::list_local_daemon_workspaces,

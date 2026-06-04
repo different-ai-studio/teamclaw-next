@@ -309,7 +309,7 @@ export type TeamInviteInput =
 export interface TeamsBackend {
   listCurrentUserTeams(args?: { limit?: number }): Promise<TeamSummary[]>;
   getTeam(teamId: string): Promise<TeamSummary | null>;
-  createTeam(input: { name: string; slug?: string | null }): Promise<TeamSummary>;
+  createTeam(input: { name: string; slug?: string | null; displayName?: string | null }): Promise<TeamSummary>;
   renameTeam(teamId: string, name: string): Promise<TeamSummary>;
   createTeamInvite(input: TeamInviteInput): Promise<TeamInviteResult>;
   removeTeamActor(teamId: string, actorId: string): Promise<void>;
@@ -444,6 +444,13 @@ export interface ActorsBackend {
     displayName?: string | null;
     visibility?: string | null;
   }): Promise<void>;
+  /** Rename / re-avatar the calling user's own member actor. The server resolves
+   * the actor from the bearer token; `actorId` must be the caller's own actor. */
+  updateCurrentActorProfile(input: {
+    actorId: string;
+    displayName: string;
+    avatarUrl?: string | null;
+  }): Promise<ActorDirectoryEntry>;
   updateAgentDefaults(input: {
     agentId: string;
     agentTypes?: string[] | null;

@@ -5,7 +5,8 @@ import { workspaces } from "../../db/schema/workspaces.js";
 import { agentMemberAccess, agents } from "../../db/schema/agents.js";
 import { ApiError } from "../http-utils.js";
 import { requireActorForTeam, checkAgentOwnership } from "./authz.js";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import { generateDisplayName } from "../display-name.js";
 
 const iso = (d: Date | string | null | undefined) => (d ? new Date(d).toISOString() : null);
 
@@ -150,7 +151,7 @@ export function makeTeamsRepo(db: PgDatabase<any, any>, deps: TeamsRepoDeps = {}
      * Inserts: teams → actors(member) → members(active) → team_members(owner)
      *          → workspaces('General') → team_workspace_config
      */
-    async createTeam(input: { name: string; slug?: string; litellmTeamId?: string; aiGatewayEndpoint?: string }, ctx?: { userId?: string }) {
+    async createTeam(input: { name: string; slug?: string; litellmTeamId?: string; aiGatewayEndpoint?: string; displayName?: string | null }, ctx?: { userId?: string }) {
       const userId = ctx?.userId;
       if (!userId) throw new ApiError(400, "bad_request", "userId is required to create a team");
 
@@ -180,11 +181,17 @@ export function makeTeamsRepo(db: PgDatabase<any, any>, deps: TeamsRepoDeps = {}
         // INSERT team
         const [team] = await tx.insert(teams).values({ name: input.name, slug }).returning();
 
-        // INSERT actor (member type, linked to userId)
+        // INSERT actor (member type, linked to userId). Caller-provided real
+        // name wins; otherwise a deterministic "Adjective Animal" handle seeded
+        // from the actor id (pre-generated so the name is stable). Never the
+        // team name — that conflated personal identity with the workspace.
+        const actorId = randomUUID();
+        const displayName = input.displayName?.trim() || generateDisplayName(actorId);
         const [actor] = await tx.insert(actors).values({
+          id: actorId,
           teamId: team.id,
           actorType: "member",
-          displayName: input.name,
+          displayName,
           userId,
         }).returning();
 
