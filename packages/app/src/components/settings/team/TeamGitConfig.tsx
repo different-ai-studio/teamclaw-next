@@ -448,7 +448,7 @@ export function TeamGitConfig() {
                         : "text-muted-foreground"
                     )} />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-[13px] font-medium">{t('settings.team.teamRepo', 'Team Shared Directory')}</p>
                       <span className={cn(
@@ -462,8 +462,8 @@ export function TeamGitConfig() {
                       </span>
                     </div>
                     {teamConfig.gitUrl && (
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <p className="text-xs text-muted-foreground font-mono truncate max-w-[300px]">
+                      <div className="flex items-center gap-2 mt-0.5 min-w-0">
+                        <p className="text-xs text-muted-foreground font-mono truncate min-w-0">
                           {teamConfig.gitUrl}
                         </p>
                         {teamConfig.gitToken && (
