@@ -361,6 +361,16 @@ pub struct IdeaRow {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SessionWorkspaceRow {
+    pub session_id: String,
+    pub team_id: String,
+    pub workspace_id: Option<String>,
+    pub workspace_path: Option<String>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClaimRow {
     pub id: String,
     pub idea_id: String,
@@ -511,6 +521,29 @@ impl LocalCacheStore {
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_session_team ON session(team_id, last_message_at)",
+            (),
+        )
+        .await
+        .ok();
+
+        // ── session_workspace ──────────────────────────────────────────────
+        // Maps a cloud session_id → the workspace it ran an agent in. Synced
+        // from listDaemonRuntimes; read offline to filter the session list by
+        // workspace. session_id is the PK (latest runtime wins on upsert).
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS session_workspace (
+                session_id     TEXT PRIMARY KEY,
+                team_id        TEXT NOT NULL,
+                workspace_id   TEXT,
+                workspace_path TEXT,
+                updated_at     TEXT NOT NULL
+            )",
+            (),
+        )
+        .await
+        .map_err(|e| format!("Failed to create session_workspace table: {}", e))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sw_team ON session_workspace(team_id)",
             (),
         )
         .await
@@ -1010,6 +1043,66 @@ impl LocalCacheStore {
                 updated_at: row.get::<String>(12).unwrap_or_default(),
                 deleted_at: row.get::<String>(13).ok().filter(|s| !s.is_empty()),
                 synced_at: row.get::<String>(14).unwrap_or_default(),
+            });
+        }
+        Ok(result)
+    }
+
+    pub async fn session_workspace_upsert_batch(
+        &self,
+        rows: &[SessionWorkspaceRow],
+    ) -> Result<(), String> {
+        let conn = self.conn.lock().await;
+        for r in rows {
+            conn.execute(
+                "INSERT INTO session_workspace
+                    (session_id, team_id, workspace_id, workspace_path, updated_at)
+                 VALUES (?1,?2,?3,?4,?5)
+                 ON CONFLICT(session_id) DO UPDATE SET
+                    team_id        = excluded.team_id,
+                    workspace_id   = excluded.workspace_id,
+                    workspace_path = excluded.workspace_path,
+                    updated_at     = excluded.updated_at
+                 WHERE excluded.updated_at >= session_workspace.updated_at",
+                params![
+                    r.session_id.clone(),
+                    r.team_id.clone(),
+                    opt_val(&r.workspace_id),
+                    opt_val(&r.workspace_path),
+                    r.updated_at.clone()
+                ],
+            )
+            .await
+            .map_err(|e| format!("session_workspace_upsert_batch: {}", e))?;
+        }
+        Ok(())
+    }
+
+    pub async fn session_workspace_load_team(
+        &self,
+        team_id: &str,
+    ) -> Result<Vec<SessionWorkspaceRow>, String> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT session_id, team_id, workspace_id, workspace_path, updated_at
+                 FROM session_workspace WHERE team_id = ?1",
+                params![team_id.to_string()],
+            )
+            .await
+            .map_err(|e| format!("session_workspace_load_team: {}", e))?;
+        let mut result = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| format!("session_workspace_load_team row: {}", e))?
+        {
+            result.push(SessionWorkspaceRow {
+                session_id: row.get::<String>(0).unwrap_or_default(),
+                team_id: row.get::<String>(1).unwrap_or_default(),
+                workspace_id: row.get::<String>(2).ok().filter(|s| !s.is_empty()),
+                workspace_path: row.get::<String>(3).ok().filter(|s| !s.is_empty()),
+                updated_at: row.get::<String>(4).unwrap_or_default(),
             });
         }
         Ok(result)
@@ -2402,5 +2495,46 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some("PID %CPU COMM\n50369 opencode\n")
         );
+    }
+
+    #[tokio::test]
+    async fn session_workspace_upsert_and_load_roundtrip() {
+        let (store, _dir) = new_store().await;
+        store
+            .session_workspace_upsert_batch(&[
+                SessionWorkspaceRow {
+                    session_id: "s1".into(),
+                    team_id: "teamA".into(),
+                    workspace_id: Some("ws1".into()),
+                    workspace_path: Some("/Users/me/proj".into()),
+                    updated_at: "2026-06-04T00:00:00Z".into(),
+                },
+                SessionWorkspaceRow {
+                    session_id: "s2".into(),
+                    team_id: "teamB".into(),
+                    workspace_id: Some("ws2".into()),
+                    workspace_path: None,
+                    updated_at: "2026-06-04T00:00:00Z".into(),
+                },
+            ])
+            .await
+            .unwrap();
+        let rows = store.session_workspace_load_team("teamA").await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].session_id, "s1");
+        assert_eq!(rows[0].workspace_id.as_deref(), Some("ws1"));
+        assert_eq!(rows[0].workspace_path.as_deref(), Some("/Users/me/proj"));
+        store
+            .session_workspace_upsert_batch(&[SessionWorkspaceRow {
+                session_id: "s1".into(),
+                team_id: "teamA".into(),
+                workspace_id: Some("ws9".into()),
+                workspace_path: Some("/Users/me/other".into()),
+                updated_at: "2026-06-05T00:00:00Z".into(),
+            }])
+            .await
+            .unwrap();
+        let rows = store.session_workspace_load_team("teamA").await.unwrap();
+        assert_eq!(rows[0].workspace_id.as_deref(), Some("ws9"));
     }
 }
