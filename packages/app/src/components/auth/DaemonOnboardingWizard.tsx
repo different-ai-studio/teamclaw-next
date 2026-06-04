@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { useTranslation } from 'react-i18next'
 import { Loader2, AlertCircle, Users, Lock, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -52,6 +53,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 export function DaemonOnboardingWizard({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation()
   const { status, busy, error, ownedAgents, refresh, loadOwnedAgents, createNewAgent, bindExistingAgent, forceReset } =
     useDaemonOnboardingStore()
   const [mode, setMode] = React.useState<'new' | 'bind'>('new')
@@ -73,9 +75,15 @@ export function DaemonOnboardingWizard({ onDone }: { onDone: () => void }) {
   // Auto-recovery in progress (onboarded but daemon was down / token stale).
   if (status === 'starting') {
     return (
-      <Shell title="正在启动 daemon…" subtitle="本机 agent 已绑定,正在确保后台服务运行。">
+      <Shell
+        title={t('settings.daemonOnboarding.startingTitle', 'Starting daemon…')}
+        subtitle={t(
+          'settings.daemonOnboarding.startingSubtitle',
+          "This machine's agent is bound; making sure the background service is running.",
+        )}
+      >
         <div className="flex items-center gap-2 py-2 text-[12.5px] text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> 启动中,请稍候…
+          <Loader2 className="h-4 w-4 animate-spin" /> {t('settings.daemonOnboarding.starting', 'Starting, please wait…')}
         </div>
       </Shell>
     )
@@ -84,14 +92,24 @@ export function DaemonOnboardingWizard({ onDone }: { onDone: () => void }) {
   // Auto-recovery failed.
   if (status === 'error') {
     return (
-      <Shell title="无法启动本机 daemon" subtitle="本机 agent 已绑定,但后台服务未能启动。">
+      <Shell
+        title={t('settings.daemonOnboarding.errorTitle', "Can't start the local daemon")}
+        subtitle={t(
+          'settings.daemonOnboarding.errorSubtitle',
+          "This machine's agent is bound, but the background service failed to start.",
+        )}
+      >
         {error && <ErrorLine error={error} />}
         <Button
           className="mt-1 h-10 w-full rounded-[10px] bg-coral text-paper hover:opacity-90"
           disabled={busy}
           onClick={() => void refresh()}
         >
-          {busy ? <Spinner label="重试中…" /> : '重试'}
+          {busy ? (
+            <Spinner label={t('settings.daemonOnboarding.retrying', 'Retrying…')} />
+          ) : (
+            t('settings.daemonOnboarding.retry', 'Retry')
+          )}
         </Button>
       </Shell>
     )
@@ -110,36 +128,52 @@ export function DaemonOnboardingWizard({ onDone }: { onDone: () => void }) {
 
   if (status === 'mismatch') {
     return (
-      <Shell title="本机 Agent 属于其他团队" subtitle="当前登录团队与本机 daemon 绑定的团队不一致，需要重置后重新初始化。">
+      <Shell
+        title={t('settings.daemonOnboarding.mismatchTitle', "This machine's agent belongs to another team")}
+        subtitle={t(
+          'settings.daemonOnboarding.mismatchSubtitle',
+          "The signed-in team doesn't match the team this machine's daemon is bound to. It needs to be reset and re-initialized.",
+        )}
+      >
         {error && <ErrorLine error={error} />}
         <Button
           className="mt-1 h-10 w-full rounded-[10px] bg-coral text-paper hover:opacity-90"
           disabled={busy}
           onClick={() => void forceReset()}
         >
-          {busy ? <Spinner label="重置中…" /> : '重置并重新初始化'}
+          {busy ? (
+            <Spinner label={t('settings.daemonOnboarding.resetting', 'Resetting…')} />
+          ) : (
+            t('settings.daemonOnboarding.resetReinit', 'Reset and re-initialize')
+          )}
         </Button>
       </Shell>
     )
   }
 
   return (
-    <Shell title="初始化本机 Agent" subtitle="新建一个 agent，或把本机绑定到你已有的 agent。">
+    <Shell
+      title={t('settings.daemonOnboarding.initTitle', "Set up this machine's agent")}
+      subtitle={t(
+        'settings.daemonOnboarding.initSubtitle',
+        'Create a new agent, or bind this machine to one you already have.',
+      )}
+    >
       <Segmented
         value={mode}
         disabled={busy}
         onChange={(m) => setMode(m)}
         options={[
-          { value: 'new', label: '新建' },
-          { value: 'bind', label: '绑定已有' },
+          { value: 'new', label: t('settings.daemonOnboarding.modeNew', 'New') },
+          { value: 'bind', label: t('settings.daemonOnboarding.modeBind', 'Bind existing') },
         ]}
       />
 
       {mode === 'new' ? (
         <div className="flex flex-col gap-4">
-          <Field label="名字">
+          <Field label={t('settings.daemonOnboarding.name', 'Name')}>
             <Input
-              placeholder="例如：MacBook Pro"
+              placeholder={t('settings.daemonOnboarding.namePlaceholder', 'e.g. MacBook Pro')}
               value={name}
               onChange={(e) => setName(e.target.value)}
               disabled={busy}
@@ -147,24 +181,29 @@ export function DaemonOnboardingWizard({ onDone }: { onDone: () => void }) {
             />
           </Field>
 
-          <Field label="可见性">
+          <Field label={t('settings.daemonOnboarding.visibility', 'Visibility')}>
             <Segmented
               value={visibility}
               disabled={busy}
               onChange={(v) => setVisibility(v)}
               options={[
-                { value: 'team', label: '团队可见' },
-                { value: 'personal', label: '仅自己' },
+                { value: 'team', label: t('settings.daemonOnboarding.visibilityTeam', 'Team-visible') },
+                { value: 'personal', label: t('settings.daemonOnboarding.visibilityPersonal', 'Only me') },
               ]}
             />
             <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
               {visibility === 'team' ? (
                 <>
-                  <Users className="h-3 w-3 shrink-0" /> 团队成员都能看到并使用这个 agent。
+                  <Users className="h-3 w-3 shrink-0" />{' '}
+                  {t('settings.daemonOnboarding.visibilityTeamHint', 'Everyone on the team can see and use this agent.')}
                 </>
               ) : (
                 <>
-                  <Lock className="h-3 w-3 shrink-0" /> 只有你能看到和使用，团队其他人不可见。
+                  <Lock className="h-3 w-3 shrink-0" />{' '}
+                  {t(
+                    'settings.daemonOnboarding.visibilityPersonalHint',
+                    'Only you can see and use it; hidden from the rest of the team.',
+                  )}
                 </>
               )}
             </p>
@@ -177,14 +216,18 @@ export function DaemonOnboardingWizard({ onDone }: { onDone: () => void }) {
             disabled={busy || name.trim().length === 0}
             onClick={() => void createNewAgent(name.trim(), visibility)}
           >
-            {busy ? <Spinner label="初始化中…" /> : '创建并启动'}
+            {busy ? (
+              <Spinner label={t('settings.daemonOnboarding.creating', 'Setting up…')} />
+            ) : (
+              t('settings.daemonOnboarding.create', 'Create and start')
+            )}
           </Button>
         </div>
       ) : (
         <div className="flex flex-col gap-2">
           {ownedAgents.length === 0 ? (
             <p className="rounded-[10px] border border-dashed border-border px-4 py-6 text-center text-[12.5px] text-faint">
-              当前团队下没有你创建的 agent 可绑定。
+              {t('settings.daemonOnboarding.noOwnedAgents', 'You have no agents in the current team to bind to.')}
             </p>
           ) : (
             ownedAgents.map((a) => (
