@@ -15,6 +15,8 @@ Add a universal slash-command system to the `teamclaw-gateway` crate so every ch
 | `/help` | — | Print available commands |
 | `/model` | `[name]` | No arg: list models with current marked `*`. With arg: switch model. |
 | `/sessions` | `[id]` | No arg: list ACP sessions with current marked `*`. With arg: switch to that session. |
+| `/agents` | `[type]` | No arg: list agent types with current marked `*`. With arg: set agent type. |
+| `/workspaces` | `[id]` | No arg: list workspaces with current marked `*`. With arg: set workspace. |
 | `/clear` | — | Reset the current ACP session (start fresh) |
 | `/stop` | — | Cancel in-progress ACP generation |
 | `/ctx` | `<text>` | Inject context without triggering a reply |
@@ -52,7 +54,9 @@ where
 pub enum Command {
     Help,
     Model(Option<String>),    // None = list, Some(name) = switch
-    Sessions(Option<String>), // None = list, Some(id) = bind
+    Sessions(Option<String>),   // None = list, Some(id) = switch
+    Agents(Option<String>),     // None = list, Some(type) = set
+    Workspaces(Option<String>), // None = list, Some(id) = set
     Clear,
     Stop,
     Ctx(String),
@@ -70,6 +74,19 @@ async fn list_sessions(&self) -> Result<Vec<(AmuxSessionId, bool)>, AcpError>;
 
 The daemon's `AmuxdAcpHandle` implementation queries amuxd for the session list.
 `/sessions <id>` switches the gateway binding to use that session going forward (updates the per-chat session mapping in `ChannelStore`).
+
+Also add `list_agents`, `set_agent`, `list_workspaces`, `set_workspace`:
+
+```rust
+/// List available agent types. Returns (agent_type, is_current) pairs.
+async fn list_agents(&self, session: &AmuxSessionId) -> Result<Vec<(String, bool)>, AcpError>;
+/// Set agent type for this session.
+async fn set_agent(&self, session: &AmuxSessionId, agent_type: &str) -> Result<(), AcpError>;
+/// List available workspaces. Returns (workspace_id, is_current) pairs.
+async fn list_workspaces(&self, session: &AmuxSessionId) -> Result<Vec<(String, bool)>, AcpError>;
+/// Set workspace for this session.
+async fn set_workspace(&self, session: &AmuxSessionId, workspace_id: &str) -> Result<(), AcpError>;
+```
 
 ### `lib.rs` change
 
@@ -133,6 +150,31 @@ Sessions:
 Session: sess_def456
 ```
 
+**`/agents` (no arg)**
+```
+Agents:
+* assistant (current)
+  coder
+  researcher
+```
+
+**`/agents coder`**
+```
+Agent set: coder
+```
+
+**`/workspaces` (no arg)**
+```
+Workspaces:
+* ws_abc123 (current)
+  ws_def456
+```
+
+**`/workspaces ws_def456`**
+```
+Workspace: ws_def456
+```
+
 **`/clear`**
 ```
 Session cleared.
@@ -170,7 +212,7 @@ Unit tests in `commands.rs`:
 ```
 crates/teamclaw-gateway/src/
 ├── commands.rs     ← NEW: parse_command, dispatch_command, Command enum
-├── acp.rs          ← add: list_sessions() to AcpHandle trait
+├── acp.rs          ← add: list_sessions, list_agents, set_agent, list_workspaces, set_workspace
 ├── lib.rs          ← add: pub mod commands
 └── wecom.rs        ← add: ~5 lines in text message handler
 
