@@ -59,7 +59,7 @@ export function LocalDaemonRow() {
   const handleNewWorkspace = async (e: React.MouseEvent) => {
     e.stopPropagation()
     if (!teamId || !agent?.id || creating) return
-    let selected: string | string[] | null = null
+    let selected: string | string[] | null
     try {
       selected = await open({ directory: true, multiple: false, title: t('sidebar.newWorkspace', 'New workspace') })
     } catch (err) {
