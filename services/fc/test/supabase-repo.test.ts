@@ -629,6 +629,10 @@ function createSelectableQuery(table, calls, data, error) {
       calls.push({ table, op: "eq", column, value });
       return query;
     },
+    in(column, values) {
+      calls.push({ table, op: "in", column, values });
+      return query;
+    },
     single() {
       calls.push({ table, op: "single" });
       return Promise.resolve({ data: data[0] ?? null, error });
@@ -811,4 +815,33 @@ test("getSessionByAcp returns the {sessionId, gatewaySessionId} shape the daemon
   // Daemon uses gatewaySessionId as the chat binding for the per-session MCP
   // config so `send` defaults to the originating chat.
   assert.equal(out.gatewaySessionId, "wecom://bot/bot/single/u1");
+});
+
+// --- Agent defaults (daemon reads these to route gateway sessions) ---
+
+test("listAgentDefaults selects + maps default_workspace_id alongside default_agent_type", async () => {
+  const tableCalls = [];
+  const repo = createRepo(fakeSupabase({
+    tableCalls,
+    tableData: {
+      agents: [{
+        id: "agent-1",
+        agent_types: ["claude", "opencode"],
+        default_agent_type: "opencode",
+        default_workspace_id: "11111111-1111-1111-1111-111111111111",
+      }],
+    },
+  }));
+
+  const rows = await repo.listAgentDefaults(["agent-1"]);
+
+  const selectCall = tableCalls.find((c) => c.table === "agents" && c.op === "select");
+  assert.ok(selectCall, "expected an agents select");
+  assert.ok(
+    selectCall.columns.includes("default_workspace_id"),
+    "must select default_workspace_id so the daemon can resolve the gateway cwd",
+  );
+  assert.equal(rows[0].id, "agent-1");
+  assert.equal(rows[0].defaultAgentType, "opencode");
+  assert.equal(rows[0].defaultWorkspaceId, "11111111-1111-1111-1111-111111111111");
 });
