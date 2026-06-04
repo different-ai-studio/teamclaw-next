@@ -182,31 +182,36 @@ export function DaemonOnboardingWizard({ onDone }: { onDone: () => void }) {
           </Field>
 
           <Field label={t('settings.daemonOnboarding.visibility', 'Visibility')}>
-            <Segmented
-              value={visibility}
-              disabled={busy}
-              onChange={(v) => setVisibility(v)}
-              options={[
-                { value: 'team', label: t('settings.daemonOnboarding.visibilityTeam', 'Team-visible') },
-                { value: 'personal', label: t('settings.daemonOnboarding.visibilityPersonal', 'Only me') },
-              ]}
-            />
-            <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
-              {visibility === 'team' ? (
-                <>
-                  <Users className="h-3 w-3 shrink-0" />{' '}
-                  {t('settings.daemonOnboarding.visibilityTeamHint', 'Everyone on the team can see and use this agent.')}
-                </>
-              ) : (
-                <>
-                  <Lock className="h-3 w-3 shrink-0" />{' '}
-                  {t(
-                    'settings.daemonOnboarding.visibilityPersonalHint',
-                    'Only you can see and use it; hidden from the rest of the team.',
+            <label className="flex items-start gap-2.5">
+              <input
+                type="checkbox"
+                checked={visibility === 'team'}
+                disabled={busy}
+                onChange={(e) => setVisibility(e.target.checked ? 'team' : 'personal')}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded-[5px] border-border accent-coral disabled:opacity-50"
+              />
+              <span className="flex flex-col gap-1">
+                <span className="text-[13px] font-medium text-foreground">
+                  {t('settings.daemonOnboarding.shareWithTeam', 'Share with the team')}
+                </span>
+                <span className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+                  {visibility === 'team' ? (
+                    <>
+                      <Users className="h-3 w-3 shrink-0" />{' '}
+                      {t('settings.daemonOnboarding.visibilityTeamHint', 'Everyone on the team can see and use this agent.')}
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="h-3 w-3 shrink-0" />{' '}
+                      {t(
+                        'settings.daemonOnboarding.visibilityPersonalHint',
+                        'Only you can see and use it; hidden from the rest of the team.',
+                      )}
+                    </>
                   )}
-                </>
-              )}
-            </p>
+                </span>
+              </span>
+            </label>
           </Field>
 
           {error && <ErrorLine error={error} />}
