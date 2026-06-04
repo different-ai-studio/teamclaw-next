@@ -21,6 +21,9 @@ export function registerTeams(router) {
     const team = await ctx.repository.createTeam({
       name: body.name,
       slug: optionalStringOrNull(body.slug, "slug"),
+      // Owner's real name (OS full name / email prefix) when the client knows
+      // it; the repository synthesizes a stable handle when omitted.
+      displayName: optionalStringOrNull(body.displayName, "displayName"),
       litellmTeamId: null,
       aiGatewayEndpoint: null,
     });

@@ -51,6 +51,28 @@ test("createTeam: creates team + owner actor + member + team_member + workspace 
   assert.equal(wsRows[0].name, "General");
 });
 
+test("createTeam: owner display name uses caller-provided name verbatim", async () => {
+  const { db } = await makeTestDb();
+  const repo = createPgBusinessRepository({ db, userId: `user-${Math.random()}` });
+
+  const team = await repo.createTeam({ name: "Acme Corp", displayName: "Jin Liang" });
+
+  const [actor] = await db.select().from(actors).where(eq(actors.teamId, team.id));
+  assert.equal(actor.displayName, "Jin Liang");
+});
+
+test("createTeam: owner display name falls back to a generated handle, never 'You' or the team name", async () => {
+  const { db } = await makeTestDb();
+  const repo = createPgBusinessRepository({ db, userId: `user-${Math.random()}` });
+
+  const team = await repo.createTeam({ name: "Acme Corp" });
+
+  const [actor] = await db.select().from(actors).where(eq(actors.teamId, team.id));
+  assert.notEqual(actor.displayName, "You", "must not regress to the legacy 'You' default");
+  assert.notEqual(actor.displayName, "Acme Corp", "must not reuse the team name as the person's name");
+  assert.match(actor.displayName ?? "", /^\S+ \S+$/, "should be an 'Adjective Animal' handle");
+});
+
 test("createTeam: first-team-only — rejects if userId already has an actor", async () => {
   const { db } = await makeTestDb();
   const userId = `user-${Math.random()}`;

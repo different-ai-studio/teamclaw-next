@@ -967,7 +967,7 @@ test("POST /v1/teams creates team without LiteLLM (provisioning extracted)", asy
     assert.equal(body.litellmKey, null);
     assert.deepEqual(repo.calls[0], {
       method: "createTeam",
-      input: { name: "Acme", slug: null, litellmTeamId: null, aiGatewayEndpoint: null },
+      input: { name: "Acme", slug: null, displayName: null, litellmTeamId: null, aiGatewayEndpoint: null },
     });
   } finally {
     if (prevMaster === undefined) delete process.env.LITELLM_MASTER_KEY;

@@ -54,6 +54,7 @@ export function createSupabaseBusinessRepository(options) {
     async createTeam(input) {
       const args: any = { p_name: input.name };
       if (input.slug !== undefined) args.p_slug = input.slug;
+      if (input.displayName !== undefined) args.p_display_name = input.displayName;
       if (input.litellmTeamId !== undefined) args.p_litellm_team_id = input.litellmTeamId;
       if (input.aiGatewayEndpoint !== undefined) args.p_ai_gateway_endpoint = input.aiGatewayEndpoint;
       const { data, error } = await supabase.rpc("create_team", args);
