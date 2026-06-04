@@ -68,10 +68,8 @@ beforeEach(() => {
 });
 
 describe("DesktopOnboarding", () => {
-  it("shows the four setup choices after welcome", () => {
+  it("shows the four setup choices", () => {
     const { container } = render(<DesktopOnboarding />);
-
-    fireEvent.click(screen.getByRole("button", { name: /get started/i }));
 
     expect(container.querySelector("[data-tauri-drag-region]")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /quick trial/i })).toBeInTheDocument();
@@ -84,7 +82,6 @@ describe("DesktopOnboarding", () => {
     authState.signInAnonymously.mockResolvedValueOnce(true);
     render(<DesktopOnboarding />);
 
-    fireEvent.click(screen.getByRole("button", { name: /get started/i }));
     fireEvent.click(screen.getByRole("button", { name: /quick trial/i }));
 
     await waitFor(() => expect(authState.signInAnonymously).toHaveBeenCalled());
@@ -94,7 +91,6 @@ describe("DesktopOnboarding", () => {
     authState.errorMessage = "Supabase config missing. Configure a server before signing in.";
     render(<DesktopOnboarding />);
 
-    fireEvent.click(screen.getByRole("button", { name: /get started/i }));
 
     expect(screen.getByText(/supabase config missing/i)).toBeInTheDocument();
   });
@@ -103,7 +99,6 @@ describe("DesktopOnboarding", () => {
     authState.claimInviteAfterAnonymousSignIn.mockResolvedValueOnce({ teamId: "team-1" });
     render(<DesktopOnboarding />);
 
-    fireEvent.click(screen.getByRole("button", { name: /get started/i }));
     fireEvent.click(screen.getByRole("button", { name: /join the team/i }));
     fireEvent.change(screen.getByLabelText(/invite link/i), { target: { value: "tok-123" } });
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
@@ -116,7 +111,6 @@ describe("DesktopOnboarding", () => {
   it("login path reuses the email OTP form", () => {
     render(<DesktopOnboarding />);
 
-    fireEvent.click(screen.getByRole("button", { name: /get started/i }));
     fireEvent.click(screen.getByRole("button", { name: /sign in or register/i }));
 
     expect(screen.getByRole("heading", { name: /sign in/i })).toBeInTheDocument();
@@ -127,7 +121,6 @@ describe("DesktopOnboarding", () => {
     hasConfig.value = false;
     render(<DesktopOnboarding />);
 
-    fireEvent.click(screen.getByRole("button", { name: /get started/i }));
     fireEvent.click(screen.getByRole("button", { name: /sign in or register/i }));
     fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "a@b.com" } });
 
@@ -141,7 +134,6 @@ describe("DesktopOnboarding", () => {
     });
     render(<DesktopOnboarding />);
 
-    fireEvent.click(screen.getByRole("button", { name: /get started/i }));
     fireEvent.click(screen.getByRole("button", { name: /self-hosted server/i }));
     fireEvent.change(screen.getByLabelText(/server address/i), {
       target: { value: "https://self.example.com" },
