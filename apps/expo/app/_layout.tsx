@@ -51,6 +51,8 @@ import {
 } from "../src/features/notifications/notification-routing";
 import { createPresenceApi } from "../src/features/notifications/presence-api";
 import { createForegroundPresenceHeartbeat } from "../src/features/notifications/presence-heartbeat";
+import { reportExpoClientVersion } from "../src/features/notifications/report-client-version";
+import { cloudApiBaseUrl, createCloudApiClient } from "../src/lib/cloud-api/client";
 import { createPushTokenApi } from "../src/features/notifications/push-token-api";
 import { registerNativePushToken } from "../src/features/notifications/push-registration";
 import { getDb } from "../src/lib/db/sqlite";
@@ -256,6 +258,17 @@ function OnboardingProvider({ children }: { children: ReactNode }) {
     void (async () => {
       const deviceId = await getExpoDeviceId();
       if (disposed) return;
+
+      const version = Constants.expoConfig?.version ?? null;
+      const teamId = state.currentTeam?.id ?? null;
+      if (version && teamId) {
+        const cloudClient = createCloudApiClient({
+          baseUrl: cloudApiBaseUrl(),
+          getAccessToken: supabaseAccessToken(supabase),
+        });
+        void reportExpoClientVersion(cloudClient, teamId, { version, deviceId });
+      }
+
       const presence = createPresenceApi({ getAccessToken: supabaseAccessToken(supabase) });
       heartbeat = createForegroundPresenceHeartbeat({
         deviceId,
