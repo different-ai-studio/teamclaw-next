@@ -30,19 +30,6 @@ function trimTrailingPathSeparators(path: string): string {
   return path.replace(/[\\/]+$/, '')
 }
 
-function trimLeadingPathSeparators(path: string): string {
-  return path.replace(/^[\\/]+/, '')
-}
-
-function isAbsolutePath(path: string): boolean {
-  return path.startsWith('/') || path.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(path)
-}
-
-function joinPath(parent: string, child: string): string {
-  const separator = parent.includes('\\') ? '\\' : '/'
-  return `${trimTrailingPathSeparators(parent)}${separator}${trimLeadingPathSeparators(child)}`
-}
-
 export function buildSkillInvocationName(parentDir: string, filename: string): string {
   const scope = getLastPathSegment(parentDir)
   return scope && scope !== 'skills' ? `${scope}/${filename}` : filename

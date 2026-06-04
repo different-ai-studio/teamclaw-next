@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useTranslation } from "react-i18next";
-import { AlertCircle, Archive, ArrowLeft, Bot, Loader2, RefreshCw, X } from "lucide-react";
+import { AlertCircle, Archive, ArrowLeft, Bot, Loader2, RefreshCw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { cn, isTauri } from "@/lib/utils";
 

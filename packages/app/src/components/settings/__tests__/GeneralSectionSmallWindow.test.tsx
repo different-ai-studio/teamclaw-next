@@ -31,9 +31,11 @@ vi.mock('i18next', () => ({
 
 vi.mock('@/lib/build-config', () => ({
   appShortName: 'teamclaw',
+  TEAMCLAW_DIR: '.teamclaw',
   buildConfig: {
     app: { shortName: 'teamclaw' },
     defaults: { theme: 'system' },
+    team: { llm: { models: [] } },
   },
 }))
 

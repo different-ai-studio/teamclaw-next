@@ -13,6 +13,10 @@ vi.mock('@/lib/utils', async () => {
   return { ...actual, isTauri: () => true }
 })
 
+vi.mock('@/lib/auth/session-store', () => ({
+  getFreshAccessToken: vi.fn(async () => 'test-token'),
+}))
+
 import { JoinTeamFlow } from '../JoinTeamFlow'
 import { useTeamShareStore } from '@/stores/team-share'
 
