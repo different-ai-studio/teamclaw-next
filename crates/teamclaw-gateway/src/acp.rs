@@ -12,6 +12,15 @@ pub struct ModelInfo {
     pub display_name: String,
 }
 
+/// A slash command advertised by the ACP agent via `AcpAvailableCommands`.
+#[derive(Debug, Clone)]
+pub struct AcpAvailableCommand {
+    pub name: String,
+    pub description: String,
+    /// Non-empty means the command accepts free-form text input.
+    pub input_hint: String,
+}
+
 /// Outcome of a single ACP turn driven by a gateway message.
 #[derive(Debug, Clone)]
 pub struct AcpTurnOutcome {
@@ -67,6 +76,59 @@ pub trait AcpHandle: Send + Sync + 'static {
         session: &AmuxSessionId,
         provider: &str,
         model: &str,
+    ) -> Result<(), AcpError>;
+
+    /// Return the slash commands the running ACP agent has currently advertised.
+    /// Returns an empty vec if the session hasn't spawned yet or the agent
+    /// hasn't reported commands. Used by `commands::dispatch` for ACP-first priority.
+    async fn available_commands(
+        &self,
+        session: &AmuxSessionId,
+    ) -> Result<Vec<AcpAvailableCommand>, AcpError>;
+
+    /// Forward a slash command to the ACP agent. Only call after confirming
+    /// via `available_commands` that the agent knows this command.
+    /// Behaves like `send_prompt` — returns the agent's reply text.
+    async fn send_slash_command(
+        &self,
+        session: &AmuxSessionId,
+        name: &str,
+        input: Option<&str>,
+    ) -> Result<AcpTurnOutcome, AcpError>;
+
+    /// List all logical sessions this handle knows about (spawned since last
+    /// daemon restart). Returns `(session_id, is_current)` pairs.
+    async fn list_sessions(
+        &self,
+        current: &AmuxSessionId,
+    ) -> Result<Vec<(AmuxSessionId, bool)>, AcpError>;
+
+    /// List available agent types. Returns `(type_name, is_current)` pairs.
+    async fn list_agents(
+        &self,
+        session: &AmuxSessionId,
+    ) -> Result<Vec<(String, bool)>, AcpError>;
+
+    /// Set agent type for this session. Resets the runtime — conversation
+    /// context is lost (same semantics as `set_model`).
+    async fn set_agent(
+        &self,
+        session: &AmuxSessionId,
+        agent_type: &str,
+    ) -> Result<(), AcpError>;
+
+    /// List workspaces known to the daemon.
+    /// Returns `(workspace_id, display_name, is_current)` triples.
+    async fn list_workspaces(
+        &self,
+        session: &AmuxSessionId,
+    ) -> Result<Vec<(String, String, bool)>, AcpError>;
+
+    /// Set workspace for this session. Resets the runtime.
+    async fn set_workspace(
+        &self,
+        session: &AmuxSessionId,
+        workspace_id: &str,
     ) -> Result<(), AcpError>;
 }
 
