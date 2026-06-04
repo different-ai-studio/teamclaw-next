@@ -84,7 +84,6 @@ export function TeamGitConfig() {
   const [repoGuideOpen, setRepoGuideOpen] = React.useState(false)
 
   const sharedDirName = TEAM_REPO_DIR
-  const gitLocalPath = workspacePath ? `${workspacePath}/${sharedDirName}` : sharedDirName
 
   // Keep the FC share-mode status fresh (TeamSection resolves it before mounting
   // us; this re-fetch covers team/workspace switches while the pane is open).
@@ -147,13 +146,6 @@ export function TeamGitConfig() {
       return isoString
     }
   }
-
-  const linkStatusLabel =
-    status.linkStatus === 'symlink'
-      ? `${t('settings.teamShare.linkStatus.linked', 'Linked')} ✓`
-      : status.linkStatus === 'real_dir'
-        ? t('settings.teamShare.linkStatus.pendingMigration', 'Pending migration')
-        : t('settings.teamShare.linkStatus.unlinked', 'Not linked')
 
   return (
     <>
@@ -232,51 +224,6 @@ export function TeamGitConfig() {
               <RefreshCw className={cn('h-3 w-3', syncing && 'animate-spin')} />
               {syncing ? t('settings.team.syncing', 'Syncing...') : t('settings.team.syncNow', 'Sync Now')}
             </Button>
-          </div>
-        </div>
-      </SettingCard>
-
-      {/* Runtime Details */}
-      <SettingCard>
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-lg flex items-center justify-center bg-muted">
-              <KeyRound className="h-5 w-5 text-muted-foreground" />
-            </div>
-            <div>
-              <p className="text-[13px] font-medium">{t('settings.team.runtimeDetails', 'Runtime Details')}</p>
-              <p className="text-xs text-muted-foreground">{t('settings.team.runtimeDetailsDesc', 'Local shared directory and Git URL')}</p>
-            </div>
-          </div>
-
-          <div className="space-y-2 rounded-lg border border-border-soft bg-background/50 p-3">
-            <div className="grid gap-1.5 sm:grid-cols-[108px_minmax(0,1fr)] sm:items-start">
-              <span className="text-xs text-muted-foreground">{t('settings.team.workspacePath', 'Workspace Path')}</span>
-              <code className="min-w-0 break-all font-mono text-xs text-foreground">
-                {workspacePath || t('settings.team.noWorkspace', 'No workspace selected')}
-              </code>
-            </div>
-
-            <div className="grid gap-1.5 sm:grid-cols-[108px_minmax(0,1fr)] sm:items-start">
-              <span className="text-xs text-muted-foreground">{t('settings.team.gitLocalPath', 'Git Path')}</span>
-              <code className="min-w-0 break-all font-mono text-xs text-foreground">
-                {gitLocalPath}
-              </code>
-            </div>
-
-            {status.globalPath && (
-              <div className="grid gap-1.5 border-t border-border-soft pt-2 sm:grid-cols-[108px_minmax(0,1fr)] sm:items-start">
-                <span className="text-xs text-muted-foreground">{t('settings.team.globalSyncDir', 'Global Copy')}</span>
-                <code className="min-w-0 break-all font-mono text-xs text-foreground">
-                  {status.globalPath}
-                </code>
-              </div>
-            )}
-
-            <div className="grid gap-1.5 border-t border-border-soft pt-2 sm:grid-cols-[108px_minmax(0,1fr)] sm:items-start">
-              <span className="text-xs text-muted-foreground">{t('settings.teamShare.workspaceLink', 'Workspace Link')}</span>
-              <span className="min-w-0 text-xs text-foreground">{linkStatusLabel}</span>
-            </div>
           </div>
         </div>
       </SettingCard>

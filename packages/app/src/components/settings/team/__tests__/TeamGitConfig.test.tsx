@@ -113,13 +113,11 @@ describe('TeamGitConfig status panel', () => {
   it('renders the status surface for a configured git-mode team (no legacy local config read)', async () => {
     render(<TeamGitConfig />)
 
-    expect(await screen.findByText('Runtime Details')).toBeTruthy()
-    expect(screen.getByText('Workspace Path')).toBeTruthy()
-    expect(screen.getByText('/workspace-a')).toBeTruthy()
-    expect(screen.getByText('/workspace-a/teamclaw-team')).toBeTruthy()
     // Repo URL + managed-git mode label come from the FC share-mode status.
+    expect(await screen.findByText('Managed Git')).toBeTruthy()
     expect(screen.getByText('https://example.com/repo.git')).toBeTruthy()
-    expect(screen.getByText('Managed Git')).toBeTruthy()
+    expect(screen.getByText('Sync Now')).toBeTruthy()
+    expect(screen.getByText('Shared Content')).toBeTruthy()
     // Legacy local-config commands are never called.
     expect(mockInvoke).not.toHaveBeenCalledWith('get_team_config', expect.anything())
     expect(mockInvoke).not.toHaveBeenCalledWith('save_team_config', expect.anything())
