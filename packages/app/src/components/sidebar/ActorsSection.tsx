@@ -6,6 +6,8 @@ import { getBackend } from '@/lib/backend'
 import { useActorsForTeam, type ActorRow as ActorRowData } from '@/components/panel/ActorsView'
 import { InviteActorDialog } from '@/components/sidebar/InviteActorDialog'
 import { ActorRow } from '@/components/sidebar/ActorRow'
+import { LocalDaemonRow } from '@/components/sidebar/LocalDaemonRow'
+import { getCurrentDaemonAgent } from '@/lib/daemon-agent-admin'
 import { ActorDetailDialog } from '@/components/sidebar/ActorDetailDialog'
 import {
   AlertDialog,
@@ -40,9 +42,17 @@ export function ActorsSection() {
     if (teamId) void ensureDefaultAgentLoaded(teamId)
   }, [teamId, ensureDefaultAgentLoaded])
 
+  const [localDaemonAgentId, setLocalDaemonAgentId] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    if (!teamId) { setLocalDaemonAgentId(null); return }
+    let cancelled = false
+    void getCurrentDaemonAgent(teamId).then((a) => { if (!cancelled) setLocalDaemonAgentId(a?.id ?? null) })
+    return () => { cancelled = true }
+  }, [teamId])
+
   const recentActors = React.useMemo(
-    () => getRecentContactActors(actors, defaultAgentId),
-    [actors, defaultAgentId],
+    () => getRecentContactActors(actors, defaultAgentId).filter((a) => a.id !== localDaemonAgentId),
+    [actors, defaultAgentId, localDaemonAgentId],
   )
 
   const handleSelect = (actor: ActorRowData) => {
@@ -92,6 +102,7 @@ export function ActorsSection() {
 
   return (
     <div className="flex flex-col">
+      <LocalDaemonRow />
       <div className="flex items-center gap-1 pr-1">
         <button
           type="button"
