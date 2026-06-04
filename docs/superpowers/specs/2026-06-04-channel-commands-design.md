@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-04
 **Branch:** to be created from main
-**Scope:** `crates/teamclaw-gateway`
+**Scope:** `crates/teamclaw-gateway` (+ `acp.rs` trait extension)
 
 ## Overview
 
@@ -14,7 +14,7 @@ Add a universal slash-command system to the `teamclaw-gateway` crate so every ch
 |---------|-----------|-------------|
 | `/help` | — | Print available commands |
 | `/model` | `[name]` | No arg: list models with current marked `*`. With arg: switch model. |
-| `/sessions` | `[id]` | No arg: list sessions with current marked `*`. With arg: bind session. |
+| `/sessions` | `[id]` | No arg: list ACP sessions with current marked `*`. With arg: switch to that session. |
 | `/clear` | — | Reset the current ACP session (start fresh) |
 | `/stop` | — | Cancel in-progress ACP generation |
 | `/ctx` | `<text>` | Inject context without triggering a reply |
@@ -58,6 +58,18 @@ pub enum Command {
     Ctx(String),
 }
 ```
+
+### `acp.rs` trait extension
+
+Add `list_sessions` to `AcpHandle`:
+
+```rust
+/// List all ACP sessions. Returns (session_id, is_current) pairs.
+async fn list_sessions(&self) -> Result<Vec<(AmuxSessionId, bool)>, AcpError>;
+```
+
+The daemon's `AmuxdAcpHandle` implementation queries amuxd for the session list.
+`/sessions <id>` switches the gateway binding to use that session going forward (updates the per-chat session mapping in `ChannelStore`).
 
 ### `lib.rs` change
 
@@ -114,6 +126,7 @@ Sessions:
 * sess_abc123 (current)
   sess_def456
 ```
+(data from `acp.list_sessions()`)
 
 **`/sessions sess_def456`**
 ```
@@ -157,6 +170,7 @@ Unit tests in `commands.rs`:
 ```
 crates/teamclaw-gateway/src/
 ├── commands.rs     ← NEW: parse_command, dispatch_command, Command enum
+├── acp.rs          ← add: list_sessions() to AcpHandle trait
 ├── lib.rs          ← add: pub mod commands
 └── wecom.rs        ← add: ~5 lines in text message handler
 
