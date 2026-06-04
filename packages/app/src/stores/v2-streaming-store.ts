@@ -17,6 +17,8 @@ export interface StreamingPermissionRequest {
   toolName: string;
   description: string;
   params: Record<string, string>;
+  /** ACP PermissionOption list from the agent (OpenCode: once / always / reject). */
+  options?: Array<{ optionId: string; kind: string; name: string }>;
 }
 
 export interface AgentStreamEntry {

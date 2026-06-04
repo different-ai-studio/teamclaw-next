@@ -199,11 +199,13 @@ impl RuntimeHandle {
         &self,
         request_id: &str,
         granted: bool,
+        option_id: Option<String>,
     ) -> crate::error::Result<()> {
         if let Some(ref tx) = self.cmd_tx {
             tx.send(AcpCommand::ResolvePermission {
                 request_id: request_id.to_string(),
                 granted,
+                option_id,
             })
             .await
             .map_err(|_| crate::error::AmuxError::Agent("ACP command channel closed".into()))

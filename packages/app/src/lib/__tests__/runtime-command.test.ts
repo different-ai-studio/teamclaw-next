@@ -23,6 +23,7 @@ describe("runtime command sender", () => {
       runtimeId: "rt-abcd",
       requestId: "perm-1",
       granted: true,
+      optionId: "always",
     });
 
     expect(mqtt.publish).toHaveBeenCalledTimes(1);
@@ -46,6 +47,7 @@ describe("runtime command sender", () => {
       throw new Error("expected grantPermission command");
     }
     expect(envelope.acpCommand.command.value.requestId).toBe("perm-1");
+    expect(envelope.acpCommand.command.value.optionId).toBe("always");
   });
 
   it("publishes a cancel ACP command to the runtime command topic", async () => {

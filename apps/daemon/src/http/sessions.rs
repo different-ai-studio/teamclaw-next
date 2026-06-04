@@ -111,6 +111,8 @@ pub struct SetModelParams {
 #[derive(Debug, Deserialize)]
 pub struct PermissionReplyParams {
     pub granted: bool,
+    #[serde(default)]
+    pub option_id: Option<String>,
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────
@@ -257,7 +259,7 @@ pub async fn reply_permission(
     enforce_session_owner(&state, &principal, id)?;
     state
         .runtime
-        .reply_permission(id, request_id, body.granted)
+        .reply_permission(id, request_id, body.granted, body.option_id)
         .await?;
     Ok(StatusCode::ACCEPTED)
 }

@@ -26,6 +26,7 @@ export type RuntimePermissionResponseInput = {
   runtimeId: string;
   requestId: string;
   granted: boolean;
+  optionId?: string;
 };
 
 export type RuntimeCommandSender = {
@@ -63,11 +64,15 @@ export function createRuntimeCommandSender(
       const runtimeId = required(input.runtimeId, "runtime id");
       const requestId = required(input.requestId, "request id");
       const peerId = required(deps.peerId, "peer id");
+      const grantOptionId = input.optionId?.trim() ?? "";
       const acpCommand = input.granted
         ? create(AcpCommandSchema, {
             command: {
               case: "grantPermission",
-              value: create(AcpGrantPermissionSchema, { requestId }),
+              value: create(AcpGrantPermissionSchema, {
+                requestId,
+                optionId: grantOptionId,
+              }),
             },
           })
         : create(AcpCommandSchema, {

@@ -1174,6 +1174,7 @@ function AppContent() {
                 toolName?: string;
                 description?: string;
                 params?: Record<string, string>;
+                options?: Array<{ optionId?: string; kind?: string; name?: string }>;
               };
               void handleAcpPermissionRequest({
                 sessionId: sid,
@@ -1183,6 +1184,11 @@ function AppContent() {
                   toolName: pr.toolName ?? "",
                   description: pr.description ?? "",
                   params: pr.params ?? {},
+                  options: (pr.options ?? []).map((o) => ({
+                    optionId: o.optionId ?? "",
+                    kind: o.kind ?? "",
+                    name: o.name ?? "",
+                  })),
                 },
               });
             } else if (event?.case === "planUpdate") {
