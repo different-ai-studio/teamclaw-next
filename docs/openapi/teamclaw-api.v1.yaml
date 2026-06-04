@@ -1356,6 +1356,68 @@ paths:
                       $ref: "#/components/schemas/ConnectedAgent"
         "401":
           $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/members/me/default-agent:
+    get:
+      operationId: getMemberDefaultAgent
+      summary: Get the calling member's default agent for a team
+      description: >
+        Returns the agent the authenticated member has chosen as their default
+        in this team, or null if none is set. The member is resolved
+        server-side from the bearer token; there is no way to read another
+        member's default.
+      tags: [Actors]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: The member's default agent (or null).
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberDefaultAgent"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: setMemberDefaultAgent
+      summary: Set or clear the calling member's default agent for a team
+      description: >
+        Sets the authenticated member's default agent in this team. Pass
+        `agentId: null` to clear it. The agent must belong to the same team, be
+        active, and be visible to the caller — a personal agent owned by someone
+        else is rejected with 403; a missing / inactive / cross-team agent with
+        409.
+      tags: [Actors]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetMemberDefaultAgentRequest"
+      responses:
+        "200":
+          description: The updated default agent (or null after clearing).
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberDefaultAgent"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /v1/agents/{agentActorId}:
     patch:
       operationId: updateOwnedAgentProfile
@@ -3724,6 +3786,26 @@ components:
               format: date-time
             agentType:
               type: string
+    MemberDefaultAgent:
+      type: object
+      required: [defaultAgentId]
+      properties:
+        defaultAgentId:
+          description: The member's default agent actor id, or null if unset.
+          type:
+            - string
+            - "null"
+          format: uuid
+    SetMemberDefaultAgentRequest:
+      type: object
+      required: [agentId]
+      properties:
+        agentId:
+          description: Agent actor id to set as default, or null to clear it.
+          type:
+            - string
+            - "null"
+          format: uuid
     AgentProfilePatch:
       type: object
       properties:

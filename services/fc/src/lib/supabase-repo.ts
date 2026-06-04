@@ -17,6 +17,23 @@ const MESSAGE_COLUMNS =
 const WORKSPACE_COLUMNS =
   "id, team_id, name, path, agent_id, created_by_member_id, archived, created_at, updated_at";
 
+// Translate the SQLSTATE codes raised by get/set_member_default_agent into the
+// same ApiError statuses pg-repo returns, so both backends behave identically.
+// 42501 (insufficient privilege) -> 403; 23514 (check violation) -> 409;
+// 23503 (foreign-key/not-found) -> 404. Anything else propagates unchanged.
+function mapDefaultAgentError(error: any) {
+  switch (error?.code) {
+    case "42501":
+      return new ApiError(403, "forbidden", error.message ?? "forbidden");
+    case "23514":
+      return new ApiError(409, "invalid_agent", error.message ?? "invalid agent");
+    case "23503":
+      return new ApiError(404, "not_found", error.message ?? "not found");
+    default:
+      return error;
+  }
+}
+
 export function createSupabaseBusinessRepository(options) {
   const {
     supabaseUrl,
@@ -118,6 +135,26 @@ export function createSupabaseBusinessRepository(options) {
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
       return mapDirectoryActor(row);
+    },
+
+    async getMemberDefaultAgent(teamId) {
+      const { data, error } = await supabase.rpc("get_member_default_agent", {
+        p_team_id: teamId,
+      });
+      if (error) throw mapDefaultAgentError(error);
+      // RPC returns a scalar uuid (or null).
+      const value = Array.isArray(data) ? data[0] : data;
+      return { defaultAgentId: (value ?? null) as string | null };
+    },
+
+    async setMemberDefaultAgent(teamId, agentId) {
+      const { data, error } = await supabase.rpc("set_member_default_agent", {
+        p_team_id: teamId,
+        p_agent_id: agentId ?? null,
+      });
+      if (error) throw mapDefaultAgentError(error);
+      const value = Array.isArray(data) ? data[0] : data;
+      return { defaultAgentId: (value ?? null) as string | null };
     },
 
     // --- Team share mode (Task 3 of share-onboarding refactor) ---

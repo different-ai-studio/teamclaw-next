@@ -34,6 +34,11 @@ export const actors = pgTable("actors", {
 export const members = pgTable("members", {
   id: uuid("id").primaryKey().references(() => actors.id, { onDelete: "cascade" }),
   status: text("status").notNull(),
+  // Per-member preference: the agent this human actor wants pre-selected as their
+  // default. The FK to agents(id) with ON DELETE SET NULL is declared in the
+  // migration SQL (kept out of the Drizzle schema to avoid a teams<->agents
+  // import cycle that drizzle-kit's resolver can't follow).
+  defaultAgentId: uuid("default_agent_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
