@@ -1,6 +1,8 @@
 {
   "common": {
     "save": "Save",
+    "expand": "Expand",
+    "collapse": "Collapse",
     "cancel": "Cancel",
     "confirm": "Confirm",
     "close": "Close",

@@ -111,11 +111,8 @@ export function LocalDaemonRow() {
             <MonitorSmartphone className="h-3 w-3" />
           </span>
           <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-            {t('sidebar.localDaemon', 'This device')} · {agent.displayName}
+            {agent.displayName}
           </span>
-          {expanded
-            ? <ChevronDown className="h-3 w-3 shrink-0 text-faint" />
-            : <ChevronRight className="h-3 w-3 shrink-0 text-faint" />}
         </button>
         <button
           type="button"
@@ -126,6 +123,16 @@ export function LocalDaemonRow() {
           aria-label={t('sidebar.newWorkspace', 'New workspace')}
         >
           {creating ? <Loader2 className="h-3 w-3 animate-spin" /> : <FolderPlus className="h-3 w-3" />}
+        </button>
+        <button
+          type="button"
+          onClick={toggle}
+          className="shrink-0 rounded-md p-1 text-faint hover:bg-selected/80 hover:text-foreground"
+          aria-label={expanded ? t('common.collapse', 'Collapse') : t('common.expand', 'Expand')}
+        >
+          {expanded
+            ? <ChevronDown className="h-3 w-3" />
+            : <ChevronRight className="h-3 w-3" />}
         </button>
       </div>
 
