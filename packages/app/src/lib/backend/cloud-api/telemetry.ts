@@ -34,5 +34,12 @@ export function createTelemetryModule(client: CloudApiClient): TelemetryBackend 
       );
       return out.items;
     },
+    async reportClientVersion(teamId, payload) {
+      try {
+        await client.post<void>(`/v1/teams/${encodeURIComponent(teamId)}/client-version`, payload);
+      } catch {
+        // ops telemetry only — never block startup
+      }
+    },
   };
 }

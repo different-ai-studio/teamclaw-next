@@ -103,6 +103,8 @@ import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { initRuntimeStateStore, disposeRuntimeStateStore } from "@/stores/runtime-state-store";
 import { initActorPresenceStore, disposeActorPresenceStore } from "@/stores/actor-presence-store";
 import { getBackend } from "@/lib/backend";
+import { getVersion } from "@tauri-apps/api/app";
+import { getDesktopDeviceId } from "./lib/backend/cloud-api/device-id";
 import { create as createMessage } from "@bufbuild/protobuf";
 import { MessageSchema, MessageKind, type Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
 import {
@@ -703,6 +705,29 @@ function AppContent() {
   // Wait for a team id for MQTT ACL. The active team from settings is the
   // authoritative source — populated by AuthGate / loadCurrentTeam after login.
   const currentTeamId = useCurrentTeamStore((s) => s.team?.id ?? null);
+
+  // Report this desktop install's tauri client version once per team selection.
+  useEffect(() => {
+    if (!currentTeamId) return;
+    let cancelled = false;
+    void (async () => {
+      let version: string;
+      try {
+        version = await getVersion(); // throws outside Tauri (web preview) — skip then
+      } catch {
+        return;
+      }
+      if (cancelled) return;
+      await getBackend().telemetry.reportClientVersion(currentTeamId, {
+        clientType: "tauri",
+        version,
+        deviceId: getDesktopDeviceId(),
+        build: null,
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [currentTeamId]);
+
   const mqttTeamId = currentTeamId;
   const mqttAccessToken = useAuthStore((s) => s.session?.access_token ?? null);
   const mqttReconnectNonce = useMqttReconnectStore((s) => s.nonce);

@@ -655,6 +655,7 @@ export interface TelemetryBackend {
   insertSessionReport(input: Record<string, unknown>): Promise<void>;
   insertSkillUsage(input: Record<string, unknown>): Promise<void>;
   listLeaderboard(teamId: string, period?: "day" | "week" | "month"): Promise<Array<Record<string, unknown>>>;
+  reportClientVersion(teamId: string, payload: { clientType: string; version: string; deviceId: string; build: string | null }): Promise<void>;
 }
 
 export interface TeamClawBackend {
