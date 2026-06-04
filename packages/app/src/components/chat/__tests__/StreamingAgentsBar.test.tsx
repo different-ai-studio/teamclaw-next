@@ -33,7 +33,7 @@ describe("StreamingAgentsBar", () => {
       />,
     );
 
-    expect(getByTestId("streaming-agents-bar")).toBeTruthy();
+    expect(getByTestId("streaming-agents-dock")).toBeTruthy();
     expect(getAllByTestId("streaming-agent-row")).toHaveLength(2);
 
     fireEvent.click(getAllByTestId("streaming-agent-stop")[0]);

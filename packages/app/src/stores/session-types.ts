@@ -123,6 +123,8 @@ export interface Message {
    * Routing still uses the v2 envelope/metadata; these labels are not part of
    * the prompt delivered to an agent. */
   mentionActorIds?: string[];
+  /** Snapshot at send time: agent actor id → delivery state for UI meta line. */
+  mentionDeliverySnapshot?: Record<string, "ready" | "offline" | "stale">;
   parts: MessagePart[];
   toolCalls?: ToolCall[];
   timestamp: Date;

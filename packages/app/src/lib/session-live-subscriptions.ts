@@ -1,4 +1,4 @@
-import { mqttSubscribe } from "@/lib/mqtt-bridge";
+import { mqttSubscribe, mqttUnsubscribe } from "@/lib/mqtt-bridge";
 
 export const subscribedSessionTopics = new Set<string>();
 
@@ -13,6 +13,10 @@ function teamSessionLiveTopic(teamId: string): string {
 
 function sessionLiveTopic(teamId: string, sessionId: string): string {
   return `amux/${teamId}/session/${sessionId}/live`;
+}
+
+function isSessionLiveTopicForTeam(topic: string, teamId: string): boolean {
+  return topic.startsWith(`amux/${teamId}/session/`) && topic.endsWith("/live");
 }
 
 export function hasTeamSessionLiveSubscription(teamId: string): boolean {
@@ -41,6 +45,23 @@ export async function ensureTeamSessionLiveSubscribed(teamId: string): Promise<v
     }
     if (subscriptionEpoch === epoch) {
       subscribedTeamSessionTopics.add(topic);
+      const overlapping = [...subscribedSessionTopics].filter((sessionTopic) =>
+        isSessionLiveTopicForTeam(sessionTopic, teamId),
+      );
+      await Promise.all(
+        overlapping.map(async (sessionTopic) => {
+          try {
+            await mqttUnsubscribe(sessionTopic);
+          } catch (error) {
+            console.warn("[MQTT] unsubscribe overlapping session/live topic failed", {
+              topic: sessionTopic,
+              error,
+            });
+          } finally {
+            subscribedSessionTopics.delete(sessionTopic);
+          }
+        }),
+      );
       return;
     }
   }

@@ -500,6 +500,18 @@ public struct Amux_AcpError: Sendable {
   public init() {}
 }
 
+public struct Amux_AcpPermissionOption: Sendable {
+  public var optionID: String = String()
+
+  public var kind: String = String()
+
+  public var name: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public struct Amux_AcpPermissionRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -512,6 +524,8 @@ public struct Amux_AcpPermissionRequest: Sendable {
   public var description_p: String = String()
 
   public var params: Dictionary<String,String> = [:]
+
+  public var options: [Amux_AcpPermissionOption] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -772,6 +786,8 @@ public struct Amux_AcpGrantPermission: Sendable {
   // methods supported on all messages.
 
   public var requestID: String = String()
+
+  public var optionID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1846,9 +1862,46 @@ extension Amux_AcpError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 }
 
+extension Amux_AcpPermissionOption: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".AcpPermissionOption"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}option_id\0\u{1}kind\0\u{1}name\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.optionID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.kind) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.name) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.optionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.optionID, fieldNumber: 1)
+    }
+    if !self.kind.isEmpty {
+      try visitor.visitSingularStringField(value: self.kind, fieldNumber: 2)
+    }
+    if !self.name.isEmpty {
+      try visitor.visitSingularStringField(value: self.name, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Amux_AcpPermissionOption, rhs: Amux_AcpPermissionOption) -> Bool {
+    if lhs.optionID != rhs.optionID {return false}
+    if lhs.kind != rhs.kind {return false}
+    if lhs.name != rhs.name {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 extension Amux_AcpPermissionRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AcpPermissionRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}tool_name\0\u{1}description\0\u{1}params\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}tool_name\0\u{1}description\0\u{1}params\0\u{1}options\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1860,6 +1913,7 @@ extension Amux_AcpPermissionRequest: SwiftProtobuf.Message, SwiftProtobuf._Messa
       case 2: try { try decoder.decodeSingularStringField(value: &self.toolName) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.description_p) }()
       case 4: try { try decoder.decodeMapField(fieldType: SwiftProtobuf._ProtobufMap<SwiftProtobuf.ProtobufString,SwiftProtobuf.ProtobufString>.self, value: &self.params) }()
+      case 5: try { try decoder.decodeRepeatedMessageField(value: &self.options) }()
       default: break
       }
     }
@@ -1878,6 +1932,9 @@ extension Amux_AcpPermissionRequest: SwiftProtobuf.Message, SwiftProtobuf._Messa
     if !self.params.isEmpty {
       try visitor.visitMapField(fieldType: SwiftProtobuf._ProtobufMap<SwiftProtobuf.ProtobufString,SwiftProtobuf.ProtobufString>.self, value: self.params, fieldNumber: 4)
     }
+    if !self.options.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.options, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1886,6 +1943,7 @@ extension Amux_AcpPermissionRequest: SwiftProtobuf.Message, SwiftProtobuf._Messa
     if lhs.toolName != rhs.toolName {return false}
     if lhs.description_p != rhs.description_p {return false}
     if lhs.params != rhs.params {return false}
+    if lhs.options != rhs.options {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2406,7 +2464,7 @@ extension Amux_AcpCancel: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
 
 extension Amux_AcpGrantPermission: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AcpGrantPermission"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}option_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2415,6 +2473,7 @@ extension Amux_AcpGrantPermission: SwiftProtobuf.Message, SwiftProtobuf._Message
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.requestID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.optionID) }()
       default: break
       }
     }
@@ -2424,11 +2483,15 @@ extension Amux_AcpGrantPermission: SwiftProtobuf.Message, SwiftProtobuf._Message
     if !self.requestID.isEmpty {
       try visitor.visitSingularStringField(value: self.requestID, fieldNumber: 1)
     }
+    if !self.optionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.optionID, fieldNumber: 2)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Amux_AcpGrantPermission, rhs: Amux_AcpGrantPermission) -> Bool {
     if lhs.requestID != rhs.requestID {return false}
+    if lhs.optionID != rhs.optionID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

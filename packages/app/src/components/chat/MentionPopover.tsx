@@ -10,6 +10,8 @@ import {
 } from '@/components/ui/command'
 import { getBackend } from '@/lib/backend'
 import { useSessionSelectionStore } from '@/stores/session-selection-store'
+import { useActorPresenceStore } from '@/stores/actor-presence-store'
+import { isSupersededLocalAgent } from '@/lib/local-daemon-identity'
 import { type MentionedPerson } from '@/packages/ai/prompt-input'
 import type { AttachedAgent } from '@/packages/ai/prompt-input-insert-hooks'
 
@@ -66,6 +68,7 @@ export function MentionPopover({
 }: MentionPopoverProps) {
   const { t } = useTranslation()
   const sessionId = useSessionSelectionStore(s => s.currentSessionId)
+  const presenceByActor = useActorPresenceStore((s) => s.byActorId)
   const [rows, setRows] = React.useState<ParticipantRow[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState(false)
@@ -147,7 +150,17 @@ export function MentionPopover({
               heading={t('chat.mentionGroupAgents', 'Agents')}
               className="[&_[cmdk-group-heading]]:text-[10px]"
             >
-              {agents.map(a => (
+              {agents.map(a => {
+                const presence = presenceByActor[a.id]
+                const stale = isSupersededLocalAgent(a.id)
+                const statusLabel = stale
+                  ? t('chat.sessionAgent.mentionStale')
+                  : presence?.online === false
+                    ? t('chat.sessionAgent.mentionOffline')
+                    : presence?.online === true
+                      ? null
+                      : t('chat.sessionAgent.mentionConnecting')
+                return (
                 <CommandItem
                   key={a.id}
                   value={`a:${a.id}`}
@@ -158,9 +171,13 @@ export function MentionPopover({
                   className="flex items-center gap-2 cursor-pointer"
                 >
                   <Sparkles className="h-4 w-4 text-orange-500 shrink-0" />
-                  <span className="text-xs font-medium truncate">{a.display_name}</span>
+                  <span className="text-xs font-medium truncate flex-1">{a.display_name}</span>
+                  {statusLabel ? (
+                    <span className="text-[10px] text-faint shrink-0">{statusLabel}</span>
+                  ) : null}
                 </CommandItem>
-              ))}
+                )
+              })}
             </CommandGroup>
           )}
         </CommandList>

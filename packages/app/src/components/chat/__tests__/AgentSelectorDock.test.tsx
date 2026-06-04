@@ -1,41 +1,20 @@
+import * as React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AgentSelectorDock, resolveAgentAvailableModels } from '../AgentSelectorDock'
 import { useAgentModelPickStore } from '@/stores/agent-model-pick-store'
 import { RuntimeLifecycle } from '@/lib/proto/amux_pb'
+import type { EngagedAgentUiEntry } from '@/hooks/use-engaged-agent-ui-states'
 
 const mocks = vi.hoisted(() => ({
-  agentRuntimeRows: [] as Array<{ agent_id: string; runtime_id: string; backend_type: string | null; session_id?: string | null }>,
   runtimeStates: {} as Record<string, unknown>,
-  queriedTeamIds: [] as string[],
 }))
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string) => fallback ?? key,
   }),
-}))
-
-vi.mock('@/lib/backend', () => ({
-  getBackend: () => ({
-    runtime: {
-      listLatestAgentRuntimeHints: (teamId: string) => {
-        mocks.queriedTeamIds.push(teamId)
-        return Promise.resolve(mocks.agentRuntimeRows)
-      },
-    },
-  }),
-}))
-
-vi.mock('@/stores/current-team', () => ({
-  useCurrentTeamStore: (selector: (s: unknown) => unknown) =>
-    selector({ team: { id: 'team-1' } }),
-}))
-
-vi.mock('@/stores/session-list-store', () => ({
-  useSessionListStore: (selector: (s: unknown) => unknown) =>
-    selector({ rows: [{ id: 'displayed-session', team_id: 'team-1' }, { id: 'session-1', team_id: 'team-1' }] }),
 }))
 
 vi.mock('@/stores/runtime-state-store', () => ({
@@ -47,22 +26,35 @@ vi.mock('@/lib/teamclaw-rpc', () => ({
   setModel: vi.fn(),
 }))
 
+function dockProps(
+  partial: Partial<React.ComponentProps<typeof AgentSelectorDock>> &
+    Pick<React.ComponentProps<typeof AgentSelectorDock>, 'engagedAgents'>,
+) {
+  const engagedAgents = partial.engagedAgents ?? []
+  const engagedUiEntries: EngagedAgentUiEntry[] =
+    partial.engagedUiEntries ??
+    engagedAgents.map((agent) => ({ agent, uiState: 'ready' as const }))
+  return {
+    activeSessionId: null as string | null,
+    engagedUiEntries,
+    agentToRuntimeId: new Map<string, string>(),
+    agentToBackendType: new Map<string, string>(),
+    onRemoveAgent: vi.fn(),
+    ...partial,
+    engagedAgents,
+  }
+}
+
 describe('AgentSelectorDock', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.agentRuntimeRows = []
     mocks.runtimeStates = {}
-    mocks.queriedTeamIds = []
     useAgentModelPickStore.setState({ bySessionAgent: {} })
   })
 
   it('renders nothing when no agents are engaged', () => {
     const { container } = render(
-      <AgentSelectorDock
-        activeSessionId={null}
-        engagedAgents={[]}
-        onRemoveAgent={vi.fn()}
-      />,
+      <AgentSelectorDock {...dockProps({ engagedAgents: [] })} />,
     )
     expect(container.firstChild).toBeNull()
   })
@@ -70,12 +62,12 @@ describe('AgentSelectorDock', () => {
   it('renders one pill per engaged agent', () => {
     render(
       <AgentSelectorDock
-        activeSessionId={null}
-        engagedAgents={[
-          { id: 'a-1', displayName: 'Reviewer Bot' },
-          { id: 'a-2', displayName: 'Ops Buddy' },
-        ]}
-        onRemoveAgent={vi.fn()}
+        {...dockProps({
+          engagedAgents: [
+            { id: 'a-1', displayName: 'Reviewer Bot' },
+            { id: 'a-2', displayName: 'Ops Buddy' },
+          ],
+        })}
       />,
     )
     expect(screen.getByText('Reviewer Bot')).toBeInTheDocument()
@@ -90,29 +82,7 @@ describe('AgentSelectorDock', () => {
     } as any)).toEqual([{ id: 'm-1', displayName: 'Model One' }])
   })
 
-  it('loads runtime mapping for the displayed session id instead of legacy global state', async () => {
-    mocks.agentRuntimeRows = [
-      { agent_id: 'a-1', runtime_id: 'runtime-1', backend_type: 'opencode', session_id: 'displayed-session' },
-    ]
-
-    render(
-      <AgentSelectorDock
-        activeSessionId="displayed-session"
-        engagedAgents={[
-          { id: 'a-1', displayName: 'OpenCode Bot' },
-        ]}
-        onRemoveAgent={vi.fn()}
-      />,
-    )
-
-    await screen.findByText('OpenCode Bot')
-    expect(mocks.queriedTeamIds).toContain('team-1')
-  })
-
   it('shows ACP-advertised models when retain is keyed by agent id but DB runtime id differs', async () => {
-    mocks.agentRuntimeRows = [
-      { agent_id: 'a-1', runtime_id: 'uuid-db', backend_type: 'opencode', session_id: 'session-1' },
-    ]
     mocks.runtimeStates = {
       'a-1': {
         daemonActorId: 'a-1',
@@ -127,9 +97,12 @@ describe('AgentSelectorDock', () => {
 
     render(
       <AgentSelectorDock
-        activeSessionId="session-1"
-        engagedAgents={[{ id: 'a-1', displayName: 'OpenCode Bot' }]}
-        onRemoveAgent={vi.fn()}
+        {...dockProps({
+          activeSessionId: 'session-1',
+          engagedAgents: [{ id: 'a-1', displayName: 'OpenCode Bot' }],
+          agentToRuntimeId: new Map([['a-1', 'uuid-db']]),
+          agentToBackendType: new Map([['a-1', 'opencode']]),
+        })}
       />,
     )
 
@@ -138,10 +111,6 @@ describe('AgentSelectorDock', () => {
   })
 
   it('keeps the newest runtime row when duplicate rows arrive newest-first', async () => {
-    mocks.agentRuntimeRows = [
-      { agent_id: 'a-1', runtime_id: 'runtime-new', backend_type: 'opencode', session_id: 'session-1' },
-      { agent_id: 'a-1', runtime_id: 'runtime-old', backend_type: 'claude', session_id: 'session-1' },
-    ]
     mocks.runtimeStates = {
       'runtime-new': {
         daemonActorId: 'a-1',
@@ -163,11 +132,11 @@ describe('AgentSelectorDock', () => {
 
     render(
       <AgentSelectorDock
-        activeSessionId="session-1"
-        engagedAgents={[
-          { id: 'a-1', displayName: 'OpenCode Bot' },
-        ]}
-        onRemoveAgent={vi.fn()}
+        {...dockProps({
+          activeSessionId: 'session-1',
+          engagedAgents: [{ id: 'a-1', displayName: 'OpenCode Bot' }],
+          agentToRuntimeId: new Map([['a-1', 'runtime-new']]),
+        })}
       />,
     )
 
@@ -175,52 +144,7 @@ describe('AgentSelectorDock', () => {
     expect(screen.queryByText('old-model')).not.toBeInTheDocument()
   })
 
-  it('does not refetch runtime hints in a loop when retain payload changes but runtime ids stay the same', async () => {
-    mocks.agentRuntimeRows = []
-    const retainEntry = {
-      daemonActorId: 'a-1',
-      lastUpdated: Date.now(),
-      info: {
-        availableModels: [{ id: 'm-1', displayName: 'Model One' }],
-        currentModel: 'm-1',
-      },
-    }
-    mocks.runtimeStates = { 'a-1': retainEntry }
-
-    const props = {
-      activeSessionId: 'session-1' as const,
-      engagedAgents: [{ id: 'a-1', displayName: 'OpenCode Bot' }],
-      onRemoveAgent: vi.fn(),
-    }
-
-    const { rerender } = render(<AgentSelectorDock {...props} />)
-
-    await screen.findByText('OpenCode Bot')
-    await new Promise((r) => setTimeout(r, 50))
-    const callsAfterMount = mocks.queriedTeamIds.length
-
-    for (let i = 0; i < 5; i += 1) {
-      mocks.runtimeStates = {
-        'a-1': {
-          ...retainEntry,
-          lastUpdated: Date.now() + i + 1,
-          info: {
-            ...retainEntry.info,
-            currentModel: `m-${i}`,
-          },
-        },
-      }
-      rerender(<AgentSelectorDock {...props} />)
-    }
-
-    await new Promise((r) => setTimeout(r, 50))
-    expect(mocks.queriedTeamIds.length).toBe(callsAfterMount)
-  })
-
   it('shows no-models hint when ACP retain has no available_models and runtime is active', async () => {
-    mocks.agentRuntimeRows = [
-      { agent_id: 'a-1', runtime_id: 'runtime-1', backend_type: 'opencode', session_id: 'session-1' },
-    ]
     mocks.runtimeStates = {
       'runtime-1': {
         daemonActorId: 'a-1',
@@ -235,9 +159,12 @@ describe('AgentSelectorDock', () => {
 
     render(
       <AgentSelectorDock
-        activeSessionId="session-1"
-        engagedAgents={[{ id: 'a-1', displayName: 'OpenCode Bot' }]}
-        onRemoveAgent={vi.fn()}
+        {...dockProps({
+          activeSessionId: 'session-1',
+          engagedAgents: [{ id: 'a-1', displayName: 'OpenCode Bot' }],
+          agentToRuntimeId: new Map([['a-1', 'runtime-1']]),
+          agentToBackendType: new Map([['a-1', 'opencode']]),
+        })}
       />,
     )
 
@@ -246,14 +173,6 @@ describe('AgentSelectorDock', () => {
   })
 
   it('lists only models from ACP retain on the runtime', async () => {
-    mocks.agentRuntimeRows = [
-      {
-        agent_id: 'a-1',
-        runtime_id: 'runtime-1',
-        backend_type: 'opencode',
-        session_id: 'session-1',
-      },
-    ]
     mocks.runtimeStates = {
       'runtime-1': {
         daemonActorId: 'a-1',
@@ -271,9 +190,11 @@ describe('AgentSelectorDock', () => {
 
     render(
       <AgentSelectorDock
-        activeSessionId="session-1"
-        engagedAgents={[{ id: 'a-1', displayName: 'OpenCode Bot' }]}
-        onRemoveAgent={vi.fn()}
+        {...dockProps({
+          activeSessionId: 'session-1',
+          engagedAgents: [{ id: 'a-1', displayName: 'OpenCode Bot' }],
+          agentToRuntimeId: new Map([['a-1', 'runtime-1']]),
+        })}
       />,
     )
 
@@ -281,5 +202,24 @@ describe('AgentSelectorDock', () => {
     expect((await screen.findAllByText('Big Pickle')).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('GPT 5.2')).toBeInTheDocument()
     expect(screen.queryByText('mimo-v2.5-free')).not.toBeInTheDocument()
+  })
+
+  it('shows offline pill suffix from engagedUiEntries', async () => {
+    render(
+      <AgentSelectorDock
+        {...dockProps({
+          engagedAgents: [{ id: 'a-1', displayName: 'Ghost Bot' }],
+          engagedUiEntries: [
+            {
+              agent: { id: 'a-1', displayName: 'Ghost Bot' },
+              uiState: 'offline',
+            },
+          ],
+        })}
+      />,
+    )
+    await waitFor(() => {
+      expect(screen.getByText(/Offline/i)).toBeInTheDocument()
+    })
   })
 })

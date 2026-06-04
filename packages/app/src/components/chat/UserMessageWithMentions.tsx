@@ -54,14 +54,55 @@ function ActorMentionChip({ actorId }: { actorId: string }) {
   );
 }
 
+function MentionDeliveryMetaLine({
+  actorIds,
+  snapshot,
+}: {
+  actorIds: string[];
+  snapshot?: Record<string, "ready" | "offline" | "stale">;
+}) {
+  const { t } = useTranslation();
+  const flagged = actorIds.filter((id) => {
+    const v = snapshot?.[id];
+    return v === "offline" || v === "stale";
+  });
+  if (flagged.length === 0 || !snapshot) return null;
+  return (
+    <div className="mt-1 text-[11px] text-faint text-right" data-testid="mention-delivery-meta">
+      {flagged.map((id) => (
+        <MentionDeliveryMetaItem key={id} actorId={id} state={snapshot[id]!} t={t} />
+      ))}
+    </div>
+  );
+}
+
+function MentionDeliveryMetaItem({
+  actorId,
+  state,
+  t,
+}: {
+  actorId: string;
+  state: "offline" | "stale";
+  t: ReturnType<typeof useTranslation>["t"];
+}) {
+  const name = useActorDisplayName(actorId);
+  const label =
+    state === "stale"
+      ? t("chat.sessionAgent.metaStale", { name: name || actorId })
+      : t("chat.sessionAgent.metaOffline", { name: name || actorId });
+  return <div>{label}</div>;
+}
+
 export function UserMessageWithMentions({
   content,
   basePath,
   leadingMentionActorIds = [],
+  mentionDeliverySnapshot,
 }: {
   content: string;
   basePath?: string;
   leadingMentionActorIds?: string[];
+  mentionDeliverySnapshot?: Record<string, "ready" | "offline" | "stale">;
 }) {
   const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = React.useState(false);
@@ -323,6 +364,11 @@ export function UserMessageWithMentions({
       </div>
 
       {/* Expand / collapse toggle */}
+      <MentionDeliveryMetaLine
+        actorIds={leadingMentionActorIds}
+        snapshot={mentionDeliverySnapshot}
+      />
+
       {needsCollapse && (
         <button
           onClick={() => setIsExpanded((v) => !v)}

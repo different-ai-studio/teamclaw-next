@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const subscribeMock = vi.fn();
+const unsubscribeMock = vi.fn();
 
 vi.mock("@/lib/mqtt-bridge", () => ({
   mqttSubscribe: subscribeMock,
+  mqttUnsubscribe: unsubscribeMock,
 }));
 
 const {
@@ -16,6 +18,7 @@ const {
 
 beforeEach(() => {
   subscribeMock.mockReset();
+  unsubscribeMock.mockReset();
   resetSessionLiveSubscriptionStateForTests();
 });
 
@@ -79,6 +82,45 @@ describe("session live subscriptions", () => {
     resolveWildcard?.();
     await wildcardPromise;
     expect(hasTeamSessionLiveSubscription("team-1")).toBe(true);
+    expect(unsubscribeMock).toHaveBeenCalledWith(
+      "amux/team-1/session/session-1/live",
+    );
+  });
+
+  it("unsubscribes overlapping concrete session topics when wildcard succeeds", async () => {
+    subscribeMock.mockResolvedValue(undefined);
+    unsubscribeMock.mockResolvedValue(undefined);
+
+    await ensureSessionLiveSubscribed("team-1", "session-1");
+    await ensureSessionLiveSubscribed("team-1", "session-2");
+    await ensureTeamSessionLiveSubscribed("team-1");
+
+    expect(unsubscribeMock).toHaveBeenCalledTimes(2);
+    expect(unsubscribeMock).toHaveBeenCalledWith(
+      "amux/team-1/session/session-1/live",
+    );
+    expect(unsubscribeMock).toHaveBeenCalledWith(
+      "amux/team-1/session/session-2/live",
+    );
+    await ensureSessionLiveSubscribed("team-1", "session-1");
+    expect(subscribeMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps wildcard subscription active when overlapping unsubscribe fails", async () => {
+    subscribeMock.mockResolvedValue(undefined);
+    unsubscribeMock.mockRejectedValue(new Error("unsubscribe failed"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      await ensureSessionLiveSubscribed("team-1", "session-1");
+      await ensureTeamSessionLiveSubscribed("team-1");
+
+      expect(hasTeamSessionLiveSubscription("team-1")).toBe(true);
+      await ensureSessionLiveSubscribed("team-1", "session-1");
+      expect(subscribeMock).toHaveBeenCalledTimes(2);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("retries when a pending wildcard subscribe becomes stale after reset", async () => {

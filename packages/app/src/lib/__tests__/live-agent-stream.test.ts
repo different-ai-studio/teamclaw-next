@@ -32,6 +32,24 @@ describe("live agent stream event helpers", () => {
     });
   });
 
+  it("maps other-kind skill tool uses to the skill route", () => {
+    expect(
+      normalizeToolUseEvent({
+        tool_id: "tool-skill",
+        tool_name: "other",
+        tool_kind: "other",
+        description: "skill",
+        params: { name: "brainstorming", description: "skill" },
+      }),
+    ).toEqual({
+      toolId: "tool-skill",
+      toolName: "skill",
+      description: "skill",
+      params: { name: "brainstorming", description: "skill" },
+      toolKind: "other",
+    });
+  });
+
   it("keeps explicit params when description is only a title", () => {
     expect(
       normalizeToolUseEvent({

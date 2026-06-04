@@ -10,7 +10,10 @@
 
 import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
 import { MessageKind } from "@/lib/proto/teamclaw_pb";
-import { toolNameFromKind } from "@/components/chat/tool-calls/tool-call-utils";
+import {
+  paramsFromToolArguments,
+  resolveWireToolName,
+} from "@/components/chat/tool-calls/tool-call-utils";
 import type {
   Message as SdkMessage,
   MessagePart,
@@ -34,8 +37,22 @@ function kindToRole(kind: MessageKind): SdkMessage["role"] {
 
 /** 1:1 mapping (legacy path) for messages without a turn_id or for
  * non-assistant roles. */
+function parseMentionDeliverySnapshot(
+  m: TeamclawMessage,
+): SdkMessage["mentionDeliverySnapshot"] {
+  const md = parseMetadata(m);
+  const raw = md.mention_delivery_snapshot;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: NonNullable<SdkMessage["mentionDeliverySnapshot"]> = {};
+  for (const [id, v] of Object.entries(raw)) {
+    if (v === "ready" || v === "offline" || v === "stale") out[id] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export function adaptTeamclawMessageToSdk(m: TeamclawMessage): SdkMessage {
   const mentionActorIds = parseDisplayMentionActorIds(m);
+  const mentionDeliverySnapshot = parseMentionDeliverySnapshot(m);
   return {
     id: m.messageId,
     sessionId: m.sessionId,
@@ -43,6 +60,7 @@ export function adaptTeamclawMessageToSdk(m: TeamclawMessage): SdkMessage {
     role: kindToRole(m.kind),
     content: m.content,
     mentionActorIds,
+    mentionDeliverySnapshot,
     modelID: m.model || undefined,
     parts: [
       {
@@ -210,9 +228,13 @@ function buildTurnSdkMessage(group: TeamclawMessage[]): SdkMessage {
       ...paramsFromMetadataParams(md.params),
     };
     const match = toolId ? resultByToolId.get(toolId) : undefined;
+    const resolveParams = {
+      ...paramsFromToolArguments(args),
+      ...(description && !args.description ? { description } : {}),
+    };
     return {
       id: toolId || tc.messageId,
-      name: toolNameFromKind(toolKind) || toolNameRaw,
+      name: resolveWireToolName(toolKind, toolNameRaw, resolveParams),
       toolKind,
       status: match ? (match.success ? "completed" : "failed") : "calling",
       arguments: args,

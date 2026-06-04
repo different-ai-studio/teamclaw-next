@@ -5,6 +5,7 @@ import { sessionFlowError, sessionFlowLog } from "@/lib/session-flow-log";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { useRuntimeStateStore } from "@/stores/runtime-state-store";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
+import { acpOptionIdForDecision } from "@/lib/teamclaw/acp-permission-option";
 import { createRuntimeCommandSender } from "@/lib/teamclaw/runtime-command";
 
 export type AcpPermissionDecision = "allow" | "deny" | "always";
@@ -34,12 +35,23 @@ export async function replyAcpPermission(args: {
   agentActorId: string;
   requestId: string;
   decision: AcpPermissionDecision;
+  /** When omitted, resolved from v2 pending permission options. */
+  optionId?: string;
 }): Promise<void> {
   const teamId = useCurrentTeamStore.getState().team?.id?.trim();
   if (!teamId) throw new Error("No active team");
 
   const senderActorId = useCurrentTeamStore.getState().currentMember?.id?.trim() ?? "";
   const granted = args.decision !== "deny";
+  const located = findV2PendingPermission(args.requestId);
+  const pendingReq = located
+    ? useV2StreamingStore.getState().byKey[`${located.sessionId}::${located.actorId}`]
+        ?.pendingPermission
+    : null;
+  const optionId = granted
+    ? args.optionId?.trim() ||
+      acpOptionIdForDecision(args.decision, { options: pendingReq?.options })
+    : undefined;
 
   let agentParticipantIds: string[] = [args.agentActorId];
   try {
@@ -102,6 +114,7 @@ export async function replyAcpPermission(args: {
       runtimeId: target.runtimeId,
       requestId: args.requestId,
       granted,
+      optionId,
     });
   } catch (error) {
     sessionFlowError("permission.reply.failed", error, {

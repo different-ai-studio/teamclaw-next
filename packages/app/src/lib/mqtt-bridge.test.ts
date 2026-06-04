@@ -5,7 +5,7 @@ const listenMock = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: listenMock }));
 
-const { mqttConnect, mqttSubscribe, mqttPublish, listenForEnvelopes } = await import("./mqtt-bridge");
+const { mqttConnect, mqttSubscribe, mqttUnsubscribe, mqttPublish, listenForEnvelopes } = await import("./mqtt-bridge");
 
 beforeEach(() => {
   invokeMock.mockReset();
@@ -41,6 +41,12 @@ describe("mqtt-bridge", () => {
     invokeMock.mockResolvedValueOnce(undefined);
     await mqttSubscribe("amux/t1/session/s1/live");
     expect(invokeMock).toHaveBeenCalledWith("mqtt_subscribe", { topic: "amux/t1/session/s1/live" });
+  });
+
+  it("mqttUnsubscribe forwards topic", async () => {
+    invokeMock.mockResolvedValueOnce(undefined);
+    await mqttUnsubscribe("amux/t1/session/s1/live");
+    expect(invokeMock).toHaveBeenCalledWith("mqtt_unsubscribe", { topic: "amux/t1/session/s1/live" });
   });
 
   it("mqttPublish converts Uint8Array to array", async () => {

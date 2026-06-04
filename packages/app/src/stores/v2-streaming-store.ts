@@ -1,6 +1,14 @@
 import { create } from "zustand";
+import {
+  agentReplyTextsEquivalent,
+  pickCanonicalAgentReplyText,
+} from "@/lib/agent-reply-text";
+import {
+  logStreamToolDiag,
+  summarizeToolCallsForDiag,
+} from "@/lib/stream-tool-diag";
 import type { MessagePart, ToolCall } from "@/stores/session-types";
-import { toolNameFromKind } from "@/components/chat/tool-calls/tool-call-utils";
+import { resolveWireToolName } from "@/components/chat/tool-calls/tool-call-utils";
 
 export interface StreamingPlanEntry {
   content: string;
@@ -13,6 +21,8 @@ export interface StreamingPermissionRequest {
   toolName: string;
   description: string;
   params: Record<string, string>;
+  /** ACP PermissionOption list from the agent (OpenCode: once / always / reject). */
+  options?: Array<{ optionId: string; kind: string; name: string }>;
 }
 
 export interface AgentStreamEntry {
@@ -76,7 +86,11 @@ interface State {
   replaceParts: (sessionId: string, actorId: string, parts: MessagePart[]) => void;
   ingestReplyPreview: (sessionId: string, actorId: string, text: string) => void;
   finalize: (sessionId: string, actorId: string, finalText: string) => void;
-  finishSessionActor: (sessionId: string, actorId: string) => void;
+  finishSessionActor: (
+    sessionId: string,
+    actorId: string,
+    opts?: { reason?: string },
+  ) => void;
   /** Re-open live rendering after statusChange marked the turn inactive too early. */
   markActorStreamActive: (sessionId: string, actorId: string) => void;
   /** Empty active stream for statusChange ACTIVE — shows planning placeholder in UI. */
@@ -284,7 +298,13 @@ function placePostToolTextPart(parts: MessagePart[], text: string): MessagePart[
   if (existingTextIndex !== -1) {
     const existing = parts[existingTextIndex];
     const existingText = existing.text || existing.content || "";
-    if (existingText === text || existingText.includes(text)) return parts;
+    if (
+      existingText === text ||
+      existingText.includes(text) ||
+      agentReplyTextsEquivalent(existingText, text)
+    ) {
+      return parts;
+    }
     if (text.includes(existingText)) {
       return parts.map((part, index) =>
         index === existingTextIndex ? replacePartText(part, text) : part,
@@ -387,6 +407,26 @@ function reviveToolCallPart(part: MessagePart): MessagePart {
   };
 }
 
+/** Async enrich/replaceParts can carry stale tool-call rows captured mid-turn.
+ * Never downgrade a terminal live status back to calling/waiting. */
+function mergeToolCallFromEnrichedParts(
+  existing: ToolCall,
+  enriched: ToolCall,
+): ToolCall {
+  const terminal = existing.status === "completed" || existing.status === "failed";
+  const enrichedInFlight =
+    enriched.status === "calling" || enriched.status === "waiting";
+  if (terminal && enrichedInFlight) {
+    return {
+      ...enriched,
+      status: existing.status,
+      result: existing.result ?? enriched.result,
+      duration: existing.duration ?? enriched.duration,
+    };
+  }
+  return enriched;
+}
+
 function finishUnresolvedTools(toolCalls: ToolCall[]): ToolCall[] {
   return toolCalls.map((tc) => {
     if (tc.status !== "calling" && tc.status !== "waiting") return tc;
@@ -419,11 +459,11 @@ function mergeToolUse(
   },
 ): ToolCall {
   const nextArgs = toolUseArguments(args.params, args.description);
-  const kindName = toolNameFromKind(args.toolKind ?? existing.toolKind);
-  const name =
-    kindName ||
-    existing.name ||
-    (args.toolName && args.toolName !== "unknown" ? args.toolName : "unknown");
+  const name = resolveWireToolName(
+    args.toolKind ?? existing.toolKind,
+    args.toolName || existing.name || "unknown",
+    args.params,
+  );
   return {
     ...existing,
     name,
@@ -433,6 +473,20 @@ function mergeToolUse(
       ...nextArgs,
     },
   };
+}
+
+function reconcileEquivalentPreviewParts(
+  parts: MessagePart[],
+  outputText: string,
+): MessagePart[] {
+  if (parts.some((part) => part.type === "tool-call")) {
+    return replacePostToolTextPart(parts, outputText);
+  }
+  const lastTextIndex = lastIndexWhere(parts, (part) => part.type === "text");
+  if (lastTextIndex === -1) return appendTextPart(parts, outputText);
+  return parts.map((part, index) =>
+    index === lastTextIndex ? replacePartText(part, outputText) : part,
+  );
 }
 
 function previewTextUpdate(
@@ -445,11 +499,26 @@ function previewTextUpdate(
   if (!text) {
     return { outputText: current, parts };
   }
-  if (text === current || current.includes(text)) {
-    return { outputText: current || text, parts };
+  if (
+    text === current ||
+    current.includes(text) ||
+    agentReplyTextsEquivalent(current, text)
+  ) {
+    const outputText = pickCanonicalAgentReplyText(current, text);
+    if (outputText === current) return { outputText: current, parts };
+    return {
+      outputText,
+      parts: reconcileEquivalentPreviewParts(parts, outputText),
+    };
   }
   if (text.startsWith(current)) {
     const suffix = text.slice(current.length);
+    if (!suffix || agentReplyTextsEquivalent(current, text)) {
+      return {
+        outputText: text,
+        parts: reconcileEquivalentPreviewParts(parts, text),
+      };
+    }
     return {
       outputText: text,
       parts: suffix ? appendTextPart(parts, suffix) : parts,
@@ -577,7 +646,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     }
     const newToolCall: ToolCall = {
       id: toolId,
-      name: toolNameFromKind(toolKind) || toolName || "unknown",
+      name: resolveWireToolName(toolKind, toolName || "unknown", params),
       toolKind: toolKind || undefined,
       status: "calling",
       arguments: toolUseArguments(params, description),
@@ -611,6 +680,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     const key = k(sessionId, actorId);
     const state = get();
     const existing = state.byKey[key];
+    const before = summarizeToolCallsForDiag(existing?.toolCalls);
     const fallbackToolCall = completedToolPlaceholder(toolId, success, summary);
     if (!existing) {
       set({
@@ -624,6 +694,16 @@ export const useV2StreamingStore = create<State>((set, get) => ({
             active: true,
           },
         },
+      });
+      logStreamToolDiag("completeToolUse", {
+        sessionId,
+        actorId,
+        toolId,
+        success,
+        hadEntry: false,
+        matchedExistingTool: false,
+        before,
+        after: summarizeToolCallsForDiag([fallbackToolCall]),
       });
       return;
     }
@@ -644,6 +724,17 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           lastUpdate: Date.now(),
         },
       },
+    });
+    logStreamToolDiag("completeToolUse", {
+      sessionId,
+      actorId,
+      toolId,
+      success,
+      hadEntry: true,
+      active: existing.active,
+      matchedExistingTool: hasToolCall,
+      before,
+      after: summarizeToolCallsForDiag(updated),
     });
   },
 
@@ -736,17 +827,27 @@ export const useV2StreamingStore = create<State>((set, get) => ({
       .map((part) => part.toolCall!);
     const enrichedById = new Map(enrichedToolCalls.map((tc) => [tc.id, tc]));
     const mergedToolCalls = [
-      ...existing.toolCalls.map((tc) => enrichedById.get(tc.id) ?? tc),
+      ...existing.toolCalls.map((tc) => {
+        const enriched = enrichedById.get(tc.id);
+        if (!enriched) return tc;
+        return mergeToolCallFromEnrichedParts(tc, enriched);
+      }),
       ...enrichedToolCalls.filter(
         (tc) => !existing.toolCalls.some((existingTc) => existingTc.id === tc.id),
       ),
     ];
+    const syncedParts = syncToolParts(revivedParts, mergedToolCalls);
+    logStreamToolDiag("replaceParts", {
+      sessionId,
+      actorId,
+      toolCalls: summarizeToolCallsForDiag(mergedToolCalls),
+    });
     set({
       byKey: {
         ...get().byKey,
         [key]: {
           ...existing,
-          parts: revivedParts,
+          parts: syncedParts,
           toolCalls: mergedToolCalls,
           lastUpdate: Date.now(),
         },
@@ -818,10 +919,19 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     });
   },
 
-  finishSessionActor: (sessionId, actorId) => {
+  finishSessionActor: (sessionId, actorId, opts) => {
     const key = k(sessionId, actorId);
     const existing = get().byKey[key];
-    if (!existing) return;
+    if (!existing) {
+      logStreamToolDiag("finishSessionActor.skip", {
+        sessionId,
+        actorId,
+        reason: opts?.reason ?? "unknown",
+        hadEntry: false,
+      });
+      return;
+    }
+    const before = summarizeToolCallsForDiag(existing.toolCalls);
     const toolCalls = finishUnresolvedTools(existing.toolCalls);
     set({
       byKey: {
@@ -834,6 +944,14 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           active: false,
         },
       },
+    });
+    logStreamToolDiag("finishSessionActor", {
+      sessionId,
+      actorId,
+      reason: opts?.reason ?? "unknown",
+      hadEntry: true,
+      before,
+      after: summarizeToolCallsForDiag(toolCalls),
     });
   },
 
@@ -910,7 +1028,15 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         entryParts(existing).length > 0 ||
         existing.toolCalls.length > 0)
     ) {
+      const before = summarizeToolCallsForDiag(existing.toolCalls);
       const toolCalls = finishUnresolvedTools(existing.toolCalls);
+      logStreamToolDiag("releaseActorAfterPersist.archive", {
+        sessionId,
+        actorId,
+        streamId: existing.streamId,
+        before,
+        after: summarizeToolCallsForDiag(toolCalls),
+      });
       archiveCounter += 1;
       archived = [
         ...archived,

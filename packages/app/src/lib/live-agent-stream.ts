@@ -1,6 +1,6 @@
 import { AgentStatus } from "@/lib/proto/amux_pb";
 import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
-import { toolNameFromKind } from "@/components/chat/tool-calls/tool-call-utils";
+import { resolveWireToolName } from "@/components/chat/tool-calls/tool-call-utils";
 
 export const PENDING_AGENT_REPLY_FALLBACK_MS = 1_200;
 export const PENDING_AGENT_REPLY_TOOL_GRACE_MS = 3_000;
@@ -149,9 +149,14 @@ export function normalizeToolUseEvent(value: unknown): {
   };
   const toolKind = stringField(raw, "toolKind", "tool_kind");
   const explicitToolName = stringField(raw, "toolName", "tool_name");
+  const resolveParams = { ...params };
+  if (description && !resolveParams.description) {
+    resolveParams.description = description;
+  }
   return {
     toolId: stringField(raw, "toolId", "tool_id"),
-    toolName: toolNameFromKind(toolKind) || explicitToolName || "unknown",
+    toolName:
+      resolveWireToolName(toolKind, explicitToolName || "unknown", resolveParams),
     description,
     params,
     toolKind: toolKind || undefined,

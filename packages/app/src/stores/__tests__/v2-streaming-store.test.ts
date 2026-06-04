@@ -457,6 +457,51 @@ describe("v2-streaming-store", () => {
     expect(stream.parts[0].toolCall?.status).toBe("completed");
   });
 
+  it("replaceParts does not downgrade completed tools to calling (enrich race)", () => {
+    const store = useV2StreamingStore.getState();
+    const ids = ["tool-1", "tool-2", "tool-3"];
+    for (const toolId of ids) {
+      store.pushToolUse("s1", "a1", {
+        toolId,
+        toolName: "bash",
+        description: "pwd",
+        params: { command: "pwd" },
+        toolKind: "execute",
+      });
+      store.completeToolUse("s1", "a1", {
+        toolId,
+        success: true,
+        summary: "/workspace",
+      });
+    }
+
+    store.replaceParts(
+      "s1",
+      "a1",
+      ids.map((toolId) => ({
+        id: `stream:tool:${toolId}`,
+        type: "tool-call" as const,
+        toolCallId: toolId,
+        toolCall: {
+          id: toolId,
+          name: "bash",
+          toolKind: "execute",
+          status: "calling" as const,
+          arguments: { command: "pwd" },
+          startTime: new Date(0),
+        },
+      })),
+    );
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.toolCalls.map((tc) => tc.status)).toEqual([
+      "completed",
+      "completed",
+      "completed",
+    ]);
+    expect(stream.parts.every((p) => p.toolCall?.status === "completed")).toBe(true);
+  });
+
   it("replaceParts updates the live tool result without waiting for session reload", () => {
     const store = useV2StreamingStore.getState();
     store.pushToolUse("s1", "a1", {

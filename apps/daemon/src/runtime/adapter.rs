@@ -116,7 +116,12 @@ pub enum AcpCommand {
     /// Cancel the current turn for a bound session.
     Cancel { acp_session_id: String },
     /// Resolve a pending permission request (any session on this host).
-    ResolvePermission { request_id: String, granted: bool },
+    ResolvePermission {
+        request_id: String,
+        granted: bool,
+        /// ACP option_id when granted (e.g. OpenCode "once" / "always"). Empty = allow_once.
+        option_id: Option<String>,
+    },
     /// Switch the model used by a bound session.
     SetModel {
         acp_session_id: String,
@@ -171,10 +176,17 @@ struct SessionRegistry {
     sessions: HashMap<String, SessionRoute>,
 }
 
+/// Client reply routed back to an in-flight ACP `request_permission` call.
+#[derive(Debug)]
+enum PermissionResolution {
+    Denied,
+    Granted { option_id: Option<String> },
+}
+
 struct SessionRoute {
     event_tx: mpsc::Sender<amux::AcpEvent>,
     is_gateway: bool,
-    pending_permissions: HashMap<String, oneshot::Sender<bool>>,
+    pending_permissions: HashMap<String, oneshot::Sender<PermissionResolution>>,
     /// Count of `session_notification` handlers currently between "entered"
     /// and "finished pushing their events onto `event_tx`". The ACP crate
     /// dispatches every incoming `session/update` on its own spawned task,
@@ -304,11 +316,95 @@ struct AmuxClient {
     registry: Rc<RefCell<SessionRegistry>>,
 }
 
-fn resolve_permission_in_registry(registry: &RefCell<SessionRegistry>, request_id: &str, granted: bool) {
+fn permission_kind_wire(kind: acp::PermissionOptionKind) -> String {
+    match kind {
+        acp::PermissionOptionKind::AllowOnce => "allow_once".to_string(),
+        acp::PermissionOptionKind::AllowAlways => "allow_always".to_string(),
+        acp::PermissionOptionKind::RejectOnce => "reject_once".to_string(),
+        acp::PermissionOptionKind::RejectAlways => "reject_always".to_string(),
+        _ => "allow_once".to_string(),
+    }
+}
+
+fn amux_permission_options(options: &[acp::PermissionOption]) -> Vec<amux::AcpPermissionOption> {
+    options
+        .iter()
+        .map(|o| amux::AcpPermissionOption {
+            option_id: o.option_id.to_string(),
+            kind: permission_kind_wire(o.kind),
+            name: o.name.clone(),
+        })
+        .collect()
+}
+
+fn acp_option_for_resolution(
+    options: &[acp::PermissionOption],
+    resolution: &PermissionResolution,
+) -> acp::PermissionOptionId {
+    match resolution {
+        PermissionResolution::Denied => options
+            .iter()
+            .find(|o| {
+                matches!(
+                    o.kind,
+                    acp::PermissionOptionKind::RejectOnce
+                        | acp::PermissionOptionKind::RejectAlways
+                )
+            })
+            .or_else(|| options.last())
+            .map(|o| o.option_id.clone())
+            .unwrap_or_else(|| acp::PermissionOptionId::new("deny")),
+        PermissionResolution::Granted { option_id } => {
+            if let Some(id) = option_id.as_deref().filter(|s| !s.is_empty()) {
+                if let Some(opt) = options.iter().find(|o| o.option_id.to_string() == id) {
+                    return opt.option_id.clone();
+                }
+                if id == "always" {
+                    if let Some(opt) = options.iter().find(|o| {
+                        matches!(o.kind, acp::PermissionOptionKind::AllowAlways)
+                    }) {
+                        return opt.option_id.clone();
+                    }
+                }
+                if id == "once" {
+                    if let Some(opt) = options.iter().find(|o| {
+                        matches!(o.kind, acp::PermissionOptionKind::AllowOnce)
+                    }) {
+                        return opt.option_id.clone();
+                    }
+                }
+                return acp::PermissionOptionId::new(id);
+            }
+            options
+                .iter()
+                .find(|o| matches!(o.kind, acp::PermissionOptionKind::AllowOnce))
+                .or_else(|| {
+                    options.iter().find(|o| {
+                        matches!(o.kind, acp::PermissionOptionKind::AllowAlways)
+                    })
+                })
+                .or_else(|| options.first())
+                .map(|o| o.option_id.clone())
+                .unwrap_or_else(|| acp::PermissionOptionId::new("allow"))
+        }
+    }
+}
+
+fn resolve_permission_in_registry(
+    registry: &RefCell<SessionRegistry>,
+    request_id: &str,
+    granted: bool,
+    option_id: Option<String>,
+) {
+    let resolution = if granted {
+        PermissionResolution::Granted { option_id }
+    } else {
+        PermissionResolution::Denied
+    };
     let mut guard = registry.borrow_mut();
     for route in guard.sessions.values_mut() {
         if let Some(tx) = route.pending_permissions.remove(request_id) {
-            let _ = tx.send(granted);
+            let _ = tx.send(resolution);
             return;
         }
     }
@@ -394,6 +490,7 @@ impl acp::Client for AmuxClient {
                             tool_name: tool_name.clone(),
                             description,
                             params: Default::default(),
+                            options: amux_permission_options(&args.options),
                         },
                     )),
                     model: String::new(),
@@ -401,49 +498,16 @@ impl acp::Client for AmuxClient {
                 .await;
         }
 
-        let granted = rx.await.unwrap_or(false);
+        let resolution = rx
+            .await
+            .unwrap_or(PermissionResolution::Denied);
+        let option_id = acp_option_for_resolution(&args.options, &resolution);
 
-        if granted {
-            let option_id = args
-                .options
-                .iter()
-                .find(|o| {
-                    matches!(
-                        o.kind,
-                        acp::PermissionOptionKind::AllowOnce
-                            | acp::PermissionOptionKind::AllowAlways
-                    )
-                })
-                .or_else(|| args.options.first())
-                .map(|o| o.option_id.clone())
-                .unwrap_or_else(|| acp::PermissionOptionId::new("allow"));
-
-            Ok(acp::RequestPermissionResponse::new(
-                acp::RequestPermissionOutcome::Selected(acp::SelectedPermissionOutcome::new(
-                    option_id,
-                )),
-            ))
-        } else {
-            let option_id = args
-                .options
-                .iter()
-                .find(|o| {
-                    matches!(
-                        o.kind,
-                        acp::PermissionOptionKind::RejectOnce
-                            | acp::PermissionOptionKind::RejectAlways
-                    )
-                })
-                .or_else(|| args.options.last())
-                .map(|o| o.option_id.clone())
-                .unwrap_or_else(|| acp::PermissionOptionId::new("deny"));
-
-            Ok(acp::RequestPermissionResponse::new(
-                acp::RequestPermissionOutcome::Selected(acp::SelectedPermissionOutcome::new(
-                    option_id,
-                )),
-            ))
-        }
+        Ok(acp::RequestPermissionResponse::new(
+            acp::RequestPermissionOutcome::Selected(acp::SelectedPermissionOutcome::new(
+                option_id,
+            )),
+        ))
     }
 
     async fn write_text_file(
@@ -1641,8 +1705,17 @@ async fn run_acp_host(
                             }
                         }
                     }
-                    AcpCommand::ResolvePermission { request_id, granted } => {
-                        resolve_permission_in_registry(&registry, &request_id, granted);
+                    AcpCommand::ResolvePermission {
+                        request_id,
+                        granted,
+                        option_id,
+                    } => {
+                        resolve_permission_in_registry(
+                            &registry,
+                            &request_id,
+                            granted,
+                            option_id,
+                        );
                     }
                     AcpCommand::SetModel { acp_session_id, model_id } => {
                         let req = acp::SetSessionModelRequest::new(

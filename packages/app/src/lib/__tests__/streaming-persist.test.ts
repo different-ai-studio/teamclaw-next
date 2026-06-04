@@ -68,6 +68,26 @@ describe("persistStreamingPartsForReply", () => {
     expect(parts[4].text).toBe("After tools.");
   });
 
+  it("does not append a duplicate text part when reply.content only differs by whitespace", async () => {
+    const stream = useV2StreamingStore.getState();
+    stream.appendOutput("s1", "actor-a", "Done.");
+
+    const reply = create(MessageSchema, {
+      messageId: "reply-final",
+      sessionId: "s1",
+      senderActorId: "actor-a",
+      kind: MessageKind.AGENT_REPLY,
+      content: "Done. ",
+      turnId: "turn-1",
+      createdAt: BigInt(100),
+    });
+
+    await persistStreamingPartsForReply("s1", "actor-a", reply);
+    const parts = JSON.parse((reply as unknown as { partsJson: string }).partsJson);
+    expect(parts.filter((part: { type: string }) => part.type === "text")).toHaveLength(1);
+    expect(parts[0].text).toBe("Done.");
+  });
+
   it("does not expose stale parts_json before async enrichment resolves", async () => {
     let resolveSetParts: ((value: string) => void) | undefined;
     localCacheMock.setMessageParts.mockImplementationOnce(

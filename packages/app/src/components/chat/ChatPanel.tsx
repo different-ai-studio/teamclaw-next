@@ -40,16 +40,20 @@ import { Button } from "@/components/ui/button";
 
 import type { Message } from "@/stores/session";
 import { ChatInputArea } from "./ChatInputArea";
+import { SessionNoticeList } from "./SessionNoticeList";
+import { useEngagedAgentRuntimeMap } from "@/hooks/use-engaged-agent-runtime-map";
+import { useEngagedAgentUiStates } from "@/hooks/use-engaged-agent-ui-states";
+import { getCurrentDaemonAgent } from "@/lib/daemon-agent-admin";
+import { buildPostSendSessionNotice } from "@/lib/session-agent-notice-text";
+import { useSessionNoticeStore } from "@/stores/session-notice-store";
+import { toMentionDeliverySnapshot } from "@/lib/session-agent-ui-state";
 import { getFileName } from "./utils/fileUtils";
 import { MessageList, type MessageListHandle } from "./MessageList";
 import { SessionErrorAlert } from "./SessionErrorAlert";
-import { PendingPermissionInline, hasVisiblePendingPermissions } from "./PermissionCard";
+import { hasVisiblePendingPermissions } from "./PermissionCard";
 import { collectAcpStreamingPermissions } from "@/lib/teamclaw/acp-permission-entries";
 import { useSessionPermissionMode } from "@/lib/session-permission-mode";
-import {
-  interruptAgentActor,
-  interruptAllActiveAgents,
-} from "@/lib/teamclaw/interrupt-agent";
+import { interruptAgentActor } from "@/lib/teamclaw/interrupt-agent";
 import { toast } from "sonner";
 import { AcpStreamDebugPanel } from "./AcpStreamDebugPanel";
 import { TodoList } from "./TodoList";
@@ -395,23 +399,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     [activeSessionId, t],
   );
 
-  const handleAbort = React.useCallback(() => {
-    if (!activeSessionId) return;
-    void (async () => {
-      try {
-        await interruptAllActiveAgents(activeSessionId);
-      } catch (error) {
-        toast.error(
-          t("chat.interruptFailed", "无法打断 agent 回复"),
-          {
-            description:
-              error instanceof Error ? error.message : String(error),
-          },
-        );
-      }
-    })();
-  }, [activeSessionId, t]);
-
   const loadSessions = acts.loadSessions;
   const resetSessions = acts.resetSessions;
   const clearSessionError = acts.clearSessionError;
@@ -448,6 +435,24 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const engagedAgents = useEngagedAgentStore((s) =>
     activeSessionId ? s.bySession[activeSessionId] ?? EMPTY_AGENTS : EMPTY_AGENTS,
   );
+  const engagedAgentIds = React.useMemo(
+    () => engagedAgents.map((a) => a.id),
+    [engagedAgents],
+  );
+  const { agentToRuntimeId, agentToBackendType } = useEngagedAgentRuntimeMap(
+    activeSessionId,
+    engagedAgentIds,
+  );
+  const engagedUiEntries = useEngagedAgentUiStates(engagedAgents, agentToRuntimeId);
+
+  const prevActiveSessionRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    const prev = prevActiveSessionRef.current;
+    if (prev && prev !== activeSessionId) {
+      useSessionNoticeStore.getState().clearSession(prev);
+    }
+    prevActiveSessionRef.current = activeSessionId;
+  }, [activeSessionId]);
   const addAgentForSession = React.useCallback(
     (agent: AttachedAgent) => {
       const sid = useSessionSelectionStore.getState().activeSessionId;
@@ -463,6 +468,22 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       useEngagedAgentStore.getState().removeAgent(sid, agentId);
     },
     [],
+  );
+  const handleSwitchToLocalAgent = React.useCallback(
+    (local: AttachedAgent) => {
+      if (!activeSessionId) return;
+      for (const entry of engagedUiEntries) {
+        if (
+          entry.uiState === "offline" ||
+          entry.uiState === "stale" ||
+          entry.uiState === "connecting"
+        ) {
+          removeAgentForSession(entry.agent.id);
+        }
+      }
+      addAgentForSession(local);
+    },
+    [activeSessionId, engagedUiEntries, removeAgentForSession, addAgentForSession],
   );
 
   const activeStreamingAgents = React.useMemo(() => {
@@ -529,6 +550,23 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const currentTeamId = useCurrentTeamStore(s => s.team?.id ?? null);
   const fallbackTeamId = useSessionListStore(s => s.rows[0]?.team_id ?? null);
   const sheetTeamId = sessionRow?.team_id ?? fallbackTeamId ?? currentTeamId;
+  const [localDaemonAgent, setLocalDaemonAgent] = React.useState<AttachedAgent | null>(null);
+  React.useEffect(() => {
+    if (!sheetTeamId) {
+      setLocalDaemonAgent(null);
+      return;
+    }
+    let cancelled = false;
+    void getCurrentDaemonAgent(sheetTeamId).then((row) => {
+      if (cancelled) return;
+      setLocalDaemonAgent(
+        row ? { id: row.id, displayName: row.displayName } : null,
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sheetTeamId]);
 
   // Boot daemon runtimes whenever engaged agents change (e.g. @-mention pill).
   React.useEffect(() => {
@@ -1290,10 +1328,21 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
                   providerFallback: selectedModelKey ?? undefined,
                 }).modelId || ""
               : selectedModelKey ?? "";
+          const mentionDeliverySnapshot: Record<string, "offline" | "stale"> = {};
+          for (const entry of engagedUiEntries) {
+            if (!allAgents.some((a) => a.id === entry.agent.id)) continue;
+            const snap = toMentionDeliverySnapshot(entry.uiState);
+            if (snap === "offline" || snap === "stale") {
+              mentionDeliverySnapshot[entry.agent.id] = snap;
+            }
+          }
           const outgoingMetadata = {
             mention_actor_ids: mentionActorIds,
             ...(displayMentionActorIds.length > 0
               ? { display_mention_actor_ids: displayMentionActorIds }
+              : {}),
+            ...(Object.keys(mentionDeliverySnapshot).length > 0
+              ? { mention_delivery_snapshot: mentionDeliverySnapshot }
               : {}),
             ...(attachmentUrls.length > 0
               ? { attachment_urls: attachmentUrls }
@@ -1376,6 +1425,11 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             teamId: teamIdForSend,
             messageId,
           });
+
+          const noticeText = buildPostSendSessionNotice(engagedUiEntries, t);
+          if (noticeText) {
+            useSessionNoticeStore.getState().append(sid, noticeText);
+          }
 
           // Runtime ensure + MQTT publish happen inside the outbox sender
           // (insert → runtimeStart/catchup → mqtt). Do not fire a parallel
@@ -1743,9 +1797,13 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     return [...archived, ...current].sort((a, b) => a.lastUpdate - b.lastUpdate);
   }, [v2StreamsByKey, v2StreamsArchived, displaySessionId]);
 
+  const hasSessionNotices = useSessionNoticeStore((s) =>
+    displaySessionId ? (s.bySession[displaySessionId]?.length ?? 0) > 0 : false,
+  );
   const messageBottomContent = !isViewingChild &&
-    (displayV2Streams.length > 0 || visibleSessionError || visibleError) ? (
+    (displayV2Streams.length > 0 || visibleSessionError || visibleError || hasSessionNotices) ? (
     <>
+      {hasSessionNotices ? <SessionNoticeList sessionId={displaySessionId} /> : null}
       {displayV2Streams.map((entry) => (
         <StreamingAgentBubble
           key={
@@ -1952,6 +2010,11 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             onFilesChange={handleFilesChange}
             onRemoveFile={removeFile}
             engagedAgents={engagedAgents}
+            engagedUiEntries={engagedUiEntries}
+            agentToRuntimeId={agentToRuntimeId}
+            agentToBackendType={agentToBackendType}
+            localDaemonAgent={localDaemonAgent}
+            onSwitchToLocalAgent={handleSwitchToLocalAgent}
             onEngageAgent={(a) => {
               if (!activeSessionId) {
                 void import("sonner").then(({ toast }) => {
@@ -1983,7 +2046,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             onRemoveImageFile={removeImageFile}
             onSubmit={handleSubmit}
             isStreaming={isStreaming}
-            onAbort={handleAbort}
             messageQueue={messageQueue}
             onRemoveFromQueue={removeFromQueue}
             onHeightChange={handleInputHeightChange}
@@ -2000,7 +2062,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
                     variant="inline"
                   />
                 ) : null}
-                <PendingPermissionInline />
               </>
             }
           />

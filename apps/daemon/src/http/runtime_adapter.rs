@@ -132,6 +132,7 @@ pub trait RuntimeAdapter: Send + Sync {
         session_id: Uuid,
         request_id: String,
         granted: bool,
+        option_id: Option<String>,
     ) -> Result<(), HttpError>;
 
     async fn restart_session(&self, session_id: Uuid) -> Result<SessionSnapshot, HttpError>;
@@ -430,6 +431,7 @@ impl RuntimeAdapter for StubRuntimeAdapter {
         session_id: Uuid,
         _request_id: String,
         _granted: bool,
+        _option_id: Option<String>,
     ) -> Result<(), HttpError> {
         let exists = self.inner.sessions.read().contains_key(&session_id);
         if !exists {
@@ -1149,6 +1151,7 @@ impl RuntimeAdapter for RuntimeManagerAdapter {
         session_id: Uuid,
         request_id: String,
         granted: bool,
+        option_id: Option<String>,
     ) -> Result<(), HttpError> {
         let runtime_id = {
             let sessions = self.sessions.read();
@@ -1160,7 +1163,7 @@ impl RuntimeAdapter for RuntimeManagerAdapter {
 
         let mut manager = self.manager.lock().await;
         manager
-            .reply_permission(&runtime_id, &request_id, granted)
+            .reply_permission(&runtime_id, &request_id, granted, option_id)
             .await
             .map_err(|e| HttpError::internal(format!("reply permission: {e}")))
     }

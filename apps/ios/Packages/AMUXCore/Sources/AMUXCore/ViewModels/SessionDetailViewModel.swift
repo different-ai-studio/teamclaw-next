@@ -2362,8 +2362,14 @@ public final class SessionDetailViewModel {
         timelineState.streamingAgentSet = []
         timelineState.streamingTurnIDByAgent = [:]
     }
-    public func grantPermission(requestId: String, agentActorID: String? = nil) async throws {
-        var g = Amux_AcpGrantPermission(); g.requestID = requestId
+    public func grantPermission(
+        requestId: String,
+        agentActorID: String? = nil,
+        optionID: String = ""
+    ) async throws {
+        var g = Amux_AcpGrantPermission()
+        g.requestID = requestId
+        g.optionID = optionID
         try await sendCommand(agentActorID: agentActorID) { $0.command = .grantPermission(g) }
     }
     public func denyPermission(requestId: String, agentActorID: String? = nil) async throws {

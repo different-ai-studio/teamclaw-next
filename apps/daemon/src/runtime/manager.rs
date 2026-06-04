@@ -1051,6 +1051,7 @@ impl RuntimeManager {
         agent_id: &str,
         request_id: &str,
         granted: bool,
+        option_id: Option<String>,
     ) -> crate::error::Result<()> {
         #[cfg(test)]
         {
@@ -1070,7 +1071,9 @@ impl RuntimeManager {
             crate::error::AmuxError::Agent(format!("agent {} not found", agent_id))
         })?;
         #[cfg(not(test))]
-        handle.resolve_permission(request_id, granted).await
+        handle
+            .resolve_permission(request_id, granted, option_id)
+            .await
     }
 
     /// Backward-compatible alias for older call sites that still speak
@@ -1080,8 +1083,10 @@ impl RuntimeManager {
         agent_id: &str,
         request_id: &str,
         granted: bool,
+        option_id: Option<String>,
     ) -> crate::error::Result<()> {
-        self.reply_permission(agent_id, request_id, granted).await
+        self.reply_permission(agent_id, request_id, granted, option_id)
+            .await
     }
 
     pub async fn restart_session(&mut self, agent_id: &str) -> crate::error::Result<()> {
@@ -1127,6 +1132,7 @@ impl RuntimeManager {
         topic_runtime_id: &str,
         request_id: &str,
         granted: bool,
+        option_id: Option<String>,
     ) -> crate::error::Result<()> {
         let agent_key = self
             .resolve_permission_runtime_key(topic_runtime_id)
@@ -1140,7 +1146,7 @@ impl RuntimeManager {
                 "permission response retargeted to active runtime"
             );
         }
-        self.resolve_permission(&agent_key, request_id, granted)
+        self.resolve_permission(&agent_key, request_id, granted, option_id)
             .await
     }
 

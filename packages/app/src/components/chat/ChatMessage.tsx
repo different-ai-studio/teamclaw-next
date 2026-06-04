@@ -284,6 +284,7 @@ export const ChatMessage = React.memo(function ChatMessage({
               content={textContent}
               basePath={basePath}
               leadingMentionActorIds={latestMessage.mentionActorIds}
+              mentionDeliverySnapshot={latestMessage.mentionDeliverySnapshot}
             />
           </MessageContent>
         </Message>

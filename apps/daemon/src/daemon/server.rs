@@ -3656,13 +3656,19 @@ impl DaemonServer {
             }
 
             amux::acp_command::Command::GrantPermission(grant) => {
+                let grant_option_id = (!grant.option_id.is_empty()).then(|| grant.option_id.clone());
                 if self.permissions.try_resolve_permission(&grant.request_id) {
                     // Resolve via ACP permission response
                     match self
                         .agents
                         .lock()
                         .await
-                        .resolve_permission_for_topic(agent_id, &grant.request_id, true)
+                        .resolve_permission_for_topic(
+                            agent_id,
+                            &grant.request_id,
+                            true,
+                            grant_option_id,
+                        )
                         .await
                     {
                         Ok(()) => {
@@ -3701,7 +3707,7 @@ impl DaemonServer {
                         .agents
                         .lock()
                         .await
-                        .resolve_permission_for_topic(agent_id, &deny.request_id, false)
+                        .resolve_permission_for_topic(agent_id, &deny.request_id, false, None)
                         .await
                     {
                         Ok(()) => {

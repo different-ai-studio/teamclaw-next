@@ -102,11 +102,20 @@ message AcpError {
   string details = 2;
 }
 
+// Mirrors ACP PermissionOption (session/request_permission).
+message AcpPermissionOption {
+  string option_id = 1;
+  // allow_once | allow_always | reject_once | reject_always
+  string kind = 2;
+  string name = 3;
+}
+
 message AcpPermissionRequest {
   string request_id = 1;
   string tool_name = 2;
   string description = 3;
   map<string, string> params = 4;
+  repeated AcpPermissionOption options = 5;
 }
 
 message AcpStatusChange {
@@ -185,6 +194,8 @@ message AcpCancel {}
 
 message AcpGrantPermission {
   string request_id = 1;
+  // Selected ACP option_id (e.g. OpenCode "once" / "always"). Empty = allow_once.
+  string option_id = 2;
 }
 
 message AcpDenyPermission {

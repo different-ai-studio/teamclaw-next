@@ -19,10 +19,10 @@ export function SkillToolCard({ toolCall }: { toolCall: ToolCall }) {
       <div className="flex items-center gap-[10px] px-3 py-[10px]">
         <span className="text-[12px] text-[#8a7a63]">⚡</span>
         <span className="text-[13px] font-bold text-[#334155] dark:text-foreground">
-          {t("chat.toolCall.skill.title", "Skill")}
+          {skillName}
         </span>
         <span className="rounded-full border border-[#e8dfd1] bg-[#f7f4ed] px-2 py-0.5 text-[11px] text-[#8a7a63]">
-          {skillName}
+          {t("chat.toolCall.skill.title", "Skill")}
         </span>
         <div className="ml-auto">
           <ToolCallStatusGlyph status={toolCall.status} />

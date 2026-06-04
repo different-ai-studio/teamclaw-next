@@ -96,6 +96,7 @@ import {
   persistStreamingPartsForReply,
   syncStreamingToolOutputsFromLocalCache,
 } from "@/lib/streaming-persist";
+import { logStreamToolDiag } from "@/lib/stream-tool-diag";
 import { useOutboxStore } from "@/stores/outbox-store";
 import { startOutboxSender } from "@/services/outbox-sender";
 import { useAcpDebugStore } from "@/stores/acp-debug-store";
@@ -782,7 +783,9 @@ function AppContent() {
     clearPendingStreamReplyTimer(streamKey);
     delete pendingStreamReplySinceRef.current[streamKey];
     delete pendingStreamRepliesRef.current[streamKey];
-    useV2StreamingStore.getState().finishSessionActor(sessionId, actorId);
+    useV2StreamingStore.getState().finishSessionActor(sessionId, actorId, {
+      reason: "flushPendingStreamReply",
+    });
     appendStreamReplyAfterPartsPersist(sessionId, actorId, mergedReply);
     return true;
   }
@@ -901,6 +904,18 @@ function AppContent() {
           if (!decoded) return;
           const sid = sessionIdFromLiveEvent(decoded, env.topic) ?? "";
 
+          if (
+            sid &&
+            env.topic.includes("/session/") &&
+            !rememberLiveEventId(
+              seenLiveEventIdsRef.current,
+              sid,
+              decoded.envelope.eventId,
+            )
+          ) {
+            return;
+          }
+
           if (env.topic.includes("/session/") && env.topic.endsWith("/live")) {
             const mentionActorIds =
               decoded.envelope.eventType === "message.created"
@@ -931,17 +946,6 @@ function AppContent() {
           }
 
           if (!sid) return;
-
-          if (
-            env.topic.includes("/session/") &&
-            !rememberLiveEventId(
-              seenLiveEventIdsRef.current,
-              sid,
-              decoded.envelope.eventId,
-            )
-          ) {
-            return;
-          }
 
           if (
             decoded.envelope.eventType === "session_participant.created" ||
@@ -986,11 +990,9 @@ function AppContent() {
               if (!streamEntry.active) {
                 streamingStore.markActorStreamActive(sid, senderActorId);
               }
-              streamingStore.ingestReplyPreview(
-                sid,
-                senderActorId,
-                msg.content,
-              );
+              // Live text comes from acp.event output only (iOS alignment).
+              // ingestReplyPreview here duplicated stream when message.created
+              // content differed slightly from accumulated deltas.
               const pendingReplies =
                 pendingStreamRepliesRef.current[streamKey] ?? [];
               if (
@@ -1120,7 +1122,7 @@ function AppContent() {
               // Capture skill invocations for local stats + cloud leaderboard.
               // tu.toolName is "skill" for Skill tool calls; tu.params.name is
               // the skill slug (e.g. "sentry-fix").
-              if (tu.toolName.toLowerCase() === "skill" && tu.params?.name) {
+              if (tu.toolName === "skill" && tu.params?.name) {
                 const wp = useWorkspaceStore.getState().workspacePath;
                 if (wp) {
                   void useLocalStatsStore.getState().incrementSkillUsage(wp, tu.params.name);
@@ -1128,6 +1130,13 @@ function AppContent() {
               }
             } else if (event?.case === "toolResult") {
               const tr = normalizeToolResultEvent(event.value);
+              logStreamToolDiag("mqtt.toolResult", {
+                sessionId: sid,
+                actorId,
+                eventId: decoded.envelope.eventId,
+                toolId: tr.toolId,
+                success: tr.success,
+              });
               useV2StreamingStore.getState().completeToolUse(sid, actorId, {
                 toolId: tr.toolId,
                 success: tr.success,
@@ -1138,7 +1147,14 @@ function AppContent() {
                 void syncStreamingToolOutputsFromLocalCache(sid, actorId);
               }, 500);
             } else if (event?.case === "statusChange") {
-              const sc = event.value as { newStatus?: number };
+              const sc = event.value as { oldStatus?: number; newStatus?: number };
+              logStreamToolDiag("mqtt.statusChange", {
+                sessionId: sid,
+                actorId,
+                eventId: decoded.envelope.eventId,
+                oldStatus: sc.oldStatus,
+                newStatus: sc.newStatus,
+              });
               if (isAgentActiveStatus(sc.newStatus)) {
                 useV2StreamingStore.getState().beginPlanningPlaceholder(sid, actorId);
               } else if (isTerminalAgentStatus(sc.newStatus)) {
@@ -1147,7 +1163,9 @@ function AppContent() {
                     agentStreamKey(sid, actorId)
                   ];
                   if (streamEntryHasVisibleContent(streamEntry)) {
-                    useV2StreamingStore.getState().finishSessionActor(sid, actorId);
+                    useV2StreamingStore.getState().finishSessionActor(sid, actorId, {
+                      reason: "statusChange.terminal",
+                    });
                   } else {
                     useV2StreamingStore.getState().setError(
                       sid,
@@ -1175,7 +1193,17 @@ function AppContent() {
                 toolName?: string;
                 description?: string;
                 params?: Record<string, string>;
+                options?: Array<{ optionId?: string; kind?: string; name?: string }>;
               };
+              logStreamToolDiag("mqtt.permissionRequest", {
+                sessionId: sid,
+                actorId,
+                eventId: decoded.envelope.eventId,
+                requestId: pr.requestId,
+                toolName: pr.toolName,
+                description: pr.description,
+                isDoomLoop: pr.toolName === "doom_loop",
+              });
               void handleAcpPermissionRequest({
                 sessionId: sid,
                 agentActorId: actorId,
@@ -1184,6 +1212,11 @@ function AppContent() {
                   toolName: pr.toolName ?? "",
                   description: pr.description ?? "",
                   params: pr.params ?? {},
+                  options: (pr.options ?? []).map((o) => ({
+                    optionId: o.optionId ?? "",
+                    kind: o.kind ?? "",
+                    name: o.name ?? "",
+                  })),
                 },
               });
             } else if (event?.case === "planUpdate") {

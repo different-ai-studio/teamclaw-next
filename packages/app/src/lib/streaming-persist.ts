@@ -3,6 +3,7 @@
 // thinking/tool events are live-only; `parts_json` lets reload restore the
 // same text/tool ordering without reconstructing it from synthetic rows.
 
+import { agentReplyTextsEquivalent } from "@/lib/agent-reply-text";
 import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
 import type { MessagePart } from "@/stores/session-types";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
@@ -25,13 +26,15 @@ function buildCanonicalPartsFromEntry(
   );
   parts.push(...orderedParts);
 
+  const replyContent = reply?.content?.trim() ? reply.content : "";
   if (
-    reply?.content &&
+    replyContent &&
     !orderedParts.some(
       (part) =>
         part.type === "text" &&
-        (part.text || part.content)?.includes(reply.content),
-    )
+        agentReplyTextsEquivalent(part.text || part.content || "", replyContent),
+    ) &&
+    !(entry?.outputText && agentReplyTextsEquivalent(entry.outputText, replyContent))
   ) {
     parts.push({
       id: `${reply.messageId}:text`,

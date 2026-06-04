@@ -68,6 +68,20 @@ pub async fn mqtt_subscribe(bus: State<'_, MqttBus>, topic: String) -> Result<()
 }
 
 #[tauri::command]
+pub async fn mqtt_unsubscribe(bus: State<'_, MqttBus>, topic: String) -> Result<(), String> {
+    let client_guard = bus.client.lock().await;
+    let client = client_guard.as_ref().ok_or("mqtt not connected")?;
+    client
+        .client
+        .unsubscribe(&topic)
+        .await
+        .map_err(|e| e.to_string())?;
+    drop(client_guard);
+    bus.subscribed.lock().await.remove(&topic);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn mqtt_publish(
     bus: State<'_, MqttBus>,
     topic: String,

@@ -159,6 +159,10 @@
     "messagesQueued": "{{count}} messages queued",
     "showMore": "Show more",
     "showLess": "Show less",
+    "streamingBar": {
+      "streaming": "Streaming…",
+      "waitingApproval": "Waiting for your approval…"
+    },
     "permissionCard": {
       "requestExecuteCommand": "requests to execute a command",
       "requestWriteFile": "requests to write a file",
@@ -172,6 +176,9 @@
       "childSessionWaitingApproval": "A child session is waiting for your approval",
       "toolInvocationWaitingApproval": "A tool call is waiting for your approval",
       "pendingCount": "{{count}} pending",
+      "waitingBadge": "Waiting for approval",
+      "queuePosition": "{{current}} / {{total}}",
+      "approvalSectionAria": "Permission approval",
       "approve": "Allow"
     },
     "todo": {
@@ -319,6 +326,38 @@
       "modelChangeWillRetry": "Pick saved; will reapply on next send. Detail: {{message}}",
       "modelPickSaved": "Model selected",
       "modelPickSavedHint": "Will apply to the agent on next send or when its runtime is ready"
+    },
+    "sessionAgent": {
+      "bannerStaleOne": "{{name}} is no longer linked to this machine's agent — messages may not be processed",
+      "bannerOfflineOne": "{{name}} is offline — messages may not be processed by the agent",
+      "bannerOfflineMany": "{{count}} agents are offline — messages may not be processed",
+      "bannerStaleMany": "{{count}} agents need to be rebound to this machine — messages may not be processed",
+      "bannerMixed": "{{offlineCount}} agent(s) offline and {{staleCount}} need rebinding — messages may not be processed",
+      "switchToLocal": "Switch to local agent",
+      "removeMention": "Remove",
+      "removeAllOffline": "Remove all",
+      "pillOffline": "Offline",
+      "pillStale": "Rebind required",
+      "pillConnecting": "Connecting…",
+      "mentionOffline": "Offline",
+      "mentionStale": "Rebind required",
+      "mentionConnecting": "Connecting…",
+      "dropdownStale": "Agent must be rebound to this machine's identity",
+      "dropdownOffline": "Agent is offline — models will be available when it comes online",
+      "sendConfirmTitle": "{{name}} is offline",
+      "sendConfirmTitleFallback": "Agent",
+      "sendConfirmBody": "Your message will be added to the session. The agent may process it after coming online, but delivery is not guaranteed.",
+      "sendConfirmDismiss": "Don't ask again in this session",
+      "sendConfirmAction": "Send anyway",
+      "metaOffline": "→ {{name}} (offline)",
+      "metaStale": "→ {{name}} (rebind required)"
+    },
+    "sessionNotice": {
+      "sentStaleOne": "Sent. {{name}} is no longer linked to this machine's agent — consider @-mentioning the local agent again.",
+      "sentStaleMany": "Sent. {{count}} agents need to be rebound.",
+      "sentOfflineOne": "Sent. {{name}} is offline; delivery will be attempted when online (not guaranteed).",
+      "sentOfflineMany": "Sent. {{count}} agents are offline; delivery will be attempted when online (not guaranteed).",
+      "sentMixed": "Sent. {{offlineCount}} agent(s) offline and {{staleCount}} need rebinding — check delivery when they are available."
     },
     "newSessionDialog": {
       "title": "New session",
