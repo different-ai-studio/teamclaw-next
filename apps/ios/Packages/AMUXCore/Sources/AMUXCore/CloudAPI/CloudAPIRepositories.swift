@@ -556,6 +556,32 @@ public actor CloudAPIInviteClaimer {
     }
 }
 
+public struct ClientVersionReport: Encodable, Sendable {
+    public let clientType: String
+    public let version: String
+    public let deviceId: String
+    public let build: String?
+    public init(clientType: String, version: String, deviceId: String, build: String?) {
+        self.clientType = clientType
+        self.version = version
+        self.deviceId = deviceId
+        self.build = build
+    }
+}
+
+private struct OkAck: Decodable, Sendable { let ok: Bool? }
+
+public struct CloudAPIClientVersionRepository: Sendable {
+    private let client: CloudAPIClient
+    public init(client: CloudAPIClient) { self.client = client }
+
+    public func report(teamID: String, version: String, build: String?, deviceID: String) async {
+        let body = ClientVersionReport(clientType: "ios", version: version, deviceId: deviceID, build: build)
+        // ops telemetry only — swallow all errors so it never disrupts the app
+        _ = try? await client.post("/v1/teams/\(teamID)/client-version", body: body, as: OkAck.self)
+    }
+}
+
 public enum CloudAPIRepositoryFactory {
     public static func client(
         configuration: CloudAPIConfiguration,
@@ -647,6 +673,10 @@ public enum CloudAPIRepositoryFactory {
         accessToken: @escaping @Sendable () async throws -> String
     ) -> any ActorRepository {
         CloudAPIActorRepository(client: client(configuration: configuration, accessToken: accessToken))
+    }
+
+    public static func clientVersion(client: CloudAPIClient) -> CloudAPIClientVersionRepository {
+        CloudAPIClientVersionRepository(client: client)
     }
 }
 

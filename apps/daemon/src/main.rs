@@ -1,6 +1,7 @@
 mod backend;
 mod channels;
 mod cli;
+mod device_id;
 mod collab;
 mod config;
 mod daemon;

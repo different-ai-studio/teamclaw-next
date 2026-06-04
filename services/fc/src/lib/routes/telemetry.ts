@@ -3,6 +3,7 @@ import { requireString } from "../routing-utils.js";
 
 const VALID_KINDS = new Set(["positive", "negative"]);
 const VALID_PERIODS = new Set(["day", "week", "month"]);
+const VALID_CLIENT_TYPES = new Set(["tauri", "ios", "expo", "daemon"]);
 
 export function registerTelemetry(router) {
   router.post("/v1/feedback", async (ctx) => {
@@ -68,6 +69,24 @@ export function registerTelemetry(router) {
     }
     await ctx.repository.submitSkillUsage(body);
     return { statusCode: 201, body: null };
+  });
+
+  router.post("/v1/teams/:teamId/client-version", async (ctx) => {
+    const teamId = decodeURIComponent(ctx.params.teamId);
+    const body = ctx.json ?? {};
+    requireString(body.clientType, "clientType");
+    requireString(body.version, "version");
+    requireString(body.deviceId, "deviceId");
+    if (!VALID_CLIENT_TYPES.has(body.clientType)) {
+      throw new ApiError(400, "validation_failed", "clientType must be one of: tauri, ios, expo, daemon");
+    }
+    await ctx.repository.reportClientVersion(teamId, {
+      clientType: body.clientType,
+      version: body.version,
+      deviceId: body.deviceId,
+      build: body.build ?? null,
+    });
+    return { body: { ok: true } };
   });
 
   router.get("/v1/teams/:teamId/leaderboard", async (ctx) => {

@@ -263,6 +263,7 @@ export function runBusinessRepositoryContract({ test, assert, createRepository }
     const actor = await repo.getActor("actor-1");
     assert.ok(actor, "actor should exist");
     assert.equal(actor.displayName, "Test Actor");
+    assert.ok(Array.isArray(actor.clientVersions), "getActor must return clientVersions array");
   });
 
   test("repository contract: getActor returns null for missing actor", async () => {
@@ -729,6 +730,16 @@ test("repository contract: getTeamDirectory returns actors and members", async (
       agentKind: "code",
       endedAt: "2026-05-29T00:00:00Z",
       skillUsage: { "sentry-fix": 2 },
+    });
+  });
+
+  test("repository contract: reportClientVersion succeeds", async () => {
+    const repo = createRepository();
+    await repo.reportClientVersion("team-1", {
+      clientType: "tauri",
+      version: "0.1.82",
+      deviceId: "device-1",
+      build: null,
     });
   });
 

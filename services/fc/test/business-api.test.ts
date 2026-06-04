@@ -1660,6 +1660,33 @@ test("GET /v1/teams/:teamId/leaderboard uses provided period", async () => {
   assert.deepEqual(repo.calls[0], { method: "getTeamLeaderboard", teamId: "team-1", args: { period: "month" } });
 });
 
+test("POST /v1/teams/:teamId/client-version returns 200 with ok:true for valid body", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/teams/team-1/client-version",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ clientType: "tauri", version: "0.1.82", deviceId: "mac-1" }),
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 200);
+  const parsed = JSON.parse(response.body);
+  assert.deepEqual(parsed, { ok: true });
+  assert.deepEqual(repo.calls[0], { method: "reportClientVersion", teamId: "team-1", body: { clientType: "tauri", version: "0.1.82", deviceId: "mac-1", build: null } });
+});
+
+test("POST /v1/teams/:teamId/client-version returns 400 for invalid clientType", async () => {
+  const repo = fakeRepo();
+  const response = await handleBusinessApiRequest({
+    httpMethod: "POST",
+    path: "/v1/teams/team-1/client-version",
+    headers: { Authorization: "Bearer token", "Content-Type": "application/json" },
+    body: JSON.stringify({ clientType: "android", version: "1", deviceId: "d" }),
+  }, { createRepository: () => repo });
+  assert.equal(response.statusCode, 400);
+  const parsed = JSON.parse(response.body);
+  assert.equal(parsed.error.code, "validation_failed");
+});
+
 function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, workspaces = [], ideas = null } = {}) {
   const calls = [];
   const configs = { ...teamWorkspaceConfigs };
@@ -1742,5 +1769,6 @@ function fakeRepo({ sessions = [], error = null, teamWorkspaceConfigs = {}, work
     async listFeedback(args) { calls.push({ method: "listFeedback", args }); if (error) throw error; return { items: [] }; },
     async deleteFeedback(messageId, actorId) { calls.push({ method: "deleteFeedback", messageId, actorId }); if (error) throw error; },
     async getTeamLeaderboard(teamId, args) { calls.push({ method: "getTeamLeaderboard", teamId, args }); if (error) throw error; return { items: [] }; },
+    async reportClientVersion(teamId, body) { calls.push({ method: "reportClientVersion", teamId, body }); if (error) throw error; },
   };
 }

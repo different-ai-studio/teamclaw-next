@@ -16,9 +16,9 @@
  *   all team-visible agents (matching Supabase default behavior).
  */
 
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
-import { actors, agents, members, teamMembers, actorDirectory } from "../../db/schema/index.js";
+import { actors, agents, members, teamMembers, actorDirectory, actorClientVersions } from "../../db/schema/index.js";
 import { resolveActorForTeam, requireActorForTeam } from "./authz.js";
 import { ApiError } from "../http-utils.js";
 
@@ -84,7 +84,28 @@ export function makeActorsRepo(db: DbLike, ctx: ActorsCtx = {}) {
         .where(eq(actors.id, id))
         .limit(1);
       if (!r) return null;
-      return { displayName: r.displayName };
+      const versions = await db
+        .select({
+          clientType: actorClientVersions.clientType,
+          version: actorClientVersions.version,
+          deviceId: actorClientVersions.deviceId,
+          build: actorClientVersions.build,
+          lastReportedAt: actorClientVersions.lastReportedAt,
+        })
+        .from(actorClientVersions)
+        .where(eq(actorClientVersions.actorId, id))
+        .orderBy(actorClientVersions.clientType, desc(actorClientVersions.lastReportedAt));
+      return {
+        displayName: r.displayName,
+        clientVersions: versions.map((v) => ({
+          clientType: v.clientType,
+          version: v.version,
+          deviceId: v.deviceId,
+          build: v.build ?? null,
+          lastReportedAt:
+            v.lastReportedAt instanceof Date ? v.lastReportedAt.toISOString() : v.lastReportedAt,
+        })),
+      };
     },
 
     /**

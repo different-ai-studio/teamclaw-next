@@ -18,6 +18,8 @@ import assert from "node:assert/strict";
 import { makeTestDb } from "./db/pglite.js";
 import { createPgBusinessRepository } from "../src/lib/pg-repo/index.js";
 import { teams, actors, members, teamMembers, sessions } from "../src/db/schema/index.js";
+import { actorClientVersions } from "../src/db/schema/telemetry.js";
+import { eq } from "drizzle-orm";
 
 // ── Seed helpers ──────────────────────────────────────────────────────────────
 
@@ -249,6 +251,27 @@ test("getTeamLeaderboard period=all includes all rows", async () => {
 });
 
 // ── listFeedbackSummary ───────────────────────────────────────────────────────
+
+// ── reportClientVersion ───────────────────────────────────────────────────────
+
+test("reportClientVersion upserts latest per (actor, clientType, deviceId)", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const actor = await seedActor(db, team.id, "Versioned");
+  const userId = crypto.randomUUID();
+  await db.update(actors).set({ userId }).where(eq(actors.id, actor.id));
+
+  const repo = createPgBusinessRepository({ db, userId });
+
+  await repo.reportClientVersion(team.id, { clientType: "tauri", version: "0.1.82", deviceId: "mac-1", build: null });
+  await repo.reportClientVersion(team.id, { clientType: "tauri", version: "0.1.83", deviceId: "mac-1", build: null });
+  await repo.reportClientVersion(team.id, { clientType: "tauri", version: "0.1.80", deviceId: "mac-2", build: null });
+
+  const rows = await db.select().from(actorClientVersions).where(eq(actorClientVersions.actorId, actor.id));
+  assert.equal(rows.length, 2);
+  const mac1 = rows.find((r) => r.deviceId === "mac-1");
+  assert.equal(mac1.version, "0.1.83");
+});
 
 test("listFeedbackSummary aggregates positive/negative/total per actor", async () => {
   const { db } = await makeTestDb();

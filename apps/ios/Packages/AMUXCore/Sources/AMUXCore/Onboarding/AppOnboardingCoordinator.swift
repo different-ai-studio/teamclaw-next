@@ -1,6 +1,9 @@
 import Foundation
 import Observation
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 public struct TeamSummary: Codable, Equatable, Sendable, Identifiable {
     public let id: String
@@ -264,6 +267,22 @@ public final class AppOnboardingCoordinator {
             CloudAPIRepositoryFactory.ideasRepository(configuration: config, memberActorID: ctx.memberActorID) { [store] in
                 try await store.accessToken()
             }
+        }
+
+        // Report ios client version + build (telemetry; fire-and-forget)
+        if let versionConfig = cloudAPIConfig {
+            let versionClient = CloudAPIRepositoryFactory.client(
+                configuration: versionConfig
+            ) { [store] in try await store.accessToken() }
+            let versionRepo = CloudAPIRepositoryFactory.clientVersion(client: versionClient)
+            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+            let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String
+            #if canImport(UIKit)
+            let deviceID = UIDevice.current.identifierForVendor?.uuidString ?? "ios-unknown"
+            #else
+            let deviceID = "ios-unknown"
+            #endif
+            Task { await versionRepo.report(teamID: ctx.team.id, version: version, build: build, deviceID: deviceID) }
         }
 
         teamRuntimeContext = TeamRuntimeContext(

@@ -1290,6 +1290,57 @@ paths:
           $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
+  /v1/teams/{teamId}/client-version:
+    post:
+      operationId: reportClientVersion
+      summary: Report this client's version for the caller's actor
+      description: >-
+        Upserts the latest version of the calling client (tauri/ios/expo/daemon)
+        for the caller's actor in the team, keyed by device. The actor is
+        resolved server-side from the bearer token; no client-supplied actor id.
+      tags: [Actors]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientType, version, deviceId]
+              properties:
+                clientType:
+                  type: string
+                  enum: [tauri, ios, expo, daemon]
+                version:
+                  type: string
+                  example: "0.1.82"
+                deviceId:
+                  type: string
+                build:
+                  type:
+                    - string
+                    - "null"
+      responses:
+        "200":
+          description: Recorded.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
   /v1/actors/external:
     post:
       operationId: upsertExternalActor
@@ -3762,6 +3813,29 @@ components:
             - object
             - "null"
           additionalProperties: true
+        clientVersions:
+          description: >-
+            Latest reported client version per device, for ops/support
+            debugging. Empty when nothing has been reported.
+          type: array
+          items:
+            type: object
+            required: [clientType, version, deviceId, lastReportedAt]
+            properties:
+              clientType:
+                type: string
+                enum: [tauri, ios, expo, daemon]
+              version:
+                type: string
+              deviceId:
+                type: string
+              build:
+                type:
+                  - string
+                  - "null"
+              lastReportedAt:
+                type: string
+                format: date-time
     ActorPage:
       type: object
       required: [items, nextCursor]

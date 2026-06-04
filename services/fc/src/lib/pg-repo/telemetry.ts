@@ -16,6 +16,9 @@ import {
   actorSkillUsage,
   actors,
 } from "../../db/schema/index.js";
+import { actorClientVersions } from "../../db/schema/telemetry.js";
+import { requireActorForTeam } from "./authz.js";
+import { ApiError } from "../http-utils.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DbLike = PgDatabase<any, any>;
@@ -49,7 +52,7 @@ function mapFeedbackRow(r: any) {
   };
 }
 
-export function makeTelemetryRepo(db: DbLike, _ctx: TelemetryCtx = {}) {
+export function makeTelemetryRepo(db: DbLike, ctx: TelemetryCtx = {}) {
   return {
     // ── submitFeedback ────────────────────────────────────────────────────────
     async submitFeedback(body: {
@@ -157,6 +160,36 @@ export function makeTelemetryRepo(db: DbLike, _ctx: TelemetryCtx = {}) {
         skill: body.skill,
         count: Number(body.count ?? 1),
       });
+    },
+
+    // ── reportClientVersion ───────────────────────────────────────────────────
+    async reportClientVersion(teamId: string, body: {
+      clientType: string;
+      version: string;
+      deviceId: string;
+      build?: string | null;
+    }) {
+      if (!ctx.userId) throw new ApiError(401, "missing_identity", "authentication required");
+      const actorId = await requireActorForTeam(db, ctx.userId, teamId);
+      const now = new Date();
+      await (db.insert(actorClientVersions) as any)
+        .values({
+          actorId,
+          teamId,
+          clientType: body.clientType,
+          deviceId: body.deviceId,
+          version: body.version,
+          build: body.build ?? null,
+          lastReportedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: [
+            actorClientVersions.actorId,
+            actorClientVersions.clientType,
+            actorClientVersions.deviceId,
+          ],
+          set: { version: body.version, build: body.build ?? null, lastReportedAt: now },
+        });
     },
 
     // ── listFeedbackSummary ───────────────────────────────────────────────────

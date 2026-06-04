@@ -301,6 +301,10 @@ impl Backend for MockBackend {
         Ok(())
     }
 
+    async fn report_client_version(&self, _device_id: &str) -> BackendResult<()> {
+        Ok(())
+    }
+
     async fn set_agent_default_workspace(&self, workspace_id: &str) -> BackendResult<()> {
         let mut st = self.state.lock().unwrap();
         if let Some(message) = &st.set_default_workspace_error {

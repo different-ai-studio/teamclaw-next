@@ -181,6 +181,12 @@ pub trait Backend: Send + Sync {
     /// Touch `actor_last_active` for the current daemon actor.
     async fn heartbeat(&self) -> BackendResult<()>;
 
+    /// Report this daemon's version to the Cloud API once at startup.
+    /// `device_id` is supplied by the caller (the bin crate owns the persisted
+    /// device-id module) so this trait stays self-contained for test crates that
+    /// pull `backend/` in via `#[path]`.
+    async fn report_client_version(&self, device_id: &str) -> BackendResult<()>;
+
     /// Upsert a `workspaces` row, returning the canonical id.
     async fn upsert_workspace(&self, row: &WorkspaceUpsert<'_>) -> BackendResult<WorkspaceRow>;
 
