@@ -1426,10 +1426,11 @@ impl WeComGateway {
                     let _ = self.send_reply(&req_id, &text, &ws_sink).await;
                 }
             } else {
+                let locale = i18n::get_locale(&self.workspace_path);
                 let _ = self
                     .send_reply(
                         &req_id,
-                        &format!("Unknown command: /{cmd_name}. Send /help for list."),
+                        &i18n::t(i18n::MsgKey::UnknownCommand(&format!("/{cmd_name}")), locale),
                         &ws_sink,
                     )
                     .await;

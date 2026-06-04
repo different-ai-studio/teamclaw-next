@@ -61,7 +61,7 @@ const HELP_TEXT: &str = "\
 Available commands:
 /help - Show this help
 /model [name] - List or switch models
-/sessions [id] - List or switch sessions
+/sessions [id] - List sessions
 /agents [type] - List or switch agent type
 /workspaces [id] - List or switch workspace
 /clear - Start new session
@@ -148,8 +148,8 @@ where
                 format!("Sessions:\n{}", lines.join("\n"))
             }
         }
-        MetaCommand::Sessions(Some(id)) => {
-            format!("Session: {}", id)
+        MetaCommand::Sessions(Some(_id)) => {
+            "Session switching is not yet supported. Use /sessions to list sessions.".to_string()
         }
 
         MetaCommand::Agents(None) => {
