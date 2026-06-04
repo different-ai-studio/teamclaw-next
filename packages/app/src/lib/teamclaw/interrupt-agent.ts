@@ -3,6 +3,7 @@ import { discardPendingStreamReply } from "@/lib/live-agent-stream";
 import { mqttPublish } from "@/lib/mqtt-bridge";
 import { resolvePermissionCommandTarget } from "@/lib/runtime-state-resolve";
 import { sessionFlowError, sessionFlowLog } from "@/lib/session-flow-log";
+import { logStreamToolDiag } from "@/lib/stream-tool-diag";
 import { createRuntimeCommandSender } from "@/lib/teamclaw/runtime-command";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { useRuntimeStateStore } from "@/stores/runtime-state-store";
@@ -15,7 +16,10 @@ function isAgentActorType(actorType: string | null | undefined): boolean {
 
 function cleanupLocalAgentStream(sessionId: string, agentActorId: string): void {
   discardPendingStreamReply(sessionId, agentActorId);
-  useV2StreamingStore.getState().finishSessionActor(sessionId, agentActorId);
+  logStreamToolDiag("interrupt.cleanup", { sessionId, agentActorId });
+  useV2StreamingStore.getState().finishSessionActor(sessionId, agentActorId, {
+    reason: "interrupt",
+  });
 }
 
 export function listActiveAgentActorIdsForSession(sessionId: string): string[] {

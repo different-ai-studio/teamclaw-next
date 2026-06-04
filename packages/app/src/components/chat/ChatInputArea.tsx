@@ -156,8 +156,8 @@ interface ChatInputAreaProps {
   onImageFilesChange: (files: File[]) => void;
   onRemoveImageFile: (index: number) => void;
   onSubmit: (message: PromptInputMessage) => void;
+  /** When true, placeholder suggests queuing another message while agents run. */
   isStreaming: boolean;
-  onAbort: () => void;
   messageQueue: QueuedMessage[];
   onRemoveFromQueue: (id: string) => void;
   onHeightChange?: (height: number) => void;
@@ -192,7 +192,6 @@ export function ChatInputArea({
   onRemoveImageFile,
   onSubmit,
   isStreaming,
-  onAbort,
   messageQueue: _messageQueue,
   onRemoveFromQueue: _onRemoveFromQueue,
   onHeightChange,
@@ -560,16 +559,8 @@ export function ChatInputArea({
 
             <div className="flex items-center gap-2">
               <ContextUsageBadge />
-              <span
-                aria-hidden="true"
-                className="hidden font-mono text-[11px] text-faint sm:inline"
-              >
-                ⌘↵
-              </span>
               <PromptInputSubmit
                 disabled={!inputValue.trim() && attachedFiles.length === 0 && imageFiles.length === 0}
-                status={isStreaming ? "streaming" : "ready"}
-                onStop={onAbort}
               />
             </div>
           </PromptInputFooter>

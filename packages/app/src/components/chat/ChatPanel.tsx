@@ -53,10 +53,7 @@ import { SessionErrorAlert } from "./SessionErrorAlert";
 import { hasVisiblePendingPermissions } from "./PermissionCard";
 import { collectAcpStreamingPermissions } from "@/lib/teamclaw/acp-permission-entries";
 import { useSessionPermissionMode } from "@/lib/session-permission-mode";
-import {
-  interruptAgentActor,
-  interruptAllActiveAgents,
-} from "@/lib/teamclaw/interrupt-agent";
+import { interruptAgentActor } from "@/lib/teamclaw/interrupt-agent";
 import { toast } from "sonner";
 import { AcpStreamDebugPanel } from "./AcpStreamDebugPanel";
 import { TodoList } from "./TodoList";
@@ -401,23 +398,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     },
     [activeSessionId, t],
   );
-
-  const handleAbort = React.useCallback(() => {
-    if (!activeSessionId) return;
-    void (async () => {
-      try {
-        await interruptAllActiveAgents(activeSessionId);
-      } catch (error) {
-        toast.error(
-          t("chat.interruptFailed", "无法打断 agent 回复"),
-          {
-            description:
-              error instanceof Error ? error.message : String(error),
-          },
-        );
-      }
-    })();
-  }, [activeSessionId, t]);
 
   const loadSessions = acts.loadSessions;
   const resetSessions = acts.resetSessions;
@@ -2066,7 +2046,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             onRemoveImageFile={removeImageFile}
             onSubmit={handleSubmit}
             isStreaming={isStreaming}
-            onAbort={handleAbort}
             messageQueue={messageQueue}
             onRemoveFromQueue={removeFromQueue}
             onHeightChange={handleInputHeightChange}

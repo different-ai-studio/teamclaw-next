@@ -96,6 +96,7 @@ import {
   persistStreamingPartsForReply,
   syncStreamingToolOutputsFromLocalCache,
 } from "@/lib/streaming-persist";
+import { logStreamToolDiag } from "@/lib/stream-tool-diag";
 import { useOutboxStore } from "@/stores/outbox-store";
 import { startOutboxSender } from "@/services/outbox-sender";
 import { useAcpDebugStore } from "@/stores/acp-debug-store";
@@ -782,7 +783,9 @@ function AppContent() {
     clearPendingStreamReplyTimer(streamKey);
     delete pendingStreamReplySinceRef.current[streamKey];
     delete pendingStreamRepliesRef.current[streamKey];
-    useV2StreamingStore.getState().finishSessionActor(sessionId, actorId);
+    useV2StreamingStore.getState().finishSessionActor(sessionId, actorId, {
+      reason: "flushPendingStreamReply",
+    });
     appendStreamReplyAfterPartsPersist(sessionId, actorId, mergedReply);
     return true;
   }
@@ -1127,6 +1130,13 @@ function AppContent() {
               }
             } else if (event?.case === "toolResult") {
               const tr = normalizeToolResultEvent(event.value);
+              logStreamToolDiag("mqtt.toolResult", {
+                sessionId: sid,
+                actorId,
+                eventId: decoded.envelope.eventId,
+                toolId: tr.toolId,
+                success: tr.success,
+              });
               useV2StreamingStore.getState().completeToolUse(sid, actorId, {
                 toolId: tr.toolId,
                 success: tr.success,
@@ -1137,7 +1147,14 @@ function AppContent() {
                 void syncStreamingToolOutputsFromLocalCache(sid, actorId);
               }, 500);
             } else if (event?.case === "statusChange") {
-              const sc = event.value as { newStatus?: number };
+              const sc = event.value as { oldStatus?: number; newStatus?: number };
+              logStreamToolDiag("mqtt.statusChange", {
+                sessionId: sid,
+                actorId,
+                eventId: decoded.envelope.eventId,
+                oldStatus: sc.oldStatus,
+                newStatus: sc.newStatus,
+              });
               if (isAgentActiveStatus(sc.newStatus)) {
                 useV2StreamingStore.getState().beginPlanningPlaceholder(sid, actorId);
               } else if (isTerminalAgentStatus(sc.newStatus)) {
@@ -1146,7 +1163,9 @@ function AppContent() {
                     agentStreamKey(sid, actorId)
                   ];
                   if (streamEntryHasVisibleContent(streamEntry)) {
-                    useV2StreamingStore.getState().finishSessionActor(sid, actorId);
+                    useV2StreamingStore.getState().finishSessionActor(sid, actorId, {
+                      reason: "statusChange.terminal",
+                    });
                   } else {
                     useV2StreamingStore.getState().setError(
                       sid,
@@ -1176,6 +1195,15 @@ function AppContent() {
                 params?: Record<string, string>;
                 options?: Array<{ optionId?: string; kind?: string; name?: string }>;
               };
+              logStreamToolDiag("mqtt.permissionRequest", {
+                sessionId: sid,
+                actorId,
+                eventId: decoded.envelope.eventId,
+                requestId: pr.requestId,
+                toolName: pr.toolName,
+                description: pr.description,
+                isDoomLoop: pr.toolName === "doom_loop",
+              });
               void handleAcpPermissionRequest({
                 sessionId: sid,
                 agentActorId: actorId,
