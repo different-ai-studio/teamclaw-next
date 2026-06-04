@@ -25,6 +25,7 @@ use tokio::sync::Mutex;
 use teamclaw_gateway::{AcpError, AcpHandle, AcpTurnOutcome, AmuxSessionId, ModelInfo};
 
 use crate::backend::Backend;
+use crate::proto::amux;
 use crate::runtime::RuntimeManager;
 
 /// Cached per-session state that lets `send_prompt` decide whether the
@@ -59,6 +60,16 @@ pub struct AmuxdAcpHandle {
     /// binding is required to write the per-session MCP config file
     /// that mounts the `send` tool.
     pub backend: Arc<dyn Backend>,
+    /// The daemon agent's own `default_agent_type`, resolved once when the
+    /// channel manager is built (`GET /v1/runtime/agent-defaults`). Gateway
+    /// runtimes spawn on this backend type instead of the daemon-wide default.
+    /// `None` → fall back to the daemon default agent type.
+    pub default_agent_type: Option<amux::AgentType>,
+    /// Local filesystem path of the daemon agent's `default_workspace_id`,
+    /// resolved via the daemon's `WorkspaceStore`. Used as the gateway runtime's
+    /// working directory instead of a throwaway `/tmp` scratch dir. `None` →
+    /// fall back to a scratch dir (the workspace is unset or not synced locally).
+    pub default_workspace_dir: Option<String>,
 }
 
 /// Returned by `resolve_or_spawn`. `spawned` is true iff this call was
@@ -125,9 +136,12 @@ impl AmuxdAcpHandle {
                 "Gateway session",
                 model_arg,
                 remote_session_id.as_deref(),
-                None,
-                // Gateway channels run on the daemon default backend.
-                None,
+                // Working directory + backend type come from the daemon agent's
+                // own configured defaults (resolved at channel-manager build).
+                // `None` for either falls back to a scratch dir / the daemon
+                // default agent type respectively.
+                self.default_workspace_dir.as_deref(),
+                self.default_agent_type,
             )
             .await
             .map_err(|e| AcpError::Create(e.to_string()))?
@@ -445,6 +459,8 @@ mod tests {
             team_id: "team-test".to_string(),
             model_override: Arc::new(Mutex::new(HashMap::new())),
             backend: Arc::new(MockBackend::default()),
+            default_agent_type: None,
+            default_workspace_dir: None,
         }
     }
 

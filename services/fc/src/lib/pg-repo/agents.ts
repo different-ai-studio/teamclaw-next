@@ -347,6 +347,7 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
           id: agents.id,
           agentTypes: agents.agentTypes,
           defaultAgentType: agents.defaultAgentType,
+          defaultWorkspaceId: agents.defaultWorkspaceId,
         })
         .from(agents)
         .where(inArray(agents.id, agentIds));
@@ -354,6 +355,9 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
         id: r.id,
         agentTypes: Array.isArray(r.agentTypes) ? r.agentTypes : null,
         defaultAgentType: r.defaultAgentType ?? null,
+        // The amuxd daemon reads this to resolve the gateway runtime's working
+        // directory from its own agent's default workspace.
+        defaultWorkspaceId: r.defaultWorkspaceId ?? null,
       }));
     },
   };
