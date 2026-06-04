@@ -26,11 +26,22 @@ pub fn send_control(sock_path: &Path, cmd: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// How long `start` waits for a previous instance to release the singleton
+/// lock before giving up. A graceful restart — very common under the launchd
+/// `KeepAlive` job, whose async `bootout` overlaps the new `RunAtLoad` start —
+/// briefly has the dying instance still holding the flock. Failing fast there
+/// makes the new process exit "already running", which `KeepAlive` then
+/// respawns into a flapping loop with no HTTP listener up, so the desktop
+/// onboarding probe fails and shows "amuxd 启动失败". Waiting it out instead
+/// lets the new instance take over once the old one finishes shutting down.
+const LOCK_WAIT: Duration = Duration::from_secs(10);
+const LOCK_POLL: Duration = Duration::from_millis(100);
+
 pub fn acquire_daemon_lock() -> anyhow::Result<DaemonLockGuard> {
-    acquire_daemon_lock_at(&DaemonConfig::lock_path())
+    acquire_daemon_lock_at(&DaemonConfig::lock_path(), LOCK_WAIT)
 }
 
-fn acquire_daemon_lock_at(path: &Path) -> anyhow::Result<DaemonLockGuard> {
+fn acquire_daemon_lock_at(path: &Path, wait: Duration) -> anyhow::Result<DaemonLockGuard> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -39,24 +50,31 @@ fn acquire_daemon_lock_at(path: &Path) -> anyhow::Result<DaemonLockGuard> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false) // lock file is just an flock target; never clobber it
         .open(path)?;
 
-    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-    if rc != 0 {
+    let deadline = Instant::now() + wait;
+    loop {
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if rc == 0 {
+            return Ok(DaemonLockGuard { file });
+        }
         let err = std::io::Error::last_os_error();
-        if matches!(
+        let would_block = matches!(
             err.raw_os_error(),
             Some(code) if code == libc::EWOULDBLOCK || code == libc::EAGAIN
-        ) {
+        );
+        if !would_block {
+            return Err(err.into());
+        }
+        if Instant::now() >= deadline {
             anyhow::bail!(
                 "amuxd is already running (lock held at {}). Use `amuxd status` or `amuxd stop`.",
                 path.display()
             );
         }
-        return Err(err).map_err(Into::into);
+        std::thread::sleep(LOCK_POLL);
     }
-
-    Ok(DaemonLockGuard { file })
 }
 
 /// Write `std::process::id()` to `DaemonConfig::pid_path()`. Called from
@@ -163,12 +181,56 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let lock_path = dir.path().join("amuxd.lock");
 
-        let first = acquire_daemon_lock_at(&lock_path).expect("first lock should succeed");
-        let second = acquire_daemon_lock_at(&lock_path);
+        // wait=0 ⇒ fail fast when contended (the historical behavior).
+        let first =
+            acquire_daemon_lock_at(&lock_path, Duration::ZERO).expect("first lock should succeed");
+        let second = acquire_daemon_lock_at(&lock_path, Duration::ZERO);
         assert!(second.is_err(), "second lock should be rejected");
 
         drop(first);
 
-        acquire_daemon_lock_at(&lock_path).expect("lock should be available after guard drop");
+        acquire_daemon_lock_at(&lock_path, Duration::ZERO)
+            .expect("lock should be available after guard drop");
+    }
+
+    #[test]
+    fn daemon_lock_waits_for_a_releasing_holder() {
+        // Regression: a graceful restart races the dying instance's lock. The
+        // new acquirer must poll and take over once the holder releases, not
+        // bail "already running" the way the old non-blocking flock did.
+        let dir = tempfile::tempdir().unwrap();
+        let lock_path = dir.path().join("amuxd.lock");
+
+        let held = acquire_daemon_lock_at(&lock_path, Duration::ZERO).expect("hold lock");
+
+        let release_path = lock_path.clone();
+        let waiter = std::thread::spawn(move || {
+            // Generous window; the holder releases well within it.
+            acquire_daemon_lock_at(&release_path, Duration::from_secs(5))
+        });
+
+        // Let the waiter start polling, then release the lock.
+        std::thread::sleep(Duration::from_millis(300));
+        drop(held);
+
+        waiter
+            .join()
+            .expect("waiter thread panicked")
+            .expect("waiter should acquire the lock once it is released");
+    }
+
+    #[test]
+    fn daemon_lock_times_out_when_holder_never_releases() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_path = dir.path().join("amuxd.lock");
+
+        let _held = acquire_daemon_lock_at(&lock_path, Duration::ZERO).expect("hold lock");
+        let start = Instant::now();
+        let contended = acquire_daemon_lock_at(&lock_path, Duration::from_millis(300));
+        assert!(contended.is_err(), "should give up once the wait elapses");
+        assert!(
+            start.elapsed() >= Duration::from_millis(300),
+            "should have waited out the full window before failing"
+        );
     }
 }
