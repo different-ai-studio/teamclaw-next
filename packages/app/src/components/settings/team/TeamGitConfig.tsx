@@ -219,10 +219,15 @@ export function TeamGitConfig() {
               size="sm"
               onClick={performSync}
               disabled={syncing || !workspacePath}
-              className="gap-2"
+              className="shrink-0 gap-2"
             >
-              <RefreshCw className={cn('h-3 w-3', syncing && 'animate-spin')} />
-              {syncing ? t('settings.team.syncing', 'Syncing...') : t('settings.team.syncNow', 'Sync Now')}
+              <RefreshCw className={cn('h-3 w-3 shrink-0', syncing && 'animate-spin')} />
+              {/* Fixed-width centered label so the "Sync Now" ↔ "Syncing..."
+                  swap never reflows the button (a width change mid-swap caused
+                  WKWebView to leave a ghost of the previous label). */}
+              <span className="inline-block min-w-[4.75rem] text-center">
+                {syncing ? t('settings.team.syncing', 'Syncing...') : t('settings.team.syncNow', 'Sync Now')}
+              </span>
             </Button>
           </div>
         </div>
