@@ -39,6 +39,8 @@ interface State {
   reloadAndSwitchTo: (teamId: string) => Promise<void>;
   setActiveTeam: (team: CurrentTeam) => Promise<void>;
   rename: (newName: string) => Promise<boolean>;
+  /** Rename the current user's own member actor (their display name). */
+  renameCurrentMember: (newName: string) => Promise<boolean>;
 }
 
 export const useCurrentTeamStore = create<State>((set, get) => ({
@@ -160,6 +162,47 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
         },
         saving: false,
       });
+      return true;
+    } catch (error) {
+      set({
+        saving: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  },
+
+  renameCurrentMember: async (newName) => {
+    const member = get().currentMember;
+    if (!member) {
+      set({ error: "no current member" });
+      return false;
+    }
+    const trimmed = newName.trim();
+    if (!trimmed) {
+      set({ error: "display name is required" });
+      return false;
+    }
+    if (trimmed === member.displayName) return true;
+
+    set({ saving: true, error: null });
+    try {
+      const updated = await getBackend().actors.updateCurrentActorProfile({
+        actorId: member.id,
+        displayName: trimmed,
+      });
+      const nextName = updated.display_name || trimmed;
+      set({ currentMember: { ...member, displayName: nextName }, saving: false });
+
+      // Best-effort: refresh the cached Actor so chat/sidebar reflect the new
+      // name without a reload. Only patches an already-cached entry.
+      try {
+        const { useActorsStore } = await import("./actors-store");
+        const cached = useActorsStore.getState().get(member.id);
+        if (cached) useActorsStore.getState().upsert({ ...cached, displayName: nextName });
+      } catch {
+        // actors-store unavailable / not yet populated — non-fatal.
+      }
       return true;
     } catch (error) {
       set({

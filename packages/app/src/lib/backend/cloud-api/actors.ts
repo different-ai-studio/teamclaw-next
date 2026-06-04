@@ -126,6 +126,14 @@ export function createActorsModule(client: CloudApiClient): ActorsBackend {
         visibility: input.visibility ?? null,
       });
     },
+    async updateCurrentActorProfile(input) {
+      return mapActor(
+        await client.patch<CloudActor>(`/v1/actors/${encodeURIComponent(input.actorId)}/profile`, {
+          displayName: input.displayName,
+          avatarUrl: input.avatarUrl ?? null,
+        }),
+      );
+    },
     async updateAgentDefaults(input) {
       const body: Record<string, unknown> = {};
       if (input.defaultAgentType !== undefined) body.defaultAgentType = input.defaultAgentType;

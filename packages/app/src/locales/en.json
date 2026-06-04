@@ -894,6 +894,11 @@
     "general": {
       "title": "General",
       "description": "Customize your application preferences",
+      "displayName": "Display Name",
+      "displayNameDesc": "The name teammates see for you",
+      "displayNamePlaceholder": "Your name",
+      "displayNameSaved": "Display name updated",
+      "displayNameError": "Could not update display name",
       "appearance": "Appearance",
       "language": "Language",
       "languageDesc": "Choose the app display language",
