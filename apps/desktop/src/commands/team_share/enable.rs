@@ -283,16 +283,27 @@ pub async fn enable_custom_git_impl(
         ));
     }
 
+    // SSH with an empty credential = "use this machine's ~/.ssh / ssh-agent".
+    // No private key is stored or delivered; the daemon falls back to the local
+    // SSH setup (see `sync::git::ssh_env_local`), so the user never has to paste
+    // a key or type a password. HTTPS always needs a token.
+    let local_ssh = input.auth_kind == "ssh_key" && input.credential.trim().is_empty();
+
     let secret = generate_team_secret_hex()?;
     team_secret_store::save_team_secret(&workspace_path, &team_id, &secret)?;
 
+    // `credentialRef` is a device-local pointer; FC only checks it is non-empty.
+    // We always send it so the server contract is satisfied, but only persist a
+    // real credential entry when the user actually supplied key material.
     let cred_ref = format!("custom_git:{}", team_id);
-    custom_git::store_credential(
-        &workspace_path,
-        &cred_ref,
-        &input.auth_kind,
-        &input.credential,
-    )?;
+    if !local_ssh {
+        custom_git::store_credential(
+            &workspace_path,
+            &cred_ref,
+            &input.auth_kind,
+            &input.credential,
+        )?;
+    }
 
     let mut git_config = json!({
         "remoteUrl": input.remote_url,
@@ -319,17 +330,21 @@ pub async fn enable_custom_git_impl(
     // Deliver the git credential to the daemon. For `https_token` the
     // credential is the literal token; for `ssh_key` the daemon needs the PEM
     // *content* (resolve_ssh_pem_content reads the file if input.credential is
-    // a path). Pass the user's branch through; the daemon owns the clone.
-    let git_credential = if input.auth_kind == "ssh_key" {
-        resolve_ssh_pem_content(&input.credential)?
+    // a path). For local-SSH there is no credential — the daemon reuses the
+    // machine's ~/.ssh / ssh-agent. Pass the user's branch through; the daemon
+    // owns the clone.
+    let git_credential = if local_ssh {
+        None
+    } else if input.auth_kind == "ssh_key" {
+        Some(resolve_ssh_pem_content(&input.credential)?)
     } else {
-        input.credential.clone()
+        Some(input.credential.clone())
     };
     let clone_warning = deliver_secrets_and_link(
         &team_id,
         &workspace_path,
         None,
-        Some(&git_credential),
+        git_credential.as_deref(),
         input.branch.as_deref(),
     )
     .await;
