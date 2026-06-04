@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { handleBusinessApiRequest } from "../src/lib/business-api.js";
+import { ApiError } from "../src/lib/http-utils.js";
 
 function makeRepo(overrides: any = {}) {
   const calls = [];
@@ -26,6 +27,16 @@ function makeRepo(overrides: any = {}) {
       return overrides.getShareModeResult ?? {
         mode: "oss",
         enabledAt: "2026-05-28T00:00:00Z",
+        gitRemoteUrl: null,
+        gitAuthKind: null,
+      };
+    },
+    async disableShareMode(teamId) {
+      calls.push({ method: "disableShareMode", teamId });
+      if (overrides.disableShareModeError) throw overrides.disableShareModeError;
+      return overrides.disableShareModeResult ?? {
+        mode: null,
+        enabledAt: null,
         gitRemoteUrl: null,
         gitAuthKind: null,
       };
@@ -137,19 +148,33 @@ test("POST /v1/teams/:id/share-mode lock violation (pg check_violation) → 409"
   assert.equal(body.error.code, "share_mode_locked");
 });
 
-test("POST /v1/teams/:id/share-mode lock violation (message match) → 409", async () => {
-  const lockErr = new Error("Team is locked to a prior share mode");
-  const repo = makeRepo({ enableShareModeError: lockErr });
+test("DELETE /v1/teams/:id/share-mode forbidden when not owner → 403", async () => {
+  const repo = makeRepo({
+    disableShareModeError: new ApiError(403, "forbidden", "only team owners may change team share mode"),
+  });
   const res = await handleBusinessApiRequest({
-    httpMethod: "POST",
+    httpMethod: "DELETE",
     path: "/v1/teams/team-1/share-mode",
     headers: bearerHeaders(),
-    body: JSON.stringify({ mode: "managed_git", gitConfig: { remoteUrl: "x" } }),
   }, { createRepository: () => repo });
 
-  assert.equal(res.statusCode, 409);
+  assert.equal(res.statusCode, 403);
   const body = JSON.parse(res.body);
-  assert.equal(body.error.code, "share_mode_locked");
+  assert.equal(body.error.code, "forbidden");
+});
+
+test("DELETE /v1/teams/:id/share-mode → 200 and clears mode", async () => {
+  const repo = makeRepo();
+  const res = await handleBusinessApiRequest({
+    httpMethod: "DELETE",
+    path: "/v1/teams/team-1/share-mode",
+    headers: bearerHeaders(),
+  }, { createRepository: () => repo });
+
+  assert.equal(res.statusCode, 200);
+  const body = JSON.parse(res.body);
+  assert.equal(body.mode, null);
+  assert.deepEqual(repo.calls[0], { method: "disableShareMode", teamId: "team-1" });
 });
 
 test("GET /v1/teams/:id/share-mode → 200", async () => {

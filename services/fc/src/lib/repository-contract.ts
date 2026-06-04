@@ -827,13 +827,13 @@ test("repository contract: getTeamDirectory returns actors and members", async (
     assert.equal(out.gitAuthKind, "ssh_key");
   });
 
-  test("repository contract: enableShareMode rejects a second enable on the same team", async () => {
+  test("repository contract: enableShareMode switches mode on the same team", async () => {
     const repo = createRepository();
     await repo.enableShareMode("team-share-3", "managed_git", null);
-    await assert.rejects(
-      () => repo.enableShareMode("team-share-3", "oss", null),
-      (error) => /share_mode|locked|already/i.test(error?.message ?? ""),
-    );
+    const out = await repo.enableShareMode("team-share-3", "oss", null);
+    assert.equal(out.shareMode, "oss");
+    const current = await repo.getShareMode("team-share-3");
+    assert.equal(current.mode, "oss");
   });
 
   test("repository contract: getShareMode returns null mode for fresh team", async () => {

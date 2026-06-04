@@ -181,16 +181,15 @@ test("pg-repo [teams]: enableShareMode accepts custom_git gitConfig", async () =
   assert.equal(out.gitAuthKind, "ssh_key");
 });
 
-// --- enableShareMode rejects second enable (lock) ---
-test("pg-repo [teams]: enableShareMode rejects a second enable on the same team", async () => {
+// --- enableShareMode switches mode on second call ---
+test("pg-repo [teams]: enableShareMode switches mode on the same team", async () => {
   const { pg, repo } = await makeRepo();
   await seedTeam(pg, TS3, "team-share-3-slug");
 
   await repo.enableShareMode(TS3, "managed_git", null);
-  await assert.rejects(
-    () => repo.enableShareMode(TS3, "oss", null),
-    (error: any) => /share_mode|locked|already/i.test(error?.message ?? ""),
-  );
+  await repo.enableShareMode(TS3, "oss", null);
+  const out = await repo.getShareMode(TS3);
+  assert.equal(out.mode, "oss");
 });
 
 // --- getShareMode reflects enabled mode ---

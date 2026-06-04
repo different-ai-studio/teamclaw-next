@@ -1,10 +1,10 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import { teams, teamWorkspaceConfig, actors, members, teamMembers, teamInvites } from "../../db/schema/index.js";
 import { workspaces } from "../../db/schema/workspaces.js";
 import { agentMemberAccess, agents } from "../../db/schema/agents.js";
 import { ApiError } from "../http-utils.js";
-import { requireActorForTeam, checkAgentOwnership } from "./authz.js";
+import { requireActorForTeam, requireTeamOwner, checkAgentOwnership } from "./authz.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { generateDisplayName } from "../display-name.js";
 
@@ -28,7 +28,11 @@ export interface TeamsRepoDeps {
 
 // PgDatabase base accepts both postgres-js and pglite drivers
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function makeTeamsRepo(db: PgDatabase<any, any>, deps: TeamsRepoDeps = {}) {
+export function makeTeamsRepo(
+  db: PgDatabase<any, any>,
+  deps: TeamsRepoDeps = {},
+  ctx: { userId?: string } = {},
+) {
   return {
     async listTeams({ limit = 50 }: { limit?: number } = {}) {
       const rows = await db.select().from(teams).orderBy(asc(teams.createdAt)).limit(limit);
@@ -49,33 +53,47 @@ export function makeTeamsRepo(db: PgDatabase<any, any>, deps: TeamsRepoDeps = {}
       return { mode: r.shareMode ?? null, enabledAt: iso(r.shareEnabledAt), gitRemoteUrl: r.gitRemoteUrl ?? null, gitAuthKind: r.gitAuthKind ?? null };
     },
     async enableShareMode(teamId: string, mode: "oss" | "managed_git" | "custom_git", gitConfig: { remoteUrl?: string; authKind?: string; credentialRef?: string } | null) {
+      if (ctx.userId) await requireTeamOwner(db, ctx.userId, teamId);
+
+      const gitRemoteUrl = mode === "oss" ? null : (gitConfig?.remoteUrl ?? null);
+      const gitAuthKind = mode === "oss" ? null : (gitConfig?.authKind ?? null);
+      const gitCredentialRef = mode === "oss" ? null : (gitConfig?.credentialRef ?? null);
+      const syncMode = mode === "oss" ? "oss" : "git";
+
       const [r] = await (db.update(teams) as any)
         .set({
           shareMode: mode,
           shareEnabledAt: new Date(),
-          gitRemoteUrl: gitConfig?.remoteUrl ?? null,
-          gitAuthKind: gitConfig?.authKind ?? null,
-          gitCredentialRef: gitConfig?.credentialRef ?? null,
+          gitRemoteUrl,
+          gitAuthKind,
+          gitCredentialRef,
           updatedAt: new Date(),
         })
-        .where(and(eq(teams.id, teamId), isNull(teams.shareMode)))
+        .where(eq(teams.id, teamId))
         .returning();
-      if (!r) {
-        const [exists] = await db.select({ id: teams.id, sm: teams.shareMode }).from(teams).where(eq(teams.id, teamId)).limit(1);
-        if (!exists) throw new ApiError(404, "not_found", "team not found");
-        throw new ApiError(409, "conflict", "share_mode already locked");
-      }
+      if (!r) throw new ApiError(404, "not_found", "team not found");
+
+      await db.execute(sql`select set_config('app.allow_sync_mode_switch', 'on', true)`);
+      await (db.insert(teamWorkspaceConfig) as any)
+        .values({ teamId, syncMode, updatedAt: new Date() })
+        .onConflictDoUpdate({
+          target: teamWorkspaceConfig.teamId,
+          set: { syncMode, updatedAt: new Date() },
+        });
+      await db.execute(sql`select set_config('app.allow_sync_mode_switch', 'off', true)`);
+
       return { id: r.id, shareMode: r.shareMode, shareEnabledAt: iso(r.shareEnabledAt), gitRemoteUrl: r.gitRemoteUrl ?? null, gitAuthKind: r.gitAuthKind ?? null };
     },
     async disableShareMode(teamId: string) {
+      if (ctx.userId) await requireTeamOwner(db, ctx.userId, teamId);
+
       const [exists] = await db
-        .select({ id: teams.id, shareMode: teams.shareMode })
+        .select({ id: teams.id })
         .from(teams)
         .where(eq(teams.id, teamId))
         .limit(1);
       if (!exists) throw new ApiError(404, "not_found", "team not found");
 
-      await db.execute(sql`select set_config('app.allow_share_mode_reset', 'on', true)`);
       const [r] = await (db.update(teams) as any)
         .set({
           shareMode: null,
@@ -94,7 +112,6 @@ export function makeTeamsRepo(db: PgDatabase<any, any>, deps: TeamsRepoDeps = {}
         .set({ syncMode: null, updatedAt: new Date() })
         .where(eq(teamWorkspaceConfig.teamId, teamId));
       await db.execute(sql`select set_config('app.allow_sync_mode_switch', 'off', true)`);
-      await db.execute(sql`select set_config('app.allow_share_mode_reset', 'off', true)`);
 
       return {
         mode: null,

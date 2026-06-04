@@ -109,21 +109,24 @@ select is(
   'team_workspace_config.sync_mode mirrored to oss'
 );
 
--- 7. Second enable_team_share call raises (locked).
-select throws_ok(
-  $q$ select app.enable_team_share((select id from _ids where key='team1'), 'managed_git'::app.team_share_mode) $q$,
-  '23514',
-  null,
-  'second enable_team_share is rejected (locked)'
+-- 7. Second enable_team_share switches mode (no longer locked).
+select lives_ok(
+  $q$ select public.enable_team_share((select id from _ids where key='team1'), 'managed_git'::app.team_share_mode) $q$,
+  'second enable_team_share switches mode'
 );
 
--- 8. Direct UPDATE changing share_mode is rejected by the guard trigger.
-select throws_ok(
-  $q$ update public.teams set share_mode = 'managed_git'::app.team_share_mode
+select is(
+  (select share_mode::text from public.teams
+    where id = (select id from _ids where key='team1')),
+  'managed_git',
+  'teams.share_mode updated to managed_git'
+);
+
+-- 8. Direct UPDATE of share_mode is allowed after guard trigger removal.
+select lives_ok(
+  $q$ update public.teams set share_mode = 'oss'::app.team_share_mode
        where id = (select id from _ids where key='team1') $q$,
-  '23514',
-  null,
-  'direct UPDATE of share_mode is rejected by trigger'
+  'direct UPDATE of share_mode is allowed'
 );
 
 -- 9. UPDATE that keeps share_mode unchanged still works (regression guard).

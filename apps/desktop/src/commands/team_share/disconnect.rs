@@ -156,6 +156,14 @@ pub async fn team_disconnect_repo(
         "team_disconnect_repo: start"
     );
 
+    let token = access_token
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| {
+            "accessToken is required to clear cloud team-share binding".to_string()
+        })?;
+
+    disable_cloud_share_mode(&workspace_path, &team_id, &token).await?;
+
     let paths = collect_workspace_paths(&team_id, &workspace_path);
     for path in &paths {
         remove_workspace_team_repo_entry(path)?;
@@ -164,14 +172,6 @@ pub async fn team_disconnect_repo(
     }
 
     remove_global_team_home(&team_id)?;
-
-    if let Some(token) = access_token.filter(|s| !s.trim().is_empty()) {
-        disable_cloud_share_mode(&workspace_path, &team_id, &token).await?;
-    } else {
-        return Err(
-            "accessToken is required to clear cloud team-share binding".to_string(),
-        );
-    }
 
     info!(
         team_id = %team_id,

@@ -13,7 +13,7 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { actors, agents, agentMemberAccess } from "../../db/schema/index.js";
+import { actors, agents, agentMemberAccess, teamMembers } from "../../db/schema/index.js";
 import { ApiError } from "../http-utils.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -51,6 +51,26 @@ export async function requireActorForTeam(
   const id = await resolveActorForTeam(db, userId, teamId);
   if (!id) throw new ApiError(403, "forbidden", "not a member of this team");
   return id;
+}
+
+/**
+ * Ensures the authenticated user is the team owner before share-mode mutations.
+ */
+export async function requireTeamOwner(
+  db: DbLike,
+  userId: string,
+  teamId: string,
+): Promise<string> {
+  const actorId = await requireActorForTeam(db, userId, teamId);
+  const [row] = await db
+    .select({ role: teamMembers.role })
+    .from(teamMembers)
+    .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.memberId, actorId)))
+    .limit(1);
+  if (!row || row.role !== "owner") {
+    throw new ApiError(403, "forbidden", "only team owners may change team share mode");
+  }
+  return actorId;
 }
 
 /**
