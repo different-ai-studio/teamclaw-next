@@ -175,35 +175,36 @@ export function TeamGitConfig() {
       <SettingCard className="border-violet-200 dark:border-violet-800 bg-gradient-to-br from-violet-50/50 to-purple-50/50 dark:from-violet-950/20 dark:to-purple-950/20">
         <div className="space-y-4">
           {/* Header with status */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-lg flex items-center justify-center bg-violet-100 dark:bg-violet-900/30">
-                <Users className="h-5 w-5 text-violet-700 dark:text-violet-400" />
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="h-9 w-9 shrink-0 rounded-lg flex items-center justify-center bg-violet-100 dark:bg-violet-900/30">
+              <Users className="h-5 w-5 text-violet-700 dark:text-violet-400" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <p className="text-[13px] font-medium">{modeLabel}</p>
+                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
+                  <CheckCircle2 className="h-3 w-3" />
+                  {t('settings.llm.connected', 'Connected')}
+                </span>
               </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-[13px] font-medium">{modeLabel}</p>
-                  <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-                    <CheckCircle2 className="h-3 w-3" />
-                    {t('settings.llm.connected', 'Connected')}
-                  </span>
+              {status.gitRemoteUrl && (
+                <div className="flex items-center gap-2 mt-0.5 min-w-0">
+                  <p
+                    className="text-xs text-muted-foreground font-mono truncate min-w-0"
+                    title={status.gitRemoteUrl}
+                  >
+                    {status.gitRemoteUrl}
+                  </p>
+                  {status.gitAuthKind && (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+                      <KeyRound className="h-2.5 w-2.5" />
+                      {status.gitAuthKind === 'ssh_key'
+                        ? t('settings.team.authSsh', 'SSH')
+                        : t('settings.team.token', 'Token')}
+                    </span>
+                  )}
                 </div>
-                {status.gitRemoteUrl && (
-                  <div className="flex items-center gap-2 mt-0.5 min-w-0">
-                    <p className="text-xs text-muted-foreground font-mono truncate min-w-0">
-                      {status.gitRemoteUrl}
-                    </p>
-                    {status.gitAuthKind && (
-                      <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
-                        <KeyRound className="h-2.5 w-2.5" />
-                        {status.gitAuthKind === 'ssh_key'
-                          ? t('settings.team.authSsh', 'SSH')
-                          : t('settings.team.token', 'Token')}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
+              )}
             </div>
           </div>
 
