@@ -8,6 +8,7 @@ import { useCurrentTeamStore } from '@/stores/current-team'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { isTauri } from '@/lib/utils'
 import { TeamSyncPaths } from './TeamSyncPaths'
+import { TeamShareDisconnect } from './TeamShareDisconnect'
 
 /**
  * OSS sync status panel — shown when a team's share mode is locked to 'oss'.
@@ -123,6 +124,8 @@ export function TeamOssSyncStatus() {
           <span className="break-words">{lastError}</span>
         </div>
       )}
+
+      <TeamShareDisconnect className="mt-4" />
     </div>
   )
 }

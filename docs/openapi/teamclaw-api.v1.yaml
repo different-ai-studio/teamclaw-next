@@ -1203,6 +1203,32 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
+    delete:
+      operationId: disableTeamShareMode
+      summary: Disable team share (owner reset)
+      description: |
+        Clears the team's locked share mode and git binding fields so the
+        owner can run the share onboarding flow again (`mode` returns to null).
+        Does not delete the team or its members. Local clients should also
+        remove workspace symlinks and daemon global directories before or
+        after calling this endpoint.
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: Share status after reset (mode is null).
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareStatus"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /v1/teams/{teamId}/litellm/setup:
     post:
       operationId: setupTeamLiteLlm

@@ -1,12 +1,13 @@
 import * as React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 
 const mockInvoke = vi.hoisted(() => vi.fn())
 const workspaceStoreMocks = vi.hoisted(() => ({
   workspacePath: '/workspace-a',
   workspaceReady: true,
 }))
+const disconnectShare = vi.hoisted(() => vi.fn(async () => {}))
 const shareStoreMocks = vi.hoisted(() => ({
   status: {
     mode: 'managed_git' as 'managed_git' | 'custom_git' | 'oss' | null,
@@ -17,6 +18,7 @@ const shareStoreMocks = vi.hoisted(() => ({
     globalPath: '/home/me/.amuxd/teams/team-1/teamclaw-team' as string | null,
   },
   refresh: vi.fn(async () => {}),
+  disconnect: disconnectShare,
 }))
 
 vi.mock('react-i18next', () => ({
@@ -47,6 +49,13 @@ vi.mock('@/lib/build-config', () => ({
   appShortName: 'teamclaw',
   TEAM_SYNCED_EVENT: 'team-synced',
   TEAM_REPO_DIR: 'teamclaw-team',
+  TEAMCLAW_DIR: '.teamclaw',
+}))
+
+const linkDaemonTeamWorkspace = vi.hoisted(() => vi.fn(async () => null))
+
+vi.mock('@/lib/daemon-local-client', () => ({
+  linkDaemonTeamWorkspace,
 }))
 
 vi.mock('@/stores/workspace', () => ({
@@ -57,6 +66,10 @@ vi.mock('@/stores/workspace', () => ({
 vi.mock('@/stores/current-team', () => ({
   useCurrentTeamStore: (sel: (s: { team: { id: string } | null }) => unknown) =>
     sel({ team: { id: 'team-1' } }),
+}))
+
+vi.mock('@/lib/team-permissions', () => ({
+  useTeamPermissions: () => ({ isOwner: true }),
 }))
 
 vi.mock('@/stores/team-share', () => ({
@@ -76,6 +89,13 @@ vi.mock('@/components/ui/collapsible', () => ({
   Collapsible: ({ children }: any) => <div>{children}</div>,
   CollapsibleContent: ({ children }: any) => <div>{children}</div>,
   CollapsibleTrigger: ({ children }: any) => <button>{children}</button>,
+}))
+
+vi.mock('sonner', () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+  },
 }))
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -117,6 +137,7 @@ describe('TeamGitConfig status panel', () => {
     expect(await screen.findByText('Managed Git')).toBeTruthy()
     expect(screen.getByText('https://example.com/repo.git')).toBeTruthy()
     expect(screen.getByText('Sync Now')).toBeTruthy()
+    expect(screen.getByText('Disconnect')).toBeTruthy()
     expect(screen.getByText('How to set up a team repository')).toBeTruthy()
     // Legacy local-config commands are never called.
     expect(mockInvoke).not.toHaveBeenCalledWith('get_team_config', expect.anything())
@@ -141,17 +162,31 @@ describe('TeamGitConfig status panel', () => {
     expect(screen.getByText('SSH')).toBeTruthy()
   })
 
-  it('syncs through the daemon proxy with only workspacePath (no gitUrl/token)', async () => {
+  it('links workspace then syncs through the daemon proxy', async () => {
     render(<TeamGitConfig />)
 
     const syncButton = await screen.findByText('Sync Now')
     syncButton.click()
 
     await waitFor(() => {
+      expect(linkDaemonTeamWorkspace).toHaveBeenCalledWith('/workspace-a')
       expect(mockInvoke).toHaveBeenCalledWith('team_shared_git_sync', {
         config: { workspacePath: '/workspace-a' },
         force: false,
       })
+    })
+  })
+
+  it('disconnects local team materialization with teamId via inline confirm', async () => {
+    render(<TeamGitConfig />)
+
+    const toggle = await screen.findByRole('button', { name: 'Disconnect' })
+    toggle.click()
+    const panel = await screen.findByTestId('disconnect-confirm-panel')
+    within(panel).getByRole('button', { name: 'Disconnect' }).click()
+
+    await waitFor(() => {
+      expect(disconnectShare).toHaveBeenCalledWith('team-1', '/workspace-a')
     })
   })
 })

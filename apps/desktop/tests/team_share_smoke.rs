@@ -158,6 +158,7 @@ async fn enable_oss_provisions_secret_and_local_dir() {
         "t1".to_string(),
         workspace.clone(),
         "test-jwt".to_string(),
+        None,
     )
     .await
     .expect("enable_oss should succeed");
@@ -189,6 +190,40 @@ async fn enable_oss_provisions_secret_and_local_dir() {
     // persisted to teamclaw.json anymore — the single source of truth is the
     // current-team store (commits ad563711 / b1baec40). The returned
     // share_mode / team_id are asserted above.
+}
+
+#[tokio::test]
+async fn enable_oss_uses_provided_team_secret() {
+    let _guard = HOME_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/teams/t1/share-mode"))
+        .and(header("authorization", "Bearer test-jwt"))
+        .and(body_partial_json(json!({ "mode": "oss" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "t1",
+            "share_mode": "oss",
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = TempDir::new().expect("tempdir");
+    isolate_home(&tmp);
+    let workspace = seed_workspace(&tmp, &server.uri());
+
+    let provided = "abcdef0123456789".repeat(4);
+    team_share::enable::enable_oss_impl(
+        "t1".to_string(),
+        workspace.clone(),
+        "test-jwt".to_string(),
+        Some(provided.to_uppercase()),
+    )
+    .await
+    .expect("enable_oss with provided secret should succeed");
+
+    let loaded = team_secret_store::load_team_secret(&workspace, "t1")
+        .expect("secret should be readable");
+    assert_eq!(loaded, provided);
 }
 
 #[tokio::test]
@@ -260,6 +295,7 @@ async fn enable_custom_git_writes_git_config() {
         workspace.clone(),
         input,
         "test-jwt".to_string(),
+        None,
     )
     .await
     .expect("enable_custom_git should succeed");

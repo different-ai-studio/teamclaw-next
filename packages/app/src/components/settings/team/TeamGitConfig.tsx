@@ -14,7 +14,7 @@
  * This panel is only mounted for a team whose share mode is already locked to a
  * git mode (managed_git / custom_git) — see TeamSection's router — so it never
  * renders an "unconfigured" empty state. The legacy local-config plumbing
- * (get/save/clear_team_config, the enabled toggle, Disconnect, the embedded LLM
+ * (get/save/clear_team_config, the enabled toggle, the embedded LLM
  * service config, and the git-installed precheck) has been removed: team
  * identity now lives behind the Cloud API, the daemon owns sync, and LLM hosting
  * is configured from the LLM settings pane (TeamSharedLlmPane).
@@ -33,9 +33,11 @@ import {
 } from 'lucide-react'
 import { cn, isTauri } from '@/lib/utils'
 import { TeamSyncPaths } from './TeamSyncPaths'
+import { TeamShareDisconnect } from './TeamShareDisconnect'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { useTeamShareStore } from '@/stores/team-share'
+import { linkDaemonTeamWorkspace } from '@/lib/daemon-local-client'
 import { buildConfig, TEAM_SYNCED_EVENT, TEAM_REPO_DIR } from '@/lib/build-config'
 import { Button } from '@/components/ui/button'
 import {
@@ -60,9 +62,13 @@ async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
 
 // ─── Reusable Components (local to git config) ─────────────────────────────
 
-function SettingCard({ children, className }: { children: React.ReactNode; className?: string }) {
+function SettingCard({
+  children,
+  className,
+  ...rest
+}: React.ComponentProps<'div'>) {
   return (
-    <div className={cn('rounded-xl border bg-card p-5 transition-all', className)}>
+    <div className={cn('rounded-xl border bg-card p-5 transition-all', className)} {...rest}>
       {children}
     </div>
   )
@@ -78,6 +84,7 @@ export function TeamGitConfig() {
   const refresh = useTeamShareStore((s) => s.refresh)
 
   const [syncing, setSyncing] = React.useState(false)
+  const [pathsRefreshKey, setPathsRefreshKey] = React.useState(0)
   const [lastSyncAt, setLastSyncAt] = React.useState<string | null>(null)
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
   const [repoGuideOpen, setRepoGuideOpen] = React.useState(false)
@@ -108,6 +115,8 @@ export function TeamGitConfig() {
     setSyncing(true)
     setErrorMessage(null)
     try {
+      // Materialize workspace symlink → global copy before sync (best-effort).
+      await linkDaemonTeamWorkspace(workspacePath)
       const result = await tauriInvoke<TeamGitResult>('team_shared_git_sync', {
         config: { workspacePath },
         force: false,
@@ -118,7 +127,7 @@ export function TeamGitConfig() {
       }
       window.dispatchEvent(new CustomEvent(TEAM_SYNCED_EVENT))
       setLastSyncAt(new Date().toISOString())
-      // Refresh link/global-path status after a sync materializes the dir.
+      setPathsRefreshKey((k) => k + 1)
       if (teamId) void refresh(teamId, workspacePath)
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err))
@@ -208,24 +217,20 @@ export function TeamGitConfig() {
             </div>
           </div>
 
-          {/* Last sync info + Sync now */}
-          <div className="flex items-center justify-between pt-2 border-t">
+          {/* Last sync info + actions */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t">
             <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
               <Clock className="h-3.5 w-3.5" />
               {t('settings.team.lastSynced', 'Last synced')}: {formatLastSync(lastSyncAt)}
             </div>
             <Button
+              type="button"
               variant="outline"
               size="sm"
-              onClick={performSync}
+              onClick={() => void performSync()}
               disabled={syncing || !workspacePath}
               className="shrink-0 gap-2"
             >
-              {/* Keep the label text CONSTANT — only spin the icon while syncing.
-                  Swapping the text in place ("Sync Now" ↔ "Syncing...") made
-                  WKWebView paint the new glyphs over the old ones (a ghost);
-                  the spinner + disabled state convey progress without mutating
-                  the text node. */}
               <RefreshCw className={cn('h-3 w-3 shrink-0', syncing && 'animate-spin')} />
               {t('settings.team.syncNow', 'Sync Now')}
             </Button>
@@ -233,8 +238,19 @@ export function TeamGitConfig() {
         </div>
       </SettingCard>
 
+      <TeamShareDisconnect
+        onDisconnected={() => {
+          setLastSyncAt(null)
+          setPathsRefreshKey((k) => k + 1)
+        }}
+      />
+
       {/* Real sync directory + every workspace symlink (all 3 share modes) */}
-      <TeamSyncPaths teamId={teamId} workspacePath={workspacePath} />
+      <TeamSyncPaths
+        teamId={teamId}
+        workspacePath={workspacePath}
+        refreshKey={pathsRefreshKey}
+      />
 
       {/* Repo setup guide */}
       <Collapsible open={repoGuideOpen} onOpenChange={setRepoGuideOpen}>

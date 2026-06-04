@@ -97,6 +97,19 @@ impl FcClient {
         self.post(path, body).await
     }
 
+    /// Generic DELETE helper. Returns raw JSON value on 2xx.
+    pub async fn delete_json(&self, path: &str) -> Result<Value, SyncError> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .client
+            .delete(&url)
+            .header("Authorization", format!("Bearer {}", self.jwt))
+            .send()
+            .await
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+        map_fc_response(resp).await
+    }
+
     /// Generic GET helper. Returns raw JSON value on 2xx.
     pub async fn get_json(&self, path: &str) -> Result<Value, SyncError> {
         let url = format!("{}{}", self.base_url, path);

@@ -105,6 +105,23 @@ fn generate_team_secret_hex() -> Result<String, String> {
     Ok(hex::encode(bytes))
 }
 
+/// Use a caller-supplied 64-hex secret when provided; otherwise generate one.
+fn resolve_team_secret_hex(team_secret_hex: Option<String>) -> Result<String, String> {
+    match team_secret_hex {
+        None => generate_team_secret_hex(),
+        Some(raw) => {
+            let normalized = raw.trim().to_ascii_lowercase();
+            if normalized.is_empty() {
+                return generate_team_secret_hex();
+            }
+            if normalized.len() != 64 || !normalized.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err("team secret must be exactly 64 hex characters".to_string());
+            }
+            Ok(normalized)
+        }
+    }
+}
+
 /// The team shared directory is now created and linked by the daemon
 /// (one global copy per team under `~/.amuxd/teams/<team_id>/teamclaw-team`,
 /// exposed via a `teamclaw-team` symlink in each workspace). Desktop no longer
@@ -144,6 +161,7 @@ pub async fn enable_oss_impl(
     team_id: String,
     workspace_path: String,
     access_token: String,
+    team_secret_hex: Option<String>,
 ) -> Result<EnableShareResult, String> {
     // Lock the share mode on the server FIRST. If it is already locked (409),
     // post_share_mode returns a clear error and we bail out BEFORE mutating any
@@ -157,7 +175,7 @@ pub async fn enable_oss_impl(
     )
     .await?;
 
-    let secret = generate_team_secret_hex()?;
+    let secret = resolve_team_secret_hex(team_secret_hex)?;
     team_secret_store::save_team_secret(&workspace_path, &team_id, &secret)?;
 
     ensure_team_repo_dir(&workspace_path)?;
@@ -180,8 +198,9 @@ pub async fn team_share_enable_oss(
     team_id: String,
     workspace_path: String,
     access_token: String,
+    team_secret_hex: Option<String>,
 ) -> Result<EnableShareResult, String> {
-    enable_oss_impl(team_id, workspace_path, access_token).await
+    enable_oss_impl(team_id, workspace_path, access_token, team_secret_hex).await
 }
 
 // ─── enable_managed_git ──────────────────────────────────────────────────
@@ -190,8 +209,9 @@ pub async fn enable_managed_git_impl(
     team_id: String,
     workspace_path: String,
     access_token: String,
+    team_secret_hex: Option<String>,
 ) -> Result<EnableShareResult, String> {
-    let secret = generate_team_secret_hex()?;
+    let secret = resolve_team_secret_hex(team_secret_hex)?;
     team_secret_store::save_team_secret(&workspace_path, &team_id, &secret)?;
 
     let fc = FcClient::new(get_fc_endpoint(&workspace_path), access_token.clone());
@@ -245,12 +265,15 @@ pub async fn enable_managed_git_impl(
 
     ensure_team_repo_dir(&workspace_path)?;
 
-    // The daemon owns the clone now: deliver the git credential and link this
-    // workspace. managed_git uses the repo's default branch, so gitBranch is
-    // None. Non-fatal on daemon error.
-    let clone_warning =
-        deliver_secrets_and_link(&team_id, &workspace_path, None, Some(&git_credential), None)
-            .await;
+    // Deliver team secret + git credential; non-fatal on daemon error.
+    let clone_warning = deliver_secrets_and_link(
+        &team_id,
+        &workspace_path,
+        Some(&secret),
+        Some(&git_credential),
+        None,
+    )
+    .await;
 
     Ok(EnableShareResult {
         team_id,
@@ -264,8 +287,9 @@ pub async fn team_share_enable_managed_git(
     team_id: String,
     workspace_path: String,
     access_token: String,
+    team_secret_hex: Option<String>,
 ) -> Result<EnableShareResult, String> {
-    enable_managed_git_impl(team_id, workspace_path, access_token).await
+    enable_managed_git_impl(team_id, workspace_path, access_token, team_secret_hex).await
 }
 
 // ─── enable_custom_git ──────────────────────────────────────────────────
@@ -275,6 +299,7 @@ pub async fn enable_custom_git_impl(
     workspace_path: String,
     input: GitEnableInput,
     access_token: String,
+    team_secret_hex: Option<String>,
 ) -> Result<EnableShareResult, String> {
     if input.auth_kind != "ssh_key" && input.auth_kind != "https_token" {
         return Err(format!(
@@ -289,7 +314,7 @@ pub async fn enable_custom_git_impl(
     // a key or type a password. HTTPS always needs a token.
     let local_ssh = input.auth_kind == "ssh_key" && input.credential.trim().is_empty();
 
-    let secret = generate_team_secret_hex()?;
+    let secret = resolve_team_secret_hex(team_secret_hex)?;
     team_secret_store::save_team_secret(&workspace_path, &team_id, &secret)?;
 
     // `credentialRef` is a device-local pointer; FC only checks it is non-empty.
@@ -343,7 +368,7 @@ pub async fn enable_custom_git_impl(
     let clone_warning = deliver_secrets_and_link(
         &team_id,
         &workspace_path,
-        None,
+        Some(&secret),
         git_credential.as_deref(),
         input.branch.as_deref(),
     )
@@ -362,8 +387,9 @@ pub async fn team_share_enable_custom_git(
     workspace_path: String,
     input: GitEnableInput,
     access_token: String,
+    team_secret_hex: Option<String>,
 ) -> Result<EnableShareResult, String> {
-    enable_custom_git_impl(team_id, workspace_path, input, access_token).await
+    enable_custom_git_impl(team_id, workspace_path, input, access_token, team_secret_hex).await
 }
 
 // ─── set_team_secret ────────────────────────────────────────────────────
@@ -498,13 +524,13 @@ pub struct TeamSyncPaths {
 
 /// Minimal mirror of the fields we need from `~/.amuxd/workspaces.toml`.
 #[derive(Debug, Clone, Deserialize)]
-struct RegistryWorkspace {
+pub(crate) struct RegistryWorkspace {
     #[serde(default)]
-    path: String,
+    pub(crate) path: String,
     #[serde(default)]
-    display_name: String,
+    pub(crate) display_name: String,
     #[serde(default)]
-    team_id: Option<String>,
+    pub(crate) team_id: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -524,7 +550,7 @@ fn filter_team_workspaces(toml_body: &str, team_id: &str) -> Vec<RegistryWorkspa
         .collect()
 }
 
-fn load_team_workspaces(team_id: &str) -> Vec<RegistryWorkspace> {
+pub(crate) fn load_team_workspaces(team_id: &str) -> Vec<RegistryWorkspace> {
     let Some(path) = dirs::home_dir().map(|h| h.join(".amuxd").join("workspaces.toml")) else {
         return vec![];
     };

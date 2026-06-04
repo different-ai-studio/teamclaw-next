@@ -207,6 +207,20 @@ export function createSupabaseBusinessRepository(options) {
       };
     },
 
+    async disableShareMode(teamId) {
+      const { data, error } = await supabase.rpc("disable_team_share", {
+        p_team_id: teamId,
+      });
+      if (error) throw error;
+      if (data) requiredRow(data, "teams.disableShareMode");
+      return {
+        mode: null,
+        enabledAt: null,
+        gitRemoteUrl: null,
+        gitAuthKind: null,
+      };
+    },
+
     async setupLiteLlm(teamId) {
       // Lazy import keeps the LiteLLM client out of cold-path repo constructors
       // and makes it trivial to inject in tests via options.provisionLiteLlm.

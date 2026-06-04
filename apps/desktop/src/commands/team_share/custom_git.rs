@@ -81,3 +81,10 @@ pub fn load_credential(
         .to_string();
     Ok((kind, value))
 }
+
+/// Remove a stored Git credential (best-effort during local disconnect).
+pub fn delete_credential(workspace_path: &str, credential_ref: &str) -> Result<(), String> {
+    let mut blob = env_vars::read_env_blob(workspace_path)?;
+    blob.remove(&key_for(credential_ref));
+    env_vars::write_env_blob(&blob)
+}

@@ -67,6 +67,26 @@ pub fn ensure_initialized(team_id: &str) -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
+/// True when `dir` is missing, totally empty, or only holds empty scaffold dirs
+/// from [`ensure_initialized`] (no `.git`, no user content). Safe to remove before
+/// the first `git clone`.
+pub fn is_scaffold_only(dir: &Path) -> bool {
+    match std::fs::read_dir(dir) {
+        Ok(entries) => entries.into_iter().all(|e| {
+            e.ok()
+                .map(|e| {
+                    let p = e.path();
+                    p.is_dir()
+                        && std::fs::read_dir(&p)
+                            .map(|mut r| r.next().is_none())
+                            .unwrap_or(false)
+                })
+                .unwrap_or(false)
+        }),
+        Err(_) => true,
+    }
+}
+
 /// Serializes tests that mutate the process-global `HOME` env var (which
 /// `config_dir()` reads). Shared across config submodule tests so HOME-based
 /// path assertions don't race. Test-only.

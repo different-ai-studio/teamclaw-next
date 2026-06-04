@@ -814,12 +814,7 @@ pub fn workspace_read_team_meta(workspace_path: String) -> Result<Option<TeamMet
 /// No-op when the directory doesn't exist.
 #[tauri::command]
 pub fn workspace_delete_team_repo(workspace_path: String) -> Result<(), String> {
-    let team_dir = Path::new(&workspace_path).join(TEAM_REPO_DIR);
-    if !team_dir.exists() {
-        return Ok(());
-    }
-    std::fs::remove_dir_all(&team_dir)
-        .map_err(|e| format!("Failed to remove {}: {}", team_dir.display(), e))
+    crate::commands::team_share::disconnect::remove_workspace_team_repo_entry(&workspace_path)
 }
 
 /// Update LLM config for an existing team.

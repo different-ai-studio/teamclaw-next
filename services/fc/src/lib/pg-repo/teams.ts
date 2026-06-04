@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import { teams, teamWorkspaceConfig, actors, members, teamMembers, teamInvites } from "../../db/schema/index.js";
 import { workspaces } from "../../db/schema/workspaces.js";
@@ -66,6 +66,42 @@ export function makeTeamsRepo(db: PgDatabase<any, any>, deps: TeamsRepoDeps = {}
         throw new ApiError(409, "conflict", "share_mode already locked");
       }
       return { id: r.id, shareMode: r.shareMode, shareEnabledAt: iso(r.shareEnabledAt), gitRemoteUrl: r.gitRemoteUrl ?? null, gitAuthKind: r.gitAuthKind ?? null };
+    },
+    async disableShareMode(teamId: string) {
+      const [exists] = await db
+        .select({ id: teams.id, shareMode: teams.shareMode })
+        .from(teams)
+        .where(eq(teams.id, teamId))
+        .limit(1);
+      if (!exists) throw new ApiError(404, "not_found", "team not found");
+
+      await db.execute(sql`select set_config('app.allow_share_mode_reset', 'on', true)`);
+      const [r] = await (db.update(teams) as any)
+        .set({
+          shareMode: null,
+          shareEnabledAt: null,
+          gitRemoteUrl: null,
+          gitAuthKind: null,
+          gitCredentialRef: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(teams.id, teamId))
+        .returning();
+      if (!r) throw new ApiError(404, "not_found", "team not found");
+
+      await db.execute(sql`select set_config('app.allow_sync_mode_switch', 'on', true)`);
+      await (db.update(teamWorkspaceConfig) as any)
+        .set({ syncMode: null, updatedAt: new Date() })
+        .where(eq(teamWorkspaceConfig.teamId, teamId));
+      await db.execute(sql`select set_config('app.allow_sync_mode_switch', 'off', true)`);
+      await db.execute(sql`select set_config('app.allow_share_mode_reset', 'off', true)`);
+
+      return {
+        mode: null,
+        enabledAt: null,
+        gitRemoteUrl: null,
+        gitAuthKind: null,
+      };
     },
     async getTeamWorkspaceConfig(teamId: string) {
       const [r] = await db.select().from(teamWorkspaceConfig).where(eq(teamWorkspaceConfig.teamId, teamId)).limit(1);
