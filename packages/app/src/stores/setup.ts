@@ -23,9 +23,12 @@ type SetupState = {
   errors: Record<string, string>
   loaded: boolean
   listRequirements: () => Promise<void>
-  install: (id: string) => Promise<void>
+  install: (id: string, opts?: { minDurationMs?: number }) => Promise<void>
   requiredSatisfied: () => boolean
 }
+
+/** Resolve after `ms`, used to keep a fast install's loading state visible. */
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 export const useSetupStore = create<SetupState>((set, get) => ({
   requirements: [],
@@ -47,11 +50,25 @@ export const useSetupStore = create<SetupState>((set, get) => ({
     set({ requirements, loaded: true })
   },
 
-  install: async (id: string) => {
-    if (!isTauri()) return
+  install: async (id: string, opts?: { minDurationMs?: number }) => {
+    const minDurationMs = opts?.minDurationMs ?? 0
+    if (!isTauri()) {
+      // Browser/dev preview: no real install, but still honor the minimum
+      // duration so the loading effect (e.g. amuxd auto-install) is visible.
+      if (minDurationMs > 0) {
+        set((s) => ({ installing: id, errors: { ...s.errors, [id]: '' } }))
+        await delay(minDurationMs)
+        set((s) => ({
+          installing: null,
+          requirements: s.requirements.map((r) => (r.id === id ? { ...r, present: true } : r)),
+        }))
+      }
+      return
+    }
     const { invoke } = await import('@tauri-apps/api/core')
     const { listen } = await import('@tauri-apps/api/event')
-    set({ installing: id })
+    // Clear any prior error for this id so a retry starts clean.
+    set((s) => ({ installing: id, errors: { ...s.errors, [id]: '' } }))
     // Listener lives only for this install and is removed in finally. The wizard
     // is modal/non-dismissible during install, so unmount-mid-install is not a
     // concern; applyProgress writes to the singleton store regardless.
@@ -59,9 +76,17 @@ export const useSetupStore = create<SetupState>((set, get) => ({
       applyProgress(event.payload)
     })
     try {
-      await invoke('setup_install', { id })
-      const requirements = await invoke<RequirementStatus[]>('setup_list_requirements')
-      set({ requirements })
+      // Run the real install and the minimum-duration timer concurrently so a
+      // near-instant install (e.g. amuxd copy) still shows ~minDurationMs of
+      // loading without padding genuinely slow installs.
+      await Promise.all([
+        (async () => {
+          await invoke('setup_install', { id })
+          const requirements = await invoke<RequirementStatus[]>('setup_list_requirements')
+          set({ requirements })
+        })(),
+        minDurationMs > 0 ? delay(minDurationMs) : Promise.resolve(),
+      ])
     } catch (e) {
       set((s) => ({ errors: { ...s.errors, [id]: String(e) } }))
     } finally {
