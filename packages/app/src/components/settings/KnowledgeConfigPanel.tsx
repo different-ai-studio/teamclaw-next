@@ -155,7 +155,7 @@ export const KnowledgeConfigPanel = React.memo(function KnowledgeConfigPanel() {
                   />
                 </FormField>
 
-                <FormField label="Top K" htmlFor="auto-inject-top-k">
+                <FormField label={t('settings.knowledge.config.autoInject.topK', 'Top K')} htmlFor="auto-inject-top-k">
                   <Input
                     id="auto-inject-top-k"
                     type="number"
@@ -232,7 +232,7 @@ export const KnowledgeConfigPanel = React.memo(function KnowledgeConfigPanel() {
             </FormField>
           </div>
 
-          <FormField label="Base URL" htmlFor="embedding-base-url">
+          <FormField label={t('settings.knowledge.config.embedding.baseUrl', 'Base URL')} htmlFor="embedding-base-url">
             <Input
               id="embedding-base-url"
               value={localConfig.embeddingBaseUrl}
@@ -242,7 +242,7 @@ export const KnowledgeConfigPanel = React.memo(function KnowledgeConfigPanel() {
           </FormField>
 
           <div className="grid grid-cols-2 gap-4">
-            <FormField label="API Key" htmlFor="embedding-api-key">
+            <FormField label={t('settings.knowledge.config.embedding.apiKey', 'API Key')} htmlFor="embedding-api-key">
               <Input
                 id="embedding-api-key"
                 type="password"
@@ -393,7 +393,7 @@ export const KnowledgeConfigPanel = React.memo(function KnowledgeConfigPanel() {
                 </div>
 
                 {localConfig.rerankProvider !== 'jina' && (
-                  <FormField label="Rerank Base URL" htmlFor="rerank-base-url">
+                  <FormField label={t('settings.knowledge.config.advanced.rerankBaseUrl', 'Rerank Base URL')} htmlFor="rerank-base-url">
                     <Input
                       id="rerank-base-url"
                       value={localConfig.rerankBaseUrl}
@@ -404,18 +404,18 @@ export const KnowledgeConfigPanel = React.memo(function KnowledgeConfigPanel() {
                 )}
 
                 <div className="grid grid-cols-2 gap-4">
-                  <FormField label="Rerank API Key" htmlFor="rerank-api-key">
+                  <FormField label={t('settings.knowledge.config.advanced.rerankApiKey', 'Rerank API Key')} htmlFor="rerank-api-key">
                     <Input
                       id="rerank-api-key"
                       type="password"
                       value={localConfig.rerankApiKey || ''}
                       onChange={(e) => updateConfig({ rerankApiKey: e.target.value || undefined })}
-                      placeholder="API Key"
+                      placeholder={t('settings.knowledge.config.advanced.rerankApiKeyPlaceholder', 'API Key')}
                     />
                   </FormField>
 
                   <FormField
-                    label="Rerank Top K"
+                    label={t('settings.knowledge.config.advanced.rerankTopK', 'Rerank Top K')}
                     description={t('settings.knowledge.config.advanced.rerankTopKDesc')}
                     htmlFor="rerank-top-k"
                   >

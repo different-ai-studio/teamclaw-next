@@ -150,7 +150,7 @@ export function PermissionDialog({ permission: permEvent, onReply }: PermissionD
           className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-3 right-3 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none"
         >
           <XIcon className="h-4 w-4" />
-          <span className="sr-only">Close</span>
+          <span className="sr-only">{t('common.close', 'Close')}</span>
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>
       </DialogPortal>

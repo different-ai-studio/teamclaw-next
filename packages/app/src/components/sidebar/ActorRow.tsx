@@ -71,7 +71,7 @@ export function ActorRow({
           />
         )}
         {isAgent && (
-          <span className="shrink-0 font-mono text-[9px] font-semibold tracking-wider text-coral">Agent</span>
+          <span className="shrink-0 font-mono text-[9px] font-semibold tracking-wider text-coral">{t('actors.type.agent', 'Agent')}</span>
         )}
       </button>
     </ActorContextMenu>

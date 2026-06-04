@@ -2,6 +2,11 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { useTabsStore } from "@/stores/tabs";
 import { TabBar } from "@/components/tab-bar/TabBar";
+import i18n from "@/lib/i18n";
+
+// Resolve the close-button accessible name through i18n so the query is
+// language-agnostic (the test env initializes i18n in zh-CN).
+const closeName = () => i18n.t("tabBar.closeAria");
 
 describe("TabBar", () => {
   beforeEach(() => {
@@ -38,7 +43,7 @@ describe("TabBar", () => {
   it("each tab has a close button", () => {
     useTabsStore.getState().openTab({ type: "file", target: "/a.ts", label: "a.ts" });
     render(<TabBar />);
-    const closeButtons = screen.getAllByRole("button", { name: /close/i });
+    const closeButtons = screen.getAllByRole("button", { name: closeName() });
     expect(closeButtons).toHaveLength(1);
   });
 
@@ -57,7 +62,7 @@ describe("TabBar", () => {
   it("clicking close button removes tab", () => {
     useTabsStore.getState().openTab({ type: "file", target: "/a.ts", label: "a.ts" });
     render(<TabBar />);
-    const closeBtn = screen.getByRole("button", { name: /close/i });
+    const closeBtn = screen.getByRole("button", { name: closeName() });
     fireEvent.click(closeBtn);
     expect(useTabsStore.getState().tabs).toHaveLength(0);
   });

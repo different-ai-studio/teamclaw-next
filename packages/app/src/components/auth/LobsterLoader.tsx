@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 interface LobsterLoaderProps {
@@ -6,10 +7,11 @@ interface LobsterLoaderProps {
 }
 
 export function LobsterLoader({ size = 28, className }: LobsterLoaderProps) {
+  const { t } = useTranslation();
   return (
     <span
       role="status"
-      aria-label="Loading"
+      aria-label={t('common.loading', 'Loading')}
       className={cn("relative inline-block shrink-0", className)}
       style={{ width: size, height: size }}
     >

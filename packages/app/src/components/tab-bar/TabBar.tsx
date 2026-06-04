@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { useTabsStore, Tab } from "@/stores/tabs";
 import { cn } from "@/lib/utils";
 import { X, Code, Globe, LayoutDashboard, FileText, Image } from "lucide-react";
@@ -26,6 +27,7 @@ interface ContextMenuState {
 }
 
 export function TabBar() {
+  const { t } = useTranslation();
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const setActiveTab = useTabsStore((s) => s.setActiveTab);
@@ -108,7 +110,7 @@ export function TabBar() {
               <span className="w-2 h-2 rounded-full bg-primary shrink-0" data-dirty="true" />
             )}
             <button
-              aria-label="close"
+              aria-label={t('tabBar.closeAria', 'Close tab')}
               className={cn(
                 "ml-auto p-0.5 rounded hover:bg-muted shrink-0",
                 isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100",
