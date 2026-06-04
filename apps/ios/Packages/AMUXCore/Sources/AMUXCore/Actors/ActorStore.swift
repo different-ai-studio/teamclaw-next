@@ -117,4 +117,31 @@ public final class ActorStore {
             return nil
         }
     }
+
+    /// The current member's default agent id for this team (nil if unset or on error).
+    public func getMemberDefaultAgent() async -> String? {
+        do {
+            let id = try await repository.getMemberDefaultAgent(teamID: teamID)
+            errorMessage = nil
+            return id
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Sets (agentID) or clears (nil) the current member's default agent.
+    /// Returns the new value on success, or nil on failure (error set on the store).
+    /// The Bool out-param distinguishes a successful clear (nil value) from a failure.
+    @discardableResult
+    public func setMemberDefaultAgent(agentID: String?) async -> (ok: Bool, value: String?) {
+        do {
+            let value = try await repository.setMemberDefaultAgent(teamID: teamID, agentID: agentID)
+            errorMessage = nil
+            return (true, value)
+        } catch {
+            errorMessage = error.localizedDescription
+            return (false, nil)
+        }
+    }
 }

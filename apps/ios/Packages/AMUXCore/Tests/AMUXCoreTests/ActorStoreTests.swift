@@ -210,4 +210,14 @@ private actor MockActorRepository: ActorRepository {
             defaultAgentType: defaultAgentType
         )
     }
+    var memberDefaultAgentID: String?
+    func getMemberDefaultAgent(teamID: String) async throws -> String? {
+        if let e = nextError { nextError = nil; throw e }
+        return memberDefaultAgentID
+    }
+    func setMemberDefaultAgent(teamID: String, agentID: String?) async throws -> String? {
+        if let e = nextError { nextError = nil; throw e }
+        memberDefaultAgentID = agentID
+        return agentID
+    }
 }

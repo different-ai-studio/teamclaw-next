@@ -105,4 +105,8 @@ public protocol ActorRepository: Sendable {
     func updateCurrentActorProfile(actorID: String, displayName: String, avatarURL: String?) async throws -> ActorRecord
     func updateAgentDefaults(actorID: String, defaultWorkspaceID: String?, agentKind: String?,
                              defaultAgentType: String?) async throws -> AgentDefaults
+    /// The calling member's default agent id for a team (nil if unset).
+    func getMemberDefaultAgent(teamID: String) async throws -> String?
+    /// Set (agentID) or clear (nil) the calling member's default agent. Returns the new value.
+    func setMemberDefaultAgent(teamID: String, agentID: String?) async throws -> String?
 }

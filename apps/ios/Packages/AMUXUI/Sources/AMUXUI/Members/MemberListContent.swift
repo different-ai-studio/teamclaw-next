@@ -459,6 +459,10 @@ struct ActorDetailView: View {
     @State private var autoApprovedOverrides: [String: Bool] = [:]
     @State private var isSavingDefaults = false
     @State private var defaultsErrorMessage: String?
+    @State private var myDefaultAgentID: String?
+    @State private var didLoadMyDefault = false
+    @State private var isSavingMyDefault = false
+    @State private var myDefaultErrorMessage: String?
 
     /// Routing actor id for the agent being viewed (== its id) — only meaningful when
     /// `actor` is itself an agent. Empty for humans (where workspace
@@ -570,6 +574,7 @@ struct ActorDetailView: View {
                 }
             }
             if actor.isAgent {
+                myDefaultSection
                 defaultsSection
                 Section("Workspaces") {
                     Group {
@@ -744,6 +749,11 @@ struct ActorDetailView: View {
                 workspaceStore = store
                 await store.reload(agentID: actor.actorId)
             }
+        }
+        .task {
+            guard actor.isAgent, !didLoadMyDefault else { return }
+            didLoadMyDefault = true
+            myDefaultAgentID = await store.getMemberDefaultAgent()
         }
         .sheet(isPresented: $showInviteSheet) {
             if let createdInvite {
@@ -1136,6 +1146,73 @@ struct ActorDetailView: View {
             get: { autoApprovedOverrides[row.name] ?? row.defaultOn },
             set: { autoApprovedOverrides[row.name] = $0 }
         )
+    }
+
+    // MARK: - My default agent
+    //
+    // Per-viewer preference (members.default_agent_id): whether *this* agent is
+    // the signed-in member's personal default, with a toggle to set/clear it.
+    // Distinct from the agent-owned `defaultsSection` below.
+
+    private var isMyDefaultAgent: Bool {
+        actor.isAgent && myDefaultAgentID == actor.actorId
+    }
+
+    @ViewBuilder
+    private var myDefaultSection: some View {
+        Section {
+            Group {
+                HStack(spacing: 10) {
+                    Image(systemName: isMyDefaultAgent ? "star.fill" : "star")
+                        .foregroundStyle(isMyDefaultAgent ? Color.amux.cinnabar : Color.amux.slate)
+                    Text(isMyDefaultAgent ? "Your default agent" : "Not your default")
+                        .foregroundStyle(Color.amux.basalt)
+                    Spacer()
+                    if isSavingMyDefault {
+                        ProgressView().controlSize(.small)
+                    } else if isMyDefaultAgent {
+                        Button("Remove") { saveMyDefault(makeDefault: false) }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Color.amux.slate)
+                    } else {
+                        Button("Set as default") { saveMyDefault(makeDefault: true) }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Color.amux.basalt)
+                    }
+                }
+
+                if let myDefaultErrorMessage {
+                    Text(myDefaultErrorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(Color.amux.cinnabarDeep)
+                }
+            }
+            .listRowBackground(Color.amux.paper)
+        } header: {
+            Text("My Default")
+        } footer: {
+            Text("Your personal default agent — pre-selected when you start a new session.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func saveMyDefault(makeDefault: Bool) {
+        guard !isSavingMyDefault else { return }
+        isSavingMyDefault = true
+        myDefaultErrorMessage = nil
+        let target: String? = makeDefault ? actor.actorId : nil
+        Task {
+            let result = await store.setMemberDefaultAgent(agentID: target)
+            await MainActor.run {
+                isSavingMyDefault = false
+                if result.ok {
+                    myDefaultAgentID = result.value
+                } else {
+                    myDefaultErrorMessage = store.errorMessage ?? "Failed to update default agent."
+                }
+            }
+        }
     }
 
     // MARK: - Defaults section

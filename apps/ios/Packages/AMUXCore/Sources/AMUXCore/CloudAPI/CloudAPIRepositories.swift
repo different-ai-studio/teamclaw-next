@@ -362,6 +362,20 @@ public actor CloudAPIActorRepository: ActorRepository {
         )
     }
 
+    public func getMemberDefaultAgent(teamID: String) async throws -> String? {
+        let row: CloudMemberDefaultAgent = try await client.get(
+            "/v1/teams/\(Self.enc(teamID))/members/me/default-agent"
+        )
+        return row.defaultAgentId
+    }
+
+    public func setMemberDefaultAgent(teamID: String, agentID: String?) async throws -> String? {
+        let body = CloudSetMemberDefaultAgentRequest(agentId: agentID)
+        // FC echoes the new value; mirror updateAgentDefaults and return what we sent.
+        try await client.putVoid("/v1/teams/\(Self.enc(teamID))/members/me/default-agent", body: body)
+        return agentID
+    }
+
     private static func enc(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
     }
@@ -799,6 +813,14 @@ private struct CloudUpdateAgentDefaultsRequest: Encodable, Sendable {
     let defaultWorkspaceId: String?
     let agentKind: String?
     let defaultAgentType: String?
+}
+
+private struct CloudMemberDefaultAgent: Decodable, Sendable {
+    let defaultAgentId: String?
+}
+
+private struct CloudSetMemberDefaultAgentRequest: Encodable, Sendable {
+    let agentId: String?
 }
 
 private struct CloudConnectedAgent: Decodable, Sendable {
