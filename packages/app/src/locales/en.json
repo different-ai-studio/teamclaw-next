@@ -159,6 +159,10 @@
     "messagesQueued": "{{count}} messages queued",
     "showMore": "Show more",
     "showLess": "Show less",
+    "streamingBar": {
+      "streaming": "Streaming…",
+      "waitingApproval": "Waiting for your approval…"
+    },
     "permissionCard": {
       "requestExecuteCommand": "requests to execute a command",
       "requestWriteFile": "requests to write a file",
@@ -172,6 +176,9 @@
       "childSessionWaitingApproval": "A child session is waiting for your approval",
       "toolInvocationWaitingApproval": "A tool call is waiting for your approval",
       "pendingCount": "{{count}} pending",
+      "waitingBadge": "Waiting for approval",
+      "queuePosition": "{{current}} / {{total}}",
+      "approvalSectionAria": "Permission approval",
       "approve": "Allow"
     },
     "todo": {

@@ -20,6 +20,86 @@ import type { ToolCall } from "@/stores/session";
 
 export type ToolCallLike = Pick<ToolCall, "name" | "toolKind" | "arguments">;
 
+function stringParam(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+/** Flatten tool arguments into string params for wire-name inference. */
+export function paramsFromToolArguments(
+  args: Record<string, unknown> | undefined,
+): Record<string, string> {
+  if (!args) return {};
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(args)) {
+    const s = stringParam(value);
+    if (s) out[key] = s;
+  }
+  return out;
+}
+
+/**
+ * Resolve canonical tool route id from ACP kind + daemon wire name + params.
+ * Skill/role_load use ToolKind::Other on the wire (`tool_name: "other"`); the
+ * human ACP title is copied into params.description (e.g. "skill").
+ */
+export function resolveWireToolName(
+  toolKind: string | undefined,
+  wireName: string,
+  params: Record<string, string> = {},
+): string {
+  const fromKind = toolNameFromKind(toolKind);
+  if (fromKind) return fromKind;
+
+  const normalized = wireName.trim().toLowerCase();
+  if (normalized && normalized !== "other" && normalized !== "unknown") {
+    return normalized;
+  }
+
+  const hint = (params.description ?? params._description ?? "").trim().toLowerCase();
+  if (
+    hint === "skill" ||
+    hint === "role_skill" ||
+    hint === "role_load" ||
+    hint === "task" ||
+    hint === "question"
+  ) {
+    return hint;
+  }
+  if (hint.includes("role_load")) return "role_load";
+  if (hint.includes("role_skill")) return "role_skill";
+
+  if (params.subagent_type || params.task_id) return "task";
+  if (params.todos) return "todo_write";
+  if (params.questions) return "question";
+  if (params.role !== undefined && params.name) return "role_load";
+
+  if (
+    params.name &&
+    !params.command &&
+    !params.path &&
+    !params.pattern &&
+    !params.query &&
+    !params.url
+  ) {
+    return "skill";
+  }
+
+  return normalized || "unknown";
+}
+
+export function resolvedToolName(toolCall: ToolCallLike): string {
+  return resolveWireToolName(
+    toolCall.toolKind,
+    toolCall.name,
+    paramsFromToolArguments(toolCall.arguments as Record<string, unknown> | undefined),
+  );
+}
+
+export function skillNameFromToolCall(toolCall: ToolCallLike): string | undefined {
+  const args = toolCall.arguments as { name?: unknown } | undefined;
+  return stringParam(args?.name);
+}
+
 /** ACP `tool_kind` → canonical UI route id (matches daemon `kind_to_canonical_name`). */
 export function toolNameFromKind(toolKind?: string): string {
   switch (toolKind) {
@@ -85,15 +165,15 @@ export function matchesTaskTool(toolCall: ToolCallLike): boolean {
 }
 
 export function matchesSkillTool(toolCall: ToolCallLike): boolean {
-  return isSkillTool(toolCall.name);
+  return isSkillTool(resolvedToolName(toolCall));
 }
 
 export function matchesRoleSkillTool(toolCall: ToolCallLike): boolean {
-  return isRoleSkillTool(toolCall.name);
+  return isRoleSkillTool(resolvedToolName(toolCall));
 }
 
 export function matchesRoleLoadTool(toolCall: ToolCallLike): boolean {
-  return isRoleLoadTool(toolCall.name);
+  return isRoleLoadTool(resolvedToolName(toolCall));
 }
 
 export function matchesQuestionTool(toolCall: ToolCallLike): boolean {
@@ -103,7 +183,7 @@ export function matchesQuestionTool(toolCall: ToolCallLike): boolean {
 }
 
 export function displayToolName(toolCall: ToolCallLike): string {
-  return toolNameFromKind(toolCall.toolKind) || toolCall.name;
+  return resolvedToolName(toolCall);
 }
 
 type TranslateFn = (

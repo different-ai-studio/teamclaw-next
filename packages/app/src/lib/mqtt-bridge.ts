@@ -30,6 +30,10 @@ export async function mqttSubscribe(topic: string): Promise<void> {
   await invoke("mqtt_subscribe", { topic });
 }
 
+export async function mqttUnsubscribe(topic: string): Promise<void> {
+  await invoke("mqtt_unsubscribe", { topic });
+}
+
 export async function mqttPublish(topic: string, bytes: Uint8Array, retain = false): Promise<void> {
   await invoke("mqtt_publish", {
     topic,

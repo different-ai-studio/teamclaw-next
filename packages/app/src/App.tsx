@@ -901,6 +901,18 @@ function AppContent() {
           if (!decoded) return;
           const sid = sessionIdFromLiveEvent(decoded, env.topic) ?? "";
 
+          if (
+            sid &&
+            env.topic.includes("/session/") &&
+            !rememberLiveEventId(
+              seenLiveEventIdsRef.current,
+              sid,
+              decoded.envelope.eventId,
+            )
+          ) {
+            return;
+          }
+
           if (env.topic.includes("/session/") && env.topic.endsWith("/live")) {
             const mentionActorIds =
               decoded.envelope.eventType === "message.created"
@@ -931,17 +943,6 @@ function AppContent() {
           }
 
           if (!sid) return;
-
-          if (
-            env.topic.includes("/session/") &&
-            !rememberLiveEventId(
-              seenLiveEventIdsRef.current,
-              sid,
-              decoded.envelope.eventId,
-            )
-          ) {
-            return;
-          }
 
           if (
             decoded.envelope.eventType === "session_participant.created" ||
@@ -1118,7 +1119,7 @@ function AppContent() {
               // Capture skill invocations for local stats + cloud leaderboard.
               // tu.toolName is "skill" for Skill tool calls; tu.params.name is
               // the skill slug (e.g. "sentry-fix").
-              if (tu.toolName.toLowerCase() === "skill" && tu.params?.name) {
+              if (tu.toolName === "skill" && tu.params?.name) {
                 const wp = useWorkspaceStore.getState().workspacePath;
                 if (wp) {
                   void useLocalStatsStore.getState().incrementSkillUsage(wp, tu.params.name);

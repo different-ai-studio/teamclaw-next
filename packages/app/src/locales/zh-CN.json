@@ -159,6 +159,10 @@
     "messagesQueued": "{{count}} 条消息排队中",
     "showMore": "展开全文",
     "showLess": "收起",
+    "streamingBar": {
+      "streaming": "正在输出…",
+      "waitingApproval": "等待你审批后继续…"
+    },
     "permissionCard": {
       "requestExecuteCommand": "请求执行命令",
       "requestWriteFile": "请求写入文件",
@@ -172,6 +176,9 @@
       "childSessionWaitingApproval": "子会话正在等待你的审批",
       "toolInvocationWaitingApproval": "工具调用正在等待你的审批",
       "pendingCount": "{{count}} 个待处理",
+      "waitingBadge": "等待审批",
+      "queuePosition": "第 {{current}} / {{total}} 条",
+      "approvalSectionAria": "权限审批",
       "approve": "允许"
     },
     "todo": {

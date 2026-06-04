@@ -331,6 +331,7 @@ pub fn run() {
             commands::window::set_window_title,
             commands::mqtt_bus::mqtt_connect,
             commands::mqtt_bus::mqtt_subscribe,
+            commands::mqtt_bus::mqtt_unsubscribe,
             commands::mqtt_bus::mqtt_publish,
             commands::mqtt_bus::mqtt_status,
             commands::server_config::get_server_config,

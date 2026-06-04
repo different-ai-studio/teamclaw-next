@@ -4,7 +4,7 @@ import {
   pickCanonicalAgentReplyText,
 } from "@/lib/agent-reply-text";
 import type { MessagePart, ToolCall } from "@/stores/session-types";
-import { toolNameFromKind } from "@/components/chat/tool-calls/tool-call-utils";
+import { resolveWireToolName } from "@/components/chat/tool-calls/tool-call-utils";
 
 export interface StreamingPlanEntry {
   content: string;
@@ -429,11 +429,11 @@ function mergeToolUse(
   },
 ): ToolCall {
   const nextArgs = toolUseArguments(args.params, args.description);
-  const kindName = toolNameFromKind(args.toolKind ?? existing.toolKind);
-  const name =
-    kindName ||
-    existing.name ||
-    (args.toolName && args.toolName !== "unknown" ? args.toolName : "unknown");
+  const name = resolveWireToolName(
+    args.toolKind ?? existing.toolKind,
+    args.toolName || existing.name || "unknown",
+    args.params,
+  );
   return {
     ...existing,
     name,
@@ -616,7 +616,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     }
     const newToolCall: ToolCall = {
       id: toolId,
-      name: toolNameFromKind(toolKind) || toolName || "unknown",
+      name: resolveWireToolName(toolKind, toolName || "unknown", params),
       toolKind: toolKind || undefined,
       status: "calling",
       arguments: toolUseArguments(params, description),

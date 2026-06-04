@@ -29,9 +29,9 @@ import type { EngagedAgentUiEntry } from "@/hooks/use-engaged-agent-ui-states";
 import { allEngagedNonReady } from "@/hooks/use-engaged-agent-ui-states";
 import { useOfflineSendPreferenceStore } from "@/stores/offline-send-preference-store";
 import {
-  StreamingAgentsBar,
+  StreamingAgentsDock,
   type ActiveStreamingAgent,
-} from "./StreamingAgentsBar";
+} from "./StreamingAgentsDock";
 import { CommandPopover } from "./CommandPopover";
 import type { Command as ChatCommand } from "./CommandPopover";
 import { FileInputButton } from "./FileInputButton";
@@ -355,7 +355,7 @@ export function ChatInputArea({
       <div className={cn("relative w-full", compact ? "" : "mx-auto max-w-3xl")}>
         {/* Permission & Error UI (rendered above input so it's visible) */}
         {onInterruptAgent ? (
-          <StreamingAgentsBar
+          <StreamingAgentsDock
             agents={activeStreamingAgents}
             onInterrupt={onInterruptAgent}
           />

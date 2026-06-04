@@ -50,7 +50,7 @@ import { toMentionDeliverySnapshot } from "@/lib/session-agent-ui-state";
 import { getFileName } from "./utils/fileUtils";
 import { MessageList, type MessageListHandle } from "./MessageList";
 import { SessionErrorAlert } from "./SessionErrorAlert";
-import { PendingPermissionInline, hasVisiblePendingPermissions } from "./PermissionCard";
+import { hasVisiblePendingPermissions } from "./PermissionCard";
 import { collectAcpStreamingPermissions } from "@/lib/teamclaw/acp-permission-entries";
 import { useSessionPermissionMode } from "@/lib/session-permission-mode";
 import {
@@ -2083,7 +2083,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
                     variant="inline"
                   />
                 ) : null}
-                <PendingPermissionInline />
               </>
             }
           />

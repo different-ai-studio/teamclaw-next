@@ -10,7 +10,10 @@
 
 import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
 import { MessageKind } from "@/lib/proto/teamclaw_pb";
-import { toolNameFromKind } from "@/components/chat/tool-calls/tool-call-utils";
+import {
+  paramsFromToolArguments,
+  resolveWireToolName,
+} from "@/components/chat/tool-calls/tool-call-utils";
 import type {
   Message as SdkMessage,
   MessagePart,
@@ -225,9 +228,13 @@ function buildTurnSdkMessage(group: TeamclawMessage[]): SdkMessage {
       ...paramsFromMetadataParams(md.params),
     };
     const match = toolId ? resultByToolId.get(toolId) : undefined;
+    const resolveParams = {
+      ...paramsFromToolArguments(args),
+      ...(description && !args.description ? { description } : {}),
+    };
     return {
       id: toolId || tc.messageId,
-      name: toolNameFromKind(toolKind) || toolNameRaw,
+      name: resolveWireToolName(toolKind, toolNameRaw, resolveParams),
       toolKind,
       status: match ? (match.success ? "completed" : "failed") : "calling",
       arguments: args,
