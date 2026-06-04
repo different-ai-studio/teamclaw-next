@@ -3,7 +3,7 @@ mod gateway;
 mod messages;
 
 use super::{
-    AgentRuntimeRow, AgentRuntimeUpsert, Backend, BackendError, BackendResult,
+    AgentDefaults, AgentRuntimeRow, AgentRuntimeUpsert, Backend, BackendError, BackendResult,
     BackendSessionAndParticipants, BootstrapMqttOverride, ClaimResult, ShareModeConfig,
     StoredMessage, WorkspaceRow, WorkspaceUpsert,
 };
@@ -884,6 +884,39 @@ impl Backend for CloudApiBackend {
         Ok(r.items)
     }
 
+    async fn get_agent_defaults(&self, agent_id: &str) -> BackendResult<AgentDefaults> {
+        #[derive(serde::Deserialize)]
+        struct Item {
+            id: String,
+            #[serde(rename = "defaultAgentType")]
+            default_agent_type: Option<String>,
+            #[serde(rename = "defaultWorkspaceId")]
+            default_workspace_id: Option<String>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            items: Vec<Item>,
+        }
+        let r: Resp = self
+            .get(&format!("/v1/runtime/agent-defaults?agentId={agent_id}"))
+            .await?;
+        // The endpoint echoes back one item per requested id; pick the one that
+        // matches (defensively — we only ever ask for our own id).
+        let item = r
+            .items
+            .into_iter()
+            .find(|i| i.id == agent_id)
+            .unwrap_or_else(|| Item {
+                id: agent_id.to_string(),
+                default_agent_type: None,
+                default_workspace_id: None,
+            });
+        Ok(AgentDefaults {
+            default_agent_type: item.default_agent_type,
+            default_workspace_id: item.default_workspace_id,
+        })
+    }
+
     async fn upsert_session_participant(
         &self,
         session_id: &str,
@@ -1593,6 +1626,51 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ids, vec!["actor-admin-1", "actor-admin-2"]);
+    }
+
+    #[tokio::test]
+    async fn get_agent_defaults_parses_type_and_workspace() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/runtime/agent-defaults"))
+            .and(wiremock::matchers::query_param("agentId", "agent-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "items": [{
+                    "id": "agent-1",
+                    "agentTypes": ["claude", "opencode"],
+                    "defaultAgentType": "opencode",
+                    "defaultWorkspaceId": "ws-uuid-1"
+                }]
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let defaults = backend.get_agent_defaults("agent-1").await.unwrap();
+        assert_eq!(defaults.default_agent_type.as_deref(), Some("opencode"));
+        assert_eq!(defaults.default_workspace_id.as_deref(), Some("ws-uuid-1"));
+    }
+
+    #[tokio::test]
+    async fn get_agent_defaults_tolerates_null_fields() {
+        let server = MockServer::start().await;
+        mount_refresh(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/runtime/agent-defaults"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "items": [{
+                    "id": "agent-1",
+                    "agentTypes": null,
+                    "defaultAgentType": null,
+                    "defaultWorkspaceId": null
+                }]
+            })))
+            .mount(&server)
+            .await;
+        let backend = CloudApiBackend::new(config(&server));
+        let defaults = backend.get_agent_defaults("agent-1").await.unwrap();
+        assert_eq!(defaults.default_agent_type, None);
+        assert_eq!(defaults.default_workspace_id, None);
     }
 
     #[tokio::test]

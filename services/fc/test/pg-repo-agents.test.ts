@@ -102,6 +102,38 @@ test("listConnectedAgents only returns agents from the specified team", async ()
   );
 });
 
+// ── listAgentDefaults ───────────────────────────────────────────────────────
+
+test("listAgentDefaults returns defaultAgentType and defaultWorkspaceId", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const member = await seedMemberActor(db, team.id);
+  const [agentActor] = await db
+    .insert(actors)
+    .values({ teamId: team.id, actorType: "agent", displayName: "Daemon" })
+    .returning();
+  const workspaceId = "11111111-1111-1111-1111-111111111111";
+  await db.insert(agents).values({
+    id: agentActor.id,
+    agentKind: "claude",
+    status: "active",
+    visibility: "team",
+    ownerMemberId: member.id,
+    agentTypes: ["claude", "opencode"],
+    defaultAgentType: "opencode",
+    defaultWorkspaceId: workspaceId,
+  });
+  const repo = createPgBusinessRepository({ db });
+
+  const rows = await repo.listAgentDefaults([agentActor.id]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, agentActor.id);
+  assert.equal(rows[0].defaultAgentType, "opencode");
+  // The amuxd daemon reads defaultWorkspaceId from this endpoint to pick the
+  // working directory for gateway (WeCom) runtimes.
+  assert.equal(rows[0].defaultWorkspaceId, workspaceId);
+});
+
 // ── checkAgentPermission ──────────────────────────────────────────────────────
 
 test("checkAgentPermission returns allowed=false + role=null when no access row", async () => {

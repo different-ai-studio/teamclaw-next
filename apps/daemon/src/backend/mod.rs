@@ -75,6 +75,19 @@ pub struct ShareModeConfig {
     pub git_auth_kind: Option<String>,
 }
 
+/// The daemon's own agent defaults, sourced from `GET /v1/runtime/agent-defaults`.
+/// The gateway path uses these to spawn the daemon's agent with its configured
+/// backend type and working directory instead of the daemon-wide fallback type
+/// and a throwaway scratch dir. All-`None` means "no override; use defaults".
+#[derive(Debug, Clone, Default)]
+pub struct AgentDefaults {
+    /// `"claude" | "opencode" | "codex"`; `None` when unset.
+    pub default_agent_type: Option<String>,
+    /// The agent's default workspace UUID (the daemon resolves it to a local
+    /// path via its `WorkspaceStore`); `None` when unset.
+    pub default_workspace_id: Option<String>,
+}
+
 #[async_trait]
 pub trait Backend: Send + Sync {
     // ── Identity ──────────────────────────────────────────────────────────
@@ -173,6 +186,14 @@ pub trait Backend: Send + Sync {
 
     /// Set `agents.default_workspace_id` for the current daemon actor.
     async fn set_agent_default_workspace(&self, workspace_id: &str) -> BackendResult<()>;
+
+    /// Fetch an agent's defaults (backend type + default workspace) from the
+    /// Cloud API. Used by the gateway path to spawn the daemon's own agent with
+    /// its configured type/workspace. Backends without an HTTP surface return
+    /// all-`None` defaults (the gateway then falls back to daemon-wide defaults).
+    async fn get_agent_defaults(&self, _agent_id: &str) -> BackendResult<AgentDefaults> {
+        Ok(AgentDefaults::default())
+    }
 
     /// Fetch a `sessions` row alongside its `session_participants`.
     async fn fetch_session_with_participants(
