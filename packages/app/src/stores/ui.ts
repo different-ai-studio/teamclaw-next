@@ -29,6 +29,8 @@ export type SidebarFilter =
   | { kind: 'idea'; ideaId: string; title: string }
   | { kind: 'workspace'; workspaceId: string | null; path: string; name: string }
 
+export type SettingsScope = 'all' | 'device'
+
 export type SettingsSection = 'llm' | 'general' | 'voice' | 'prompt' | 'mcp' | 'channels' | 'automation' | 'daemonGeneral' | 'daemonWorkspaces' | 'daemonRuntimes' | 'team' | 'envVars' | 'skills' | 'roles' | 'rolesSkills' | 'knowledge' | 'deps' | 'tokenUsage' | 'privacy' | 'permissions' | 'leaderboard' | 'shortcuts' | 'cache'
 
 interface UIState {
@@ -44,6 +46,10 @@ interface UIState {
    * share state. */
   actorSheetOpen: boolean
   settingsInitialSection: SettingsSection | null
+  /** When 'device', the Settings dialog shows only the local-agent (daemon +
+   * opencode) group — used by the local-daemon row's "Settings" entry. 'all'
+   * shows every group. */
+  settingsScope: SettingsScope
   draftPreselectedActor: DraftActor | null
   sidebarFilter: SidebarFilter
   ideasSectionCollapsed: boolean
@@ -70,7 +76,7 @@ interface UIState {
   toggleActorSheet: () => void
   selectDefaultPrimaryTab: (tab: DefaultPrimaryTab) => void
   openDefaultMoreDestination: (destination: DefaultMoreDestination) => Promise<void> | void
-  openSettings: (section?: SettingsSection) => void
+  openSettings: (section?: SettingsSection, scope?: SettingsScope) => void
   closeSettings: () => void
   setLayoutMode: (mode: LayoutMode) => void
   toggleLayoutMode: () => void
@@ -94,6 +100,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   defaultMoreOpen: false,
   actorSheetOpen: false,
   settingsInitialSection: null,
+  settingsScope: 'all',
   draftPreselectedActor: null,
   sidebarFilter: { kind: 'all' },
   ideasSectionCollapsed: false,
@@ -153,9 +160,10 @@ export const useUIStore = create<UIState>((set, get) => ({
     }
   },
 
-  openSettings: (section) => set({
+  openSettings: (section, scope = 'all') => set({
     currentView: 'settings',
     settingsInitialSection: section ?? null,
+    settingsScope: scope,
   }),
 
   closeSettings: () => set({ currentView: 'chat', settingsInitialSection: null }),
