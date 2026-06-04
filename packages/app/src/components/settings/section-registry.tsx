@@ -55,8 +55,18 @@ export function SettingsSectionBody({ section }: { section: SettingsSection }) {
   const Component = SETTINGS_SECTION_COMPONENTS[section]
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-      <ScrollArea className="h-full min-h-0 flex-1">
-        <div className="w-full max-w-[960px] p-8 pr-10">
+      {/*
+        Radix ScrollArea's Viewport wraps children in an inline-styled
+        `display:table; min-width:100%` div, which shrink-to-fits to the
+        content's max-content width. Any non-wrapping descendant (e.g. a
+        `truncate` URL = white-space:nowrap, or a long path) then forces that
+        table wider than the pane, and the outer `overflow-hidden` clips it on
+        the right. Force the viewport's inner wrapper to `display:block` so it
+        respects the pane width and our `max-w-[960px]` content wraps/truncates
+        instead of overflowing. Scoped to this ScrollArea via its data-slot.
+      */}
+      <ScrollArea className="h-full min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
+        <div className="w-full min-w-0 max-w-[960px] p-8 pr-10">
           {React.createElement(Component)}
         </div>
       </ScrollArea>

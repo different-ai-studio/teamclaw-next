@@ -117,7 +117,7 @@ describe('TeamGitConfig status panel', () => {
     expect(await screen.findByText('Managed Git')).toBeTruthy()
     expect(screen.getByText('https://example.com/repo.git')).toBeTruthy()
     expect(screen.getByText('Sync Now')).toBeTruthy()
-    expect(screen.getByText('Shared Content')).toBeTruthy()
+    expect(screen.getByText('How to set up a team repository')).toBeTruthy()
     // Legacy local-config commands are never called.
     expect(mockInvoke).not.toHaveBeenCalledWith('get_team_config', expect.anything())
     expect(mockInvoke).not.toHaveBeenCalledWith('save_team_config', expect.anything())

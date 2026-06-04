@@ -23,7 +23,6 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Users,
-  GitBranch,
   AlertCircle,
   RefreshCw,
   CheckCircle2,
@@ -230,33 +229,6 @@ export function TeamGitConfig() {
 
       {/* Real sync directory + every workspace symlink (all 3 share modes) */}
       <TeamSyncPaths teamId={teamId} workspacePath={workspacePath} />
-
-      {/* Shared Layer Info */}
-      <SettingCard className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
-        <div className="space-y-3">
-          <h4 className="font-medium text-blue-900 dark:text-blue-100 flex items-center gap-2">
-            <GitBranch className="h-4 w-4" />
-            {t('settings.team.sharedContent', 'Shared Content')}
-          </h4>
-          <p className="text-[13px] text-blue-700 dark:text-blue-300">
-            {t('settings.team.sharedContentDesc', 'The following directories are synced from the team repository:')}
-          </p>
-          <div className="space-y-1.5">
-            {[
-              { path: 'skills/', desc: t('settings.team.sharedSkills', 'Shared AI skills') },
-              { path: '.mcp/', desc: t('settings.team.sharedMcp', 'Shared MCP server configs') },
-              { path: 'knowledge/', desc: t('settings.team.sharedKnowledge', 'Shared knowledge base') },
-            ].map((item) => (
-              <div key={item.path} className="flex items-center gap-2 text-[13px]">
-                <span className="font-mono text-xs bg-blue-100 dark:bg-blue-900/50 px-2 py-0.5 rounded text-blue-800 dark:text-blue-200">
-                  {item.path}
-                </span>
-                <span className="text-blue-600 dark:text-blue-400 text-xs">{item.desc}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </SettingCard>
 
       {/* Repo setup guide */}
       <Collapsible open={repoGuideOpen} onOpenChange={setRepoGuideOpen}>
