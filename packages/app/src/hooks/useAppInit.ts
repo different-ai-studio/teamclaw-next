@@ -105,11 +105,35 @@ export function useWorkspaceInit() {
             }
 
             if (!restored) {
-              // No saved workspace — leave workspacePath null so <WorkspacePrompt />
-              // forces the user to pick one before entering the app. Previously
-              // we silently set a default like ~/TeamClaw, which silently put
-              // freshly-joined teams into a workspace with no teamclaw-team/.
-              console.log("[App] No saved workspace — prompting user to pick one");
+              // No saved workspace. On desktop the amuxd daemon has already
+              // created the team's global sync dir (`~/.amuxd/teams/<teamId>`,
+              // which holds the `teamclaw-team/` repo) by the time the app
+              // mounts — AuthGate only renders children after daemon onboarding
+              // completes, and the current team is always set by then. Auto-use
+              // that dir as the workspace so first launch skips the manual
+              // picker entirely.
+              //
+              // Falls through to <WorkspacePrompt /> when the team isn't known
+              // (e.g. web mode, which has no ~/.amuxd and instead auto-selects
+              // its own default inside the prompt). We deliberately do NOT fall
+              // back to a bare ~/TeamClaw here: that silently dropped freshly
+              // joined teams into a workspace with no teamclaw-team/.
+              const teamId = useCurrentTeamStore.getState().team?.id;
+              if (isTauri() && teamId) {
+                const teamWorkspace = `~/.amuxd/teams/${teamId}`;
+                console.log(
+                  "[App] No saved workspace — auto-using daemon team dir:",
+                  teamWorkspace,
+                );
+                await setWorkspace(teamWorkspace);
+                // The daemon team dir already holds a synced `teamclaw-team/`,
+                // so it is an established team workspace. Suppress the
+                // "new workspace" Personal/Team chooser that setWorkspace()
+                // raises whenever it finds no local `.teamclaw/` marker.
+                useWorkspaceStore.getState().setIsNewWorkspace(false);
+              } else {
+                console.log("[App] No saved workspace — prompting user to pick one");
+              }
             }
           } catch (error) {
             console.warn("[App] Workspace restore failed; falling through to picker:", error);
