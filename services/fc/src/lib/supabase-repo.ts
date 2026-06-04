@@ -63,11 +63,23 @@ export function createSupabaseBusinessRepository(options) {
     if (authErr || !authData?.user?.id) {
       throw new ApiError(401, "missing_auth", "authenticated user required");
     }
+
+    const { data: actor, error: actorErr } = await supabase
+      .from("actors")
+      .select("id")
+      .eq("team_id", targetTeamId)
+      .eq("user_id", authData.user.id)
+      .maybeSingle();
+    if (actorErr) throw actorErr;
+    if (!actor?.id) {
+      throw new ApiError(403, "forbidden", "not a member of this team");
+    }
+
     const { data: membership, error: memberErr } = await supabase
       .from("team_members")
-      .select("role, members!inner(user_id)")
+      .select("role")
       .eq("team_id", targetTeamId)
-      .eq("members.user_id", authData.user.id)
+      .eq("member_id", actor.id)
       .maybeSingle();
     if (memberErr) throw memberErr;
     if (!membership || membership.role !== "owner") {

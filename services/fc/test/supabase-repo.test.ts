@@ -286,7 +286,8 @@ function fakeSupabaseForShareMode(rpcData, rpcCalls = []) {
     rpcCalls,
     rpcData,
     tableData: {
-      team_members: [{ role: "owner", members: { user_id: "user-owner-1" } }],
+      actors: [{ id: "actor-owner-1" }],
+      team_members: [{ role: "owner" }],
     },
     auth: OWNER_AUTH.auth,
   });
