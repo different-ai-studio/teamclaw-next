@@ -553,7 +553,7 @@ impl Backend for CloudApiBackend {
         Ok(if r.allowed { r.role } else { None })
     }
 
-    async fn report_client_version(&self) -> BackendResult<()> {
+    async fn report_client_version(&self, device_id: &str) -> BackendResult<()> {
         #[derive(serde::Serialize)]
         struct ClientVersionReq<'a> {
             #[serde(rename = "clientType")]
@@ -567,11 +567,10 @@ impl Backend for CloudApiBackend {
             #[allow(dead_code)]
             ok: Option<bool>,
         }
-        let device_id = crate::device_id::daemon_device_id();
         let req = ClientVersionReq {
             client_type: "daemon",
             version: env!("CARGO_PKG_VERSION"),
-            device_id: &device_id,
+            device_id,
         };
         let path = format!("/v1/teams/{}/client-version", self.cfg.team_id);
         let _: ClientVersionAck = self.post(&path, &req, None).await?;

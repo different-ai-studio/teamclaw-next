@@ -301,7 +301,7 @@ impl Backend for MockBackend {
         Ok(())
     }
 
-    async fn report_client_version(&self) -> BackendResult<()> {
+    async fn report_client_version(&self, _device_id: &str) -> BackendResult<()> {
         Ok(())
     }
 

@@ -1184,8 +1184,9 @@ impl DaemonServer {
         // Report daemon client version once at startup (ops telemetry; non-fatal).
         {
             let sb = self.backend.clone();
+            let device_id = crate::device_id::daemon_device_id();
             tokio::spawn(async move {
-                if let Err(e) = sb.report_client_version().await {
+                if let Err(e) = sb.report_client_version(&device_id).await {
                     warn!("failed to report daemon client version: {e}");
                 }
             });
