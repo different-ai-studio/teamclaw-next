@@ -8,6 +8,10 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockInvoke,
 }))
 
+vi.mock('@/lib/auth/session-store', () => ({
+  getFreshAccessToken: vi.fn(async () => 'test-token'),
+}))
+
 import { TeamLiteLlmSection } from '../TeamLiteLlmSection'
 
 describe('TeamLiteLlmSection', () => {
@@ -38,6 +42,7 @@ describe('TeamLiteLlmSection', () => {
       expect(mockInvoke).toHaveBeenCalledWith('team_litellm_setup', {
         teamId: 'team-1',
         workspacePath: '/workspace',
+        accessToken: 'test-token',
       })
     })
 

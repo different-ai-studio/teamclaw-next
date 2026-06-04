@@ -697,6 +697,26 @@
     "skip": "Skip",
     "waitingForOutput": "Waiting for output..."
   },
+  "setupWizard": {
+    "title": "Prepare runtime environment",
+    "intro": "First launch needs to install a few local dependencies. This only takes a moment.",
+    "optional": "Optional",
+    "ready": "Ready",
+    "install": "Install",
+    "installing": "Installing…",
+    "upgrade": "Upgrade",
+    "upgrading": "Upgrading…",
+    "autoInstalling": "Auto-installing…",
+    "retry": "Retry",
+    "currentNeedsUpgrade": "Current {{version}}, upgrade needed",
+    "continue": "Continue",
+    "installRequiredFirst": "Install required items first",
+    "deps": {
+      "amuxd": "Agent daemon (amuxd)",
+      "opencode": "OpenCode runtime",
+      "git": "Git"
+    }
+  },
   "errors": {
     "somethingWentWrong": "Something went wrong",
     "unexpectedError": "An unexpected error occurred",
@@ -1279,6 +1299,7 @@
       "description": "Maintain this machine daemon agent and access",
       "teamMismatchTitle": "Local daemon doesn't match the current team",
       "teamMismatchDesc": "The daemon is bound to a different team than the one currently selected in the app. Team-shared content syncs and symlinks to the daemon's team, not the current team. To have this machine join the current team's shares, re-initialize the daemon with an invite from the current team.",
+      "rebind": "Rebind to current team",
       "daemonTeam": "Daemon team",
       "currentTeam": "Current team",
       "noTeam": "Join or create a team before configuring daemon agent settings.",
@@ -2704,7 +2725,9 @@
       "remoteUrlLabel": "Repository URL",
       "authKindLabel": "Authentication method",
       "sshPrivateKey": "SSH private key",
-      "sshKeyPlaceholder": "Paste the full OpenSSH private key (-----BEGIN ... -----END)",
+      "sshKeyLabelOptional": "SSH private key (optional)",
+      "sshKeyPlaceholder": "Leave empty to use this machine's SSH (~/.ssh / agent), or paste the full OpenSSH private key (-----BEGIN ... -----END)",
+      "sshLocalHint": "Leave empty to reuse this machine's SSH keys and agent (~/.ssh) — no password or key paste needed.",
       "tokenPlaceholder": "Paste a Personal Access Token with repo permissions",
       "branchLabel": "Branch (optional, defaults to main)",
       "lockWarning": "⚠️ Cannot be changed once enabled.",
@@ -3024,6 +3047,7 @@
     "searchPlaceholder": "Search actors",
     "noMatches": "No matching actors",
     "invite": "Invite actor",
+    "defaultAgent": "Default agent",
     "type": {
       "agent": "Agent",
       "member": "Team"
@@ -3041,6 +3065,8 @@
       "viewProfile": "View profile",
       "copyName": "Copy name",
       "copyId": "Copy ID",
+      "setDefault": "Set as default agent",
+      "removeDefault": "Remove as default agent",
       "remove": "Remove from team"
     },
     "detail": {

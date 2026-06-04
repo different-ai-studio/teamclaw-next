@@ -68,6 +68,7 @@ pub async fn spawn(
     runtime_supervisor: Option<Arc<crate::runtime::RuntimeSupervisor>>,
     opencode_settings: Option<Arc<crate::opencode_settings::OpenCodeSettingsService>>,
     sync_dispatcher: crate::sync::dispatch::SyncDispatcher,
+    register_workspace_tx: Option<crate::http::state::RegisterWorkspaceTx>,
 ) -> anyhow::Result<HttpHandle> {
     // Resolve token + port files (defaults live in DaemonConfig::config_dir).
     let token_path = http
@@ -114,6 +115,7 @@ pub async fn spawn(
         runtime_supervisor,
         opencode_settings,
         sync_dispatcher,
+        register_workspace_tx,
     );
 
     spawn_reapers(state.clone());
@@ -205,7 +207,7 @@ mod tests {
         };
         let meta = metadata("actor-test".into(), "test");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher())
+        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None)
             .await
             .unwrap();
         let url = format!("http://{}/v1/healthz", handle.local_addr);
@@ -234,6 +236,7 @@ mod tests {
             None,
             None,
             test_dispatcher(),
+            None,
         )
         .await
         .unwrap();
@@ -280,6 +283,7 @@ mod tests {
             None,
             None,
             test_dispatcher(),
+            None,
         )
         .await
         .unwrap();
@@ -465,6 +469,7 @@ mod tests {
             None,
             None,
             test_dispatcher(),
+            None,
         )
         .await
         .unwrap();
@@ -531,7 +536,7 @@ mod tests {
         };
         let meta = metadata("actor-x".into(), "test");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher())
+        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None)
             .await
             .unwrap();
         let base = format!("http://{}", handle.local_addr);
@@ -602,7 +607,7 @@ mod tests {
         };
         let meta = metadata("actor-abc".into(), "cloud_api");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher())
+        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None)
             .await
             .unwrap();
         let url = format!("http://{}/v1/info", handle.local_addr);
@@ -693,6 +698,7 @@ mod tests {
             None,
             None,
             test_dispatcher(),
+            None,
         )
             .await
             .unwrap();

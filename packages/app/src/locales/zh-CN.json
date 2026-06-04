@@ -697,6 +697,26 @@
     "skip": "跳过",
     "waitingForOutput": "等待输出..."
   },
+  "setupWizard": {
+    "title": "准备运行环境",
+    "intro": "首次启动需要安装一些本机依赖，稍等片刻即可。",
+    "optional": "可选",
+    "ready": "已就绪",
+    "install": "安装",
+    "installing": "安装中…",
+    "upgrade": "升级",
+    "upgrading": "升级中…",
+    "autoInstalling": "自动安装中…",
+    "retry": "重试",
+    "currentNeedsUpgrade": "当前 {{version}}，需升级",
+    "continue": "继续",
+    "installRequiredFirst": "请先安装必需项",
+    "deps": {
+      "amuxd": "Agent 守护进程 (amuxd)",
+      "opencode": "OpenCode 运行时",
+      "git": "Git"
+    }
+  },
   "errors": {
     "somethingWentWrong": "出了点问题",
     "unexpectedError": "发生了意外错误",
@@ -1279,6 +1299,7 @@
       "description": "维护本机 Daemon 对应的 Agent 和访问权限",
       "teamMismatchTitle": "本机 Daemon 与当前团队不一致",
       "teamMismatchDesc": "Daemon 绑定的团队与 App 当前选中的团队不同。团队共享内容会同步并软链到 Daemon 的团队，而非当前团队。如需让本机参与当前团队的共享，请用当前团队的邀请重新初始化 Daemon。",
+      "rebind": "重新绑定到当前团队",
       "daemonTeam": "Daemon 团队",
       "currentTeam": "当前团队",
       "noTeam": "加入或创建团队后再配置 Daemon Agent。",
@@ -2704,7 +2725,9 @@
       "remoteUrlLabel": "仓库 URL",
       "authKindLabel": "认证方式",
       "sshPrivateKey": "SSH 私钥",
-      "sshKeyPlaceholder": "粘贴完整的 OpenSSH 私钥（-----BEGIN ... -----END）",
+      "sshKeyLabelOptional": "SSH 私钥（可选）",
+      "sshKeyPlaceholder": "留空则使用本机 SSH（~/.ssh / agent），或粘贴完整的 OpenSSH 私钥（-----BEGIN ... -----END）",
+      "sshLocalHint": "留空即复用本机的 SSH 密钥与 ssh-agent（~/.ssh）——无需输入密码或粘贴私钥。",
       "tokenPlaceholder": "粘贴具有 repo 权限的 Personal Access Token",
       "branchLabel": "分支（可选，默认 main）",
       "lockWarning": "⚠️ 开通后不可切换。",
@@ -3024,6 +3047,7 @@
     "searchPlaceholder": "搜索成员",
     "noMatches": "没有匹配的成员",
     "invite": "邀请成员",
+    "defaultAgent": "默认 Agent",
     "type": {
       "agent": "Agent",
       "member": "团队"
@@ -3041,6 +3065,8 @@
       "viewProfile": "查看资料",
       "copyName": "复制名字",
       "copyId": "复制 ID",
+      "setDefault": "设为默认 Agent",
+      "removeDefault": "取消默认 Agent",
       "remove": "从团队移除"
     },
     "detail": {

@@ -158,7 +158,11 @@ fn shell_quote(s: &str) -> String {
 
 /// Write `pem` to `dir/.ssh_key` (0600 on unix) and build the env vars git
 /// needs to use it: `GIT_SSH_COMMAND` pointing at the key with
-/// `IdentitiesOnly=yes` and `StrictHostKeyChecking=accept-new`.
+/// `IdentitiesOnly=yes`, `StrictHostKeyChecking=accept-new`, and
+/// `BatchMode=yes`. `BatchMode=yes` guarantees ssh never blocks on an
+/// interactive prompt — a passphrase-protected key (which the daemon cannot
+/// unlock non-interactively) fails fast with a clear error instead of hanging
+/// the whole sync waiting on a TTY that will never arrive.
 fn ssh_env_for_key(pem: &str, dir: &Path) -> anyhow::Result<Vec<(String, String)>> {
     std::fs::create_dir_all(dir)?;
     let key_path = dir.join(".ssh_key");
@@ -169,10 +173,32 @@ fn ssh_env_for_key(pem: &str, dir: &Path) -> anyhow::Result<Vec<(String, String)
         std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))?;
     }
     let ssh_cmd = format!(
-        "ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
+        "ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes",
         shell_quote(&key_path.to_string_lossy())
     );
     Ok(vec![("GIT_SSH_COMMAND".to_string(), ssh_cmd)])
+}
+
+/// True when `url` is an SSH git remote (`git@host:org/repo.git` scp-style or
+/// `ssh://…`). HTTPS/HTTP remotes never match.
+fn is_ssh_remote(url: &str) -> bool {
+    let u = url.trim();
+    if u.starts_with("http://") || u.starts_with("https://") {
+        return false;
+    }
+    u.starts_with("ssh://") || (u.contains('@') && u.contains(':'))
+}
+
+/// `GIT_SSH_COMMAND` for an SSH remote with NO daemon-injected key: reuse the
+/// local machine's SSH setup (`~/.ssh/config`, default identities, and a
+/// running ssh-agent) so the user never has to paste a private key. `BatchMode=yes`
+/// keeps it fully non-interactive (no password/passphrase prompt — fails fast
+/// instead) and `accept-new` trusts a first-seen host key without prompting.
+fn ssh_env_local() -> Vec<(String, String)> {
+    vec![(
+        "GIT_SSH_COMMAND".to_string(),
+        "ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes".to_string(),
+    )]
 }
 
 fn embed_token_in_url(url: &str, token: Option<&str>) -> String {
@@ -270,6 +296,11 @@ pub fn sync_git_dir_with_cred(
         GitCredential::SshKey(pem) => {
             let env = ssh_env_for_key(pem, clone_parent)?;
             (git_url.to_string(), env)
+        }
+        GitCredential::None if is_ssh_remote(git_url) => {
+            // SSH remote, no injected key → reuse the local ~/.ssh / ssh-agent,
+            // fully non-interactive (see `ssh_env_local`).
+            (git_url.to_string(), ssh_env_local())
         }
         GitCredential::None => (
             embed_token_in_url(git_url, config.git_token.as_deref()),
@@ -471,6 +502,9 @@ mod tests {
             ssh_cmd.contains("StrictHostKeyChecking=accept-new"),
             "ssh_cmd={ssh_cmd}"
         );
+        // BatchMode keeps a passphrase-protected key from hanging the sync on a
+        // TTY prompt that will never arrive.
+        assert!(ssh_cmd.contains("BatchMode=yes"), "ssh_cmd={ssh_cmd}");
 
         // Extract the key path from `-i <path>` (single-quoted).
         let after = ssh_cmd.split("ssh -i ").nth(1).expect("`ssh -i ` prefix");
@@ -491,6 +525,35 @@ mod tests {
             let mode = std::fs::metadata(key_path).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600, "key file must be 0600, got {mode:o}");
         }
+    }
+
+    #[test]
+    fn is_ssh_remote_classifies_urls() {
+        assert!(is_ssh_remote("git@github.com:org/repo.git"));
+        assert!(is_ssh_remote("ssh://git@host.example.com/org/repo.git"));
+        assert!(is_ssh_remote("user@gitlab.internal:team/repo.git"));
+        assert!(!is_ssh_remote("https://github.com/org/repo.git"));
+        assert!(!is_ssh_remote("http://host/org/repo.git"));
+        // HTTPS with userinfo must not be misread as SSH.
+        assert!(!is_ssh_remote("https://oauth2:tok@host/org/repo.git"));
+    }
+
+    #[test]
+    fn ssh_env_local_is_non_interactive_and_keyless() {
+        let envs = ssh_env_local();
+        let (_, ssh_cmd) = envs
+            .iter()
+            .find(|(k, _)| k == "GIT_SSH_COMMAND")
+            .expect("GIT_SSH_COMMAND");
+        // No injected key → reuse the local ~/.ssh / agent.
+        assert!(!ssh_cmd.contains("-i "), "ssh_cmd={ssh_cmd}");
+        assert!(!ssh_cmd.contains("IdentitiesOnly"), "ssh_cmd={ssh_cmd}");
+        // Never blocks on a prompt.
+        assert!(ssh_cmd.contains("BatchMode=yes"), "ssh_cmd={ssh_cmd}");
+        assert!(
+            ssh_cmd.contains("StrictHostKeyChecking=accept-new"),
+            "ssh_cmd={ssh_cmd}"
+        );
     }
 
     #[test]

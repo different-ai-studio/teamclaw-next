@@ -340,3 +340,89 @@ pub async fn fetch_workspace_model_catalog_keys(
     }
     Some(keys)
 }
+
+/// Workspace record returned by the daemon's `POST /v1/workspaces` endpoint.
+/// Fields mirror the daemon's snake_case JSON (`RegisterWorkspaceResponseBody`).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RegisteredDaemonWorkspace {
+    pub workspace_id: String,
+    pub path: String,
+    pub display_name: String,
+}
+
+/// Register `workspace_path` into the daemon's local registry
+/// (`~/.amuxd/workspaces.toml`) **and** the cloud `public.workspaces` table by
+/// calling the daemon's loopback `POST /v1/workspaces`. Idempotent — safe to
+/// call on every launch. The desktop uses this on first launch to ensure its
+/// default team workspace (`~/.amuxd/teams/<teamId>`) exists in both registries.
+///
+/// Returns `Ok(None)` when the daemon HTTP listener isn't up yet (port/token
+/// files missing) so the caller can treat it as a soft no-op and retry later.
+#[tauri::command]
+pub async fn register_daemon_workspace(
+    workspace_path: String,
+) -> Result<Option<RegisteredDaemonWorkspace>, String> {
+    let path = workspace_path.trim().to_string();
+    if path.is_empty() {
+        return Err("workspace_path must not be empty".into());
+    }
+
+    // The daemon's `WorkspaceStore::add` requires the path to already exist (it
+    // canonicalizes + checks `is_dir`). For a freshly-onboarded team the global
+    // dir `~/.amuxd/teams/<teamId>` may not exist yet — the daemon only
+    // scaffolds `teamclaw-team/` inside it once a workspace is linked. Create it
+    // up front so registration succeeds; the daemon then fills in the synced
+    // `teamclaw-team/` via ensure_team_link.
+    if let Err(e) = std::fs::create_dir_all(&path) {
+        return Err(format!("create workspace dir {path}: {e}"));
+    }
+
+    let amuxd_dir = match dirs::home_dir() {
+        Some(h) => h.join(".amuxd"),
+        None => return Ok(None),
+    };
+    let port: u16 = match std::fs::read_to_string(amuxd_dir.join("amuxd.http.port")) {
+        Ok(s) => match s.trim().parse() {
+            Ok(p) => p,
+            Err(_) => return Ok(None),
+        },
+        Err(_) => return Ok(None),
+    };
+    let root_token = match std::fs::read_to_string(amuxd_dir.join("amuxd.http.token")) {
+        Ok(s) => s.trim().to_string(),
+        Err(_) => return Ok(None),
+    };
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+
+    let exchange: DaemonAuthExchangeResponse = client
+        .post(format!("{base}/v1/auth/exchange"))
+        .header("Authorization", format!("Bearer {root_token}"))
+        .json(&serde_json::json!({
+            "scopes": ["workspace:write"],
+            "ttl_seconds": 300,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("auth exchange request failed: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("auth exchange rejected: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("auth exchange decode failed: {e}"))?;
+
+    let registered: RegisteredDaemonWorkspace = client
+        .post(format!("{base}/v1/workspaces"))
+        .header("Authorization", format!("Bearer {}", exchange.token))
+        .json(&serde_json::json!({ "path": path }))
+        .send()
+        .await
+        .map_err(|e| format!("register workspace request failed: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("register workspace rejected: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("register workspace decode failed: {e}"))?;
+
+    Ok(Some(registered))
+}

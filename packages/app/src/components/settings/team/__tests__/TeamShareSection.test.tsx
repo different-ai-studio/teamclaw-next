@@ -26,6 +26,11 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (sel: (s: { session: unknown }) => unknown) => sel(authState),
 }))
 
+// The team-share store now fetches a fresh access token before invoking Tauri.
+vi.mock('@/lib/auth/session-store', () => ({
+  getFreshAccessToken: vi.fn(async () => 'test-token'),
+}))
+
 // ---------------------------------------------------------------------------
 // SUT — imported after mocks
 // ---------------------------------------------------------------------------
@@ -89,6 +94,7 @@ describe('TeamShareSection', () => {
     expect(mockInvoke).toHaveBeenCalledWith('team_share_get_status', {
       teamId: 'team-1',
       workspacePath: '/workspace',
+      accessToken: 'test-token',
     })
   })
 
@@ -154,6 +160,7 @@ describe('TeamShareSection', () => {
       expect(mockInvoke).toHaveBeenCalledWith('team_share_enable_oss', {
         teamId: 'team-1',
         workspacePath: '/workspace',
+        accessToken: 'test-token',
       })
     })
 

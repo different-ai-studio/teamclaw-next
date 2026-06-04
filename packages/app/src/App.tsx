@@ -68,6 +68,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { SetupGuide } from "@/components/SetupGuide";
+import { WelcomeScreen } from "@/components/auth/WelcomeScreen";
+import { hasSeenWelcome, markWelcomeSeen } from "@/stores/deps";
 import { TelemetryConsentDialog } from "@/components/telemetry/TelemetryConsentDialog";
 import { WorkspacePrompt } from "@/components/workspace";
 import { WorkspaceTypeDialog } from "@/components/workspace/WorkspaceTypeDialog";
@@ -1817,7 +1819,19 @@ function App() {
   const { showSetupGuide, dependencies, handleRecheck, handleSetupContinue } = useSetupGuide(setupReady);
   const { showConsentDialog, setShowConsentDialog } = useTelemetryConsent(showSetupGuide);
 
-  const mainContent = (
+  // First-run welcome — the very first screen, shown before dependency setup.
+  // Dismissing it (Get started) is what unblocks the dependency initialization.
+  const [welcomeAck, setWelcomeAck] = useState(() => !isTauri() || hasSeenWelcome());
+  const showWelcome = isTauri() && !welcomeAck;
+
+  const mainContent = showWelcome ? (
+    <WelcomeScreen
+      onContinue={() => {
+        markWelcomeSeen();
+        setWelcomeAck(true);
+      }}
+    />
+  ) : (
     <>
       {showSetupGuide && (
         <SetupGuide

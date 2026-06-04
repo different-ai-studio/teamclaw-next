@@ -4,14 +4,13 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { buildConfig } from "@/lib/build-config";
 import { parseInviteTokenInput } from "@/lib/invite-deeplink";
 import { saveServerConfig, type ServerConfig } from "@/lib/server-config";
 import { useAppVersion } from "@/lib/version";
 import { useAuthStore } from "@/stores/auth-store";
 import { LoginScreen } from "./LoginScreen";
 
-type Step = "welcome" | "choose" | "login" | "invite" | "server";
+type Step = "choose" | "login" | "invite" | "server";
 
 function Shell({ children }: { children: React.ReactNode }) {
   const appVersion = useAppVersion();
@@ -92,24 +91,6 @@ function ChoiceRow({
         <span className="mt-0.5 block text-[12px] leading-5 text-muted-foreground">{caption}</span>
       </span>
     </button>
-  );
-}
-
-function WelcomeStep({ onNext }: { onNext: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <Shell>
-      <div className="flex flex-1 flex-col items-center justify-center text-center">
-        <img src="/logo.png" alt={`${buildConfig.app.name} logo`} className="mb-5 h-20 w-20 object-contain" />
-        <h1 className="text-[30px] font-semibold text-foreground">{buildConfig.app.name}</h1>
-        <p className="mt-3 max-w-sm text-[14px] leading-6 text-ink-2">
-          {t("auth.onboarding.tagline", "Choose how to enter TeamClaw.")}
-        </p>
-        <Button className="mt-8 bg-coral text-paper hover:bg-coral/90" onClick={onNext}>
-          {t("auth.onboarding.getStarted", "Get started")}
-        </Button>
-      </div>
-    </Shell>
   );
 }
 
@@ -272,10 +253,9 @@ function ServerStep({ onBack }: { onBack: () => void }) {
 }
 
 export function DesktopOnboarding() {
-  const [step, setStep] = useState<Step>("welcome");
+  const [step, setStep] = useState<Step>("choose");
   const signInAnonymously = useAuthStore((state) => state.signInAnonymously);
 
-  if (step === "welcome") return <WelcomeStep onNext={() => setStep("choose")} />;
   if (step === "login") {
     return (
       <DetailFrame onBack={() => setStep("choose")}>

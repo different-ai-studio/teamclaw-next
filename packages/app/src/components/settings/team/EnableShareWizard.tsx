@@ -47,9 +47,13 @@ export function EnableShareWizard({
   const enableManagedGit = useTeamShareStore((s) => s.enableManagedGit)
   const enableCustomGit = useTeamShareStore((s) => s.enableCustomGit)
 
+  // For SSH the credential is optional: an empty key means "use this machine's
+  // ~/.ssh / ssh-agent" (the daemon falls back to local SSH). HTTPS always needs
+  // a token.
   const customGitValid =
     mode !== 'custom_git' ||
-    (remoteUrl.trim().length > 0 && credential.trim().length > 0)
+    (remoteUrl.trim().length > 0 &&
+      (authKind === 'ssh_key' || credential.trim().length > 0))
   const canSubmit = !submitting && customGitValid
 
   function reset() {
@@ -95,7 +99,7 @@ export function EnableShareWizard({
         if (!submitting) onOpenChange(v)
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t('settings.teamShare.enableTitle')}</DialogTitle>
           <DialogDescription>
@@ -165,12 +169,12 @@ export function EnableShareWizard({
               <div className="space-y-1.5">
                 <Label htmlFor="share-credential">
                   {authKind === 'ssh_key'
-                    ? t('settings.teamShare.sshPrivateKey')
+                    ? t('settings.teamShare.sshKeyLabelOptional')
                     : 'HTTPS Token'}
                 </Label>
                 <textarea
                   id="share-credential"
-                  className="min-h-[80px] w-full rounded-md border border-input bg-transparent p-2 font-mono text-[12px]"
+                  className="min-h-[80px] w-full break-all rounded-md border border-input bg-transparent p-2 font-mono text-[12px]"
                   placeholder={
                     authKind === 'ssh_key'
                       ? t('settings.teamShare.sshKeyPlaceholder')
@@ -179,6 +183,11 @@ export function EnableShareWizard({
                   value={credential}
                   onChange={(e) => setCredential(e.target.value)}
                 />
+                {authKind === 'ssh_key' && (
+                  <p className="text-[11px] text-muted-foreground">
+                    {t('settings.teamShare.sshLocalHint')}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1.5">

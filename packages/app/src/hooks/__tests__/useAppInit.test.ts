@@ -15,6 +15,7 @@ const {
   mockHydrateFromCache,
   mockLoadPersonal,
   mockLoadTeamForCurrentTeam,
+  mockSetIsNewWorkspace,
 } = vi.hoisted(() => ({
   mockSetWorkspace: vi.fn(),
   mockSetWorkspaceBootstrapped: vi.fn(),
@@ -28,6 +29,7 @@ const {
   mockHydrateFromCache: vi.fn(),
   mockLoadPersonal: vi.fn(),
   mockLoadTeamForCurrentTeam: vi.fn(),
+  mockSetIsNewWorkspace: vi.fn(),
 }))
 
 vi.mock('@/lib/utils', () => ({
@@ -53,6 +55,7 @@ const workspaceState = {
   setWorkspace: mockSetWorkspace,
   setWorkspaceBootstrapped: mockSetWorkspaceBootstrapped,
   setWorkspaceReady: mockSetWorkspaceReady,
+  setIsNewWorkspace: mockSetIsNewWorkspace,
   // useAppInit selects these runtime-readiness actions; the daemon-control
   // migration replaced OpenCode lifecycle selectors with these.
   setOpenCodeBootstrapped: vi.fn(),
@@ -66,8 +69,11 @@ const workspaceState = {
 }
 
 vi.mock('@/stores/workspace', () => ({
-  useWorkspaceStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector(workspaceState as unknown as Record<string, unknown>),
+  useWorkspaceStore: Object.assign(
+    (selector: (s: Record<string, unknown>) => unknown) =>
+      selector(workspaceState as unknown as Record<string, unknown>),
+    { getState: () => workspaceState },
+  ),
 }))
 
 const teamModeState = {
@@ -121,9 +127,13 @@ vi.mock('@/stores/shortcuts', () => ({
   },
 }))
 
+const currentTeamState = {
+  team: null as { id: string } | null,
+}
+
 vi.mock('@/stores/current-team', () => ({
   useCurrentTeamStore: {
-    getState: () => ({ team: null }),
+    getState: () => currentTeamState,
   },
 }))
 
@@ -173,6 +183,7 @@ beforeEach(() => {
   workspaceState.workspaceReady = false
   teamModeState.teamModeType = null
   teamModeState.setState.mockClear()
+  currentTeamState.team = null
   localStorage.clear()
 })
 
@@ -212,6 +223,35 @@ describe('useWorkspaceInit', () => {
   })
 
   it('does not set a default workspace when nothing is saved (picker handles it)', async () => {
+    const { useWorkspaceInit } = await import('@/hooks/useAppInit')
+    const { result } = renderHook(() => useWorkspaceInit())
+
+    await waitFor(() => {
+      expect(result.current.initialWorkspaceResolved).toBe(true)
+    })
+    expect(mockSetWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('auto-uses the daemon team dir on first launch in Tauri when a team is known', async () => {
+    mockIsTauri.mockReturnValue(true)
+    currentTeamState.team = { id: 'team-xyz' }
+
+    const { useWorkspaceInit } = await import('@/hooks/useAppInit')
+    const { result } = renderHook(() => useWorkspaceInit())
+
+    await waitFor(() => {
+      expect(result.current.initialWorkspaceResolved).toBe(true)
+    })
+    expect(mockSetWorkspace).toHaveBeenCalledWith('~/.amuxd/teams/team-xyz')
+    // The synced team dir is an established team workspace — the Personal/Team
+    // chooser must be suppressed.
+    expect(mockSetIsNewWorkspace).toHaveBeenCalledWith(false)
+  })
+
+  it('falls back to the picker on first launch in Tauri when no team is known', async () => {
+    mockIsTauri.mockReturnValue(true)
+    currentTeamState.team = null
+
     const { useWorkspaceInit } = await import('@/hooks/useAppInit')
     const { result } = renderHook(() => useWorkspaceInit())
 

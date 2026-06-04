@@ -255,6 +255,15 @@ enum SockCommand {
         scode: String,
         reply_tx: oneshot::Sender<String>,
     },
+    /// Register a workspace into the local registry + cloud, idempotently.
+    /// Fed by the HTTP control plane (`POST /v1/workspaces`) via the
+    /// register-workspace bridge — the actor owns the `WorkspaceStore`, so the
+    /// HTTP task cannot mutate it without racing. Reply is a single JSON line
+    /// (`{ok, result?, error?}`) with `{workspace_id, path, display_name}`.
+    AddWorkspace {
+        path: String,
+        reply_tx: oneshot::Sender<String>,
+    },
     Unknown(String),
 }
 
@@ -1008,6 +1017,13 @@ impl DaemonServer {
         // logged but does NOT abort the daemon — the Unix socket path remains
         // usable for legacy clients.
         let http_cfg = self.config.http.clone().unwrap_or_default();
+        // Bridge: `POST /v1/workspaces` (HTTP) → the actor command loop, which
+        // owns the `WorkspaceStore`. The HTTP handler sends a
+        // `RegisterWorkspaceRequest`; the forwarder task below (spawned once the
+        // sock command channel exists) re-publishes it as
+        // `SockCommand::AddWorkspace` so the existing main-loop handler runs it.
+        let (register_workspace_tx, mut register_workspace_rx) =
+            mpsc::channel::<crate::http::state::RegisterWorkspaceRequest>(16);
         let _http_handle = {
             let mut meta = crate::http::server::metadata(self.actor_id.clone(), "amuxd");
             // Expose configured backends so the model-catalog endpoint can
@@ -1064,6 +1080,7 @@ impl DaemonServer {
                 Some(runtime_supervisor),
                 opencode_settings,
                 self.sync_dispatcher.clone(),
+                Some(register_workspace_tx),
             )
             .await
             {
@@ -1085,7 +1102,27 @@ impl DaemonServer {
         // use SIGTERM / signal handlers to stop it.
         let (sock_tx, mut sock_rx) = mpsc::channel::<SockCommand>(16);
         let sock_path = DaemonConfig::sock_path();
-        spawn_sock_listener(sock_path.clone(), sock_tx);
+        spawn_sock_listener(sock_path.clone(), sock_tx.clone());
+
+        // Forward HTTP register-workspace requests into the command loop. Runs
+        // for the lifetime of the daemon; exits if either channel closes.
+        {
+            let bridge_tx = sock_tx.clone();
+            tokio::spawn(async move {
+                while let Some(req) = register_workspace_rx.recv().await {
+                    if bridge_tx
+                        .send(SockCommand::AddWorkspace {
+                            path: req.path,
+                            reply_tx: req.reply_tx,
+                        })
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+        }
 
         // One-time setup before the reconnect loop.
         // Heartbeat runs independently of MQTT session.
@@ -1373,6 +1410,10 @@ impl DaemonServer {
                                     Err(e) => serde_json::json!({ "ok": false, "error": e }),
                                 };
                                 let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::AddWorkspace { path, reply_tx }) => {
+                                let body = self.handle_add_workspace_sock(&path).await;
+                                let _ = reply_tx.send(body);
                             }
                             Some(SockCommand::Unknown(line)) => {
                                 warn!("amuxd.sock: unknown control command: {line:?}");
@@ -1677,6 +1718,10 @@ impl DaemonServer {
                                     Err(e) => serde_json::json!({ "ok": false, "error": e }),
                                 };
                                 let _ = reply_tx.send(resp.to_string());
+                            }
+                            Some(SockCommand::AddWorkspace { path, reply_tx }) => {
+                                let body = self.handle_add_workspace_sock(&path).await;
+                                let _ = reply_tx.send(body);
                             }
                             Some(SockCommand::Unknown(line)) => warn!("amuxd.sock: unknown control command: {line:?}"),
                             None => warn!("amuxd.sock: listener channel closed; control commands unavailable until restart"),
@@ -4053,6 +4098,32 @@ impl DaemonServer {
                 warn!(path = %add.path, "add workspace failed: {}", e);
                 (false, e.to_string(), None)
             }
+        }
+    }
+
+    /// Register a workspace from the HTTP control plane (`POST /v1/workspaces`).
+    /// Wraps `apply_add_workspace` (local registry + cloud upsert + default +
+    /// team link, all idempotent) and publishes the same `workspaces.changed`
+    /// notify as the MQTT/RPC path. Returns a JSON line for the reply channel.
+    async fn handle_add_workspace_sock(&mut self, path: &str) -> String {
+        let amux_add = amux::AddWorkspace {
+            path: path.to_string(),
+        };
+        let (accepted, error, workspace) = self.apply_add_workspace(&amux_add).await;
+        if accepted {
+            let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
+            let _ = publisher.publish_notify("workspaces.changed", "").await;
+            serde_json::json!({
+                "ok": true,
+                "result": workspace.map(|w| serde_json::json!({
+                    "workspace_id": w.workspace_id,
+                    "path": w.path,
+                    "display_name": w.display_name,
+                })),
+            })
+            .to_string()
+        } else {
+            serde_json::json!({ "ok": false, "error": error }).to_string()
         }
     }
 
@@ -6613,6 +6684,47 @@ mod tests {
             mock.state().default_workspace_ids,
             vec!["remote-ws-1".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn handle_add_workspace_sock_registers_and_is_idempotent() {
+        let mock = Arc::new(crate::backend::mock::MockBackend::with_identity(
+            "team-test",
+            "agent-actor",
+        ));
+        let mut ts = test_server_with_cloud_api(mock.clone());
+        let workspace_dir = ts._tmp.path().to_path_buf();
+        let display_name = workspace_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        seed_startup_workspace_sync(&mock, &display_name, "remote-ws-1");
+
+        let reply = ts
+            .server
+            .handle_add_workspace_sock(&workspace_dir.to_string_lossy())
+            .await;
+        let value: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        assert_eq!(value["ok"], serde_json::json!(true), "reply: {reply}");
+        assert_eq!(
+            value["result"]["path"].as_str().unwrap(),
+            workspace_dir.canonicalize().unwrap().to_str().unwrap()
+        );
+        assert!(!value["result"]["workspace_id"]
+            .as_str()
+            .unwrap()
+            .is_empty());
+        assert_eq!(ts.server.workspaces.workspaces.len(), 1);
+
+        // Re-registering the same path is idempotent: still ok, no duplicate.
+        let reply2 = ts
+            .server
+            .handle_add_workspace_sock(&workspace_dir.to_string_lossy())
+            .await;
+        let value2: serde_json::Value = serde_json::from_str(&reply2).unwrap();
+        assert_eq!(value2["ok"], serde_json::json!(true));
+        assert_eq!(ts.server.workspaces.workspaces.len(), 1);
     }
 
     #[tokio::test]

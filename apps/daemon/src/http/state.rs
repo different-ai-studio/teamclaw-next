@@ -7,6 +7,8 @@
 
 use std::sync::Arc;
 
+use tokio::sync::{mpsc, oneshot};
+
 use crate::config::workspace_control::WorkspaceControlStore;
 use crate::config::HttpConfig;
 
@@ -14,6 +16,25 @@ use super::limit::RateLimiter;
 use super::runtime_adapter::RuntimeAdapter;
 use super::sessions::{IdempotencyCache, SessionOwnerIndex};
 use super::tokens::TokenStore;
+
+/// Request to register a workspace into the daemon's local registry (`~/.amuxd/
+/// workspaces.toml`) **and** the cloud `public.workspaces` table, idempotently.
+///
+/// The HTTP `POST /v1/workspaces` handler cannot mutate the registry directly —
+/// the daemon actor owns the in-memory `WorkspaceStore` and persists it, so a
+/// concurrent file write from the HTTP task would race the actor. Instead the
+/// handler sends this request to the actor loop (via the same command channel
+/// that backs the Unix control socket) and waits on `reply_tx` for a single
+/// JSON line: `{"ok":true,"result":{workspace}}` or `{"ok":false,"error":...}`.
+pub struct RegisterWorkspaceRequest {
+    /// Absolute workspace path to register (e.g. `~/.amuxd/teams/<teamId>`
+    /// already expanded by the caller).
+    pub path: String,
+    pub reply_tx: oneshot::Sender<String>,
+}
+
+/// Producer side of the register-workspace bridge handed to `HttpState`.
+pub type RegisterWorkspaceTx = mpsc::Sender<RegisterWorkspaceRequest>;
 
 /// Process metadata surfaced via `/v1/info`. Filled in at startup and
 /// treated as immutable thereafter.
@@ -52,6 +73,10 @@ pub struct HttpState {
     pub opencode_settings: Option<Arc<crate::opencode_settings::OpenCodeSettingsService>>,
     /// Daemon-owned team sync dispatcher (drives `/v1/team/sync*`).
     pub sync_dispatcher: crate::sync::dispatch::SyncDispatcher,
+    /// Bridge to the daemon actor loop for `POST /v1/workspaces`. `None` when
+    /// the HTTP server runs without a daemon actor behind it (focused tests) —
+    /// the route then returns 503.
+    pub register_workspace_tx: Option<RegisterWorkspaceTx>,
 }
 
 impl HttpState {
@@ -67,6 +92,7 @@ impl HttpState {
         runtime_supervisor: Option<Arc<crate::runtime::RuntimeSupervisor>>,
         opencode_settings: Option<Arc<crate::opencode_settings::OpenCodeSettingsService>>,
         sync_dispatcher: crate::sync::dispatch::SyncDispatcher,
+        register_workspace_tx: Option<RegisterWorkspaceTx>,
     ) -> Self {
         let runtime_refresh = runtime_supervisor
             .as_ref()
@@ -84,6 +110,7 @@ impl HttpState {
             runtime_refresh,
             opencode_settings,
             sync_dispatcher,
+            register_workspace_tx,
         }
     }
 }

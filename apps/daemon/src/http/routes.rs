@@ -45,6 +45,10 @@ pub fn build(state: HttpState) -> Router {
         .route("/v1/sessions/:id/restart", post(sessions::restart))
         .route("/v1/sessions/:id/events", get(sessions::replay_events))
         .route("/v1/sessions/:id/stream", get(sessions::stream))
+        // Register a workspace into the local registry + cloud (idempotent).
+        // Used by the desktop on first launch to ensure its default team
+        // workspace (`~/.amuxd/teams/<teamId>`) exists in both registries.
+        .route("/v1/workspaces", post(workspaces::register_workspace))
         // Workspace control-plane APIs (Phase B/C)
         .route(
             "/v1/workspaces/:id/providers",
