@@ -1299,6 +1299,7 @@
       "description": "Maintain this machine daemon agent and access",
       "teamMismatchTitle": "Local daemon doesn't match the current team",
       "teamMismatchDesc": "The daemon is bound to a different team than the one currently selected in the app. Team-shared content syncs and symlinks to the daemon's team, not the current team. To have this machine join the current team's shares, re-initialize the daemon with an invite from the current team.",
+      "rebind": "Rebind to current team",
       "daemonTeam": "Daemon team",
       "currentTeam": "Current team",
       "noTeam": "Join or create a team before configuring daemon agent settings.",
@@ -3043,6 +3044,7 @@
     "searchPlaceholder": "Search actors",
     "noMatches": "No matching actors",
     "invite": "Invite actor",
+    "defaultAgent": "Default agent",
     "type": {
       "agent": "Agent",
       "member": "Team"
@@ -3060,6 +3062,8 @@
       "viewProfile": "View profile",
       "copyName": "Copy name",
       "copyId": "Copy ID",
+      "setDefault": "Set as default agent",
+      "removeDefault": "Remove as default agent",
       "remove": "Remove from team"
     },
     "detail": {

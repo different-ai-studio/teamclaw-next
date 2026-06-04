@@ -11,6 +11,10 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockInvoke,
 }))
 
+vi.mock('@/lib/auth/session-store', () => ({
+  getFreshAccessToken: vi.fn(async () => 'test-token'),
+}))
+
 import { CreateTeamDialog } from '../CreateTeamDialog'
 
 function Harness({
@@ -61,6 +65,7 @@ describe('CreateTeamDialog', () => {
       expect(mockInvoke).toHaveBeenCalledWith('team_share_create', {
         name: 'alpha',
         workspacePath: '/ws',
+        accessToken: 'test-token',
       })
     })
     await waitFor(() => {
