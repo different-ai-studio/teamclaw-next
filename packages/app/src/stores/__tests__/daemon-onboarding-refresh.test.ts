@@ -8,10 +8,15 @@ const h = vi.hoisted(() => ({
   // Successive probe results; the last entry persists once the queue drains.
   probeQueue: [] as Array<{ ok: boolean; reason?: string; baseUrl?: string }>,
   invokeCalls: [] as string[],
+  registerArgs: null as { workspacePath?: string } | null,
   installServiceShouldThrow: false,
 }))
 
 vi.mock('@/lib/utils', () => ({ isTauri: () => h.isTauriVal }))
+vi.mock('@tauri-apps/api/path', () => ({
+  homeDir: async () => '/home/u',
+  join: async (...parts: string[]) => parts.join('/'),
+}))
 vi.mock('@/lib/backend', () => ({ getBackend: () => ({}) }))
 vi.mock('@/stores/current-team', () => ({
   useCurrentTeamStore: { getState: () => ({ team: h.currentTeam }) },
@@ -25,12 +30,16 @@ vi.mock('@/lib/daemon-local-client', () => ({
   ),
 }))
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(async (cmd: string) => {
+  invoke: vi.fn(async (cmd: string, args?: unknown) => {
     h.invokeCalls.push(cmd)
     if (cmd === 'get_daemon_team_id') return h.daemonTeam
     if (cmd === 'daemon_install_service') {
       if (h.installServiceShouldThrow) throw new Error('install-service boom')
       return undefined
+    }
+    if (cmd === 'register_daemon_workspace') {
+      h.registerArgs = (args ?? null) as { workspacePath?: string } | null
+      return { workspace_id: 'ws1', path: (args as { workspacePath?: string })?.workspacePath ?? '', display_name: 't1' }
     }
     return undefined
   }),
@@ -53,6 +62,7 @@ beforeEach(() => {
   h.daemonTeam = null
   h.probeQueue = []
   h.invokeCalls = []
+  h.registerArgs = null
   h.installServiceShouldThrow = false
   reset()
 })
@@ -103,6 +113,26 @@ describe('daemon-onboarding refresh() orchestration', () => {
     expect(useDaemonOnboardingStore.getState().status).toBe('ready')
     // Healthy on first probe → no recovery attempt.
     expect(h.invokeCalls).not.toContain('daemon_install_service')
+  })
+
+  it('ready registers the default team workspace (local + cloud) for the daemon team dir', async () => {
+    h.currentTeam = { id: 't1' }
+    h.daemonTeam = 't1'
+    h.probeQueue = [{ ok: true, baseUrl: 'http://127.0.0.1:1' }]
+    await useDaemonOnboardingStore.getState().refresh()
+    expect(useDaemonOnboardingStore.getState().status).toBe('ready')
+    // Registration is fire-and-forget — wait for the background promise.
+    await vi.waitFor(() => expect(h.invokeCalls).toContain('register_daemon_workspace'))
+    expect(h.registerArgs?.workspacePath).toBe('/home/u/.amuxd/teams/t1')
+  })
+
+  it('does not register a workspace on a team mismatch', async () => {
+    h.currentTeam = { id: 't1' }
+    h.daemonTeam = 't2'
+    await useDaemonOnboardingStore.getState().refresh()
+    // give any stray async a tick; mismatch must never register.
+    await Promise.resolve()
+    expect(h.invokeCalls).not.toContain('register_daemon_workspace')
   })
 
   it('matched-but-down → starting → auto-recovers to ready', async () => {
