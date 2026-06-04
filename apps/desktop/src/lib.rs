@@ -412,6 +412,7 @@ pub fn run() {
             commands::team::get_team_status,
             commands::team::workspace_read_team_meta,
             commands::team::workspace_delete_team_repo,
+            commands::team_share::disconnect::team_disconnect_repo,
             commands::team::update_team_llm_config,
             commands::team::get_team_config,
             commands::team::team_check_workspace_has_git,

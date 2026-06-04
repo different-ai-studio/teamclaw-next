@@ -143,7 +143,7 @@ fn migrate_legacy_dir(link: &Path, target: &Path) -> LinkStatus {
         };
     }
 
-    if global_is_empty(target) {
+    if global_team_store::is_scaffold_only(target) {
         // First workspace wins: seed the global copy from the legacy content,
         // INCLUDING a `.git` if present. The legacy `teamclaw-team/.git` is the
         // team repo itself (not the user's project repo), so preserving it keeps
@@ -188,25 +188,6 @@ fn git_is_dirty(dir: &Path) -> bool {
     match out {
         Ok(o) => !String::from_utf8_lossy(&o.stdout).trim().is_empty(),
         Err(_) => true, // can't tell → keep it
-    }
-}
-
-/// The global dir counts as empty when it is missing, has no entries, or holds
-/// only the empty fixed-prefix scaffold dirs created by `ensure_initialized`.
-fn global_is_empty(target: &Path) -> bool {
-    match std::fs::read_dir(target) {
-        Ok(entries) => entries.into_iter().all(|e| {
-            e.ok()
-                .map(|e| {
-                    let p = e.path();
-                    p.is_dir()
-                        && std::fs::read_dir(&p)
-                            .map(|mut r| r.next().is_none())
-                            .unwrap_or(false)
-                })
-                .unwrap_or(false)
-        }),
-        Err(_) => true,
     }
 }
 

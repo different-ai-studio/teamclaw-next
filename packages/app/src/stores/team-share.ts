@@ -25,9 +25,10 @@ export interface ShareStatus {
   globalPath?: string | null
 }
 
+/** Matches Rust `GitEnableInput` (`#[serde(rename_all = "camelCase")]`). */
 export interface CustomGitInput {
-  remote_url: string
-  auth_kind: 'ssh_key' | 'https_token'
+  remoteUrl: string
+  authKind: 'ssh_key' | 'https_token'
   credential: string
   branch?: string
 }
@@ -49,21 +50,29 @@ export interface TeamShareState {
   lastError: string | null
 
   refresh(teamId: string, workspacePath: string): Promise<void>
-  enableOss(teamId: string, workspacePath: string): Promise<EnableShareResult>
+  enableOss(
+    teamId: string,
+    workspacePath: string,
+    teamSecretHex?: string,
+  ): Promise<EnableShareResult>
   enableManagedGit(
     teamId: string,
     workspacePath: string,
+    teamSecretHex?: string,
   ): Promise<EnableShareResult>
   enableCustomGit(
     teamId: string,
     workspacePath: string,
     input: CustomGitInput,
+    teamSecretHex?: string,
   ): Promise<EnableShareResult>
   setSecret(
     teamId: string,
     secretHex: string,
     workspacePath: string,
   ): Promise<void>
+  /** Local teardown + cloud share-mode reset → wizard can run again. */
+  disconnect(teamId: string, workspacePath: string): Promise<void>
 }
 
 const EMPTY_STATUS: ShareStatus = {
@@ -107,12 +116,13 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
     }
   },
 
-  async enableOss(teamId, workspacePath) {
+  async enableOss(teamId, workspacePath, teamSecretHex) {
     const accessToken = await getFreshAccessToken()
     const res = await invoke<EnableShareResult>('team_share_enable_oss', {
       teamId,
       workspacePath,
       accessToken,
+      teamSecretHex: teamSecretHex?.trim() || null,
     })
     // Materialize the daemon's global dir + workspace symlink now (best-effort)
     // so the synced directory exists immediately instead of after a restart.
@@ -121,22 +131,33 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
     return res
   },
 
-  async enableManagedGit(teamId, workspacePath) {
+  async enableManagedGit(teamId, workspacePath, teamSecretHex) {
     const accessToken = await getFreshAccessToken()
     const res = await invoke<EnableShareResult>(
       'team_share_enable_managed_git',
-      { teamId, workspacePath, accessToken },
+      {
+        teamId,
+        workspacePath,
+        accessToken,
+        teamSecretHex: teamSecretHex?.trim() || null,
+      },
     )
     await linkDaemonTeamWorkspace(workspacePath)
     await get().refresh(teamId, workspacePath)
     return res
   },
 
-  async enableCustomGit(teamId, workspacePath, input) {
+  async enableCustomGit(teamId, workspacePath, input, teamSecretHex) {
     const accessToken = await getFreshAccessToken()
     const res = await invoke<EnableShareResult>(
       'team_share_enable_custom_git',
-      { teamId, workspacePath, input, accessToken },
+      {
+        teamId,
+        workspacePath,
+        input,
+        accessToken,
+        teamSecretHex: teamSecretHex?.trim() || null,
+      },
     )
     await linkDaemonTeamWorkspace(workspacePath)
     await get().refresh(teamId, workspacePath)
@@ -149,5 +170,24 @@ export const useTeamShareStore = create<TeamShareState>((set, get) => ({
       secretHex,
       workspacePath,
     })
+  },
+
+  async disconnect(teamId, workspacePath) {
+    if (!isTauri()) {
+      throw new Error('Team share disconnect requires the desktop app')
+    }
+    const accessToken = await getFreshAccessToken()
+    await invoke<{ success: boolean; message: string }>('team_disconnect_repo', {
+      teamId,
+      workspacePath,
+      accessToken,
+    })
+    set({ status: { ...EMPTY_STATUS }, lastError: null })
+    try {
+      const { useTeamModeStore } = await import('@/stores/team-mode')
+      await useTeamModeStore.getState().clearTeamMode(workspacePath)
+    } catch {
+      // Best-effort: legacy team_mode cleared on disk by the Rust command.
+    }
   },
 }))

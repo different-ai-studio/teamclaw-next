@@ -15,6 +15,7 @@
 //!   - `custom_git` — placeholder for Task 7 (SSH/HTTPS credential bridge).
 
 pub mod custom_git;
+pub mod disconnect;
 pub mod enable;
 pub mod join;
 
@@ -25,6 +26,8 @@ pub use enable::{
     team_share_enable_oss, team_share_get_status, team_share_set_team_secret, team_sync_paths,
     EnableShareResult, GitEnableInput,
 };
+#[allow(unused_imports)]
+pub use disconnect::team_disconnect_repo;
 #[allow(unused_imports)]
 pub use join::{team_share_join_existing, team_share_join_existing_impl, JoinExistingResult};
 

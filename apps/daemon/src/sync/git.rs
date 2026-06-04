@@ -309,7 +309,18 @@ pub fn sync_git_dir_with_cred(
     };
     let extra_env = extra_env.as_slice();
 
-    if !team_dir.exists() {
+    let needs_clone = !team_dir.exists()
+        || (!team_dir.join(".git").exists()
+            && crate::config::global_team_store::is_scaffold_only(team_dir));
+    if needs_clone {
+        if team_dir.exists() {
+            std::fs::remove_dir_all(team_dir).map_err(|e| {
+                anyhow::anyhow!(
+                    "failed to remove uninitialized team dir {} before clone: {e}",
+                    team_dir.display()
+                )
+            })?;
+        }
         std::fs::create_dir_all(clone_parent)?;
         let mut args = vec!["clone".to_string()];
         if let Some(branch) = config
@@ -470,6 +481,46 @@ mod tests {
             embed_token_in_url("https://example.com/repo.git", Some("   ")),
             "https://example.com/repo.git"
         );
+    }
+
+    #[test]
+    fn sync_clones_when_global_dir_is_scaffold_only_without_git() {
+        let tmp = tempfile::tempdir().unwrap();
+        let remote = tmp.path().join("remote.git");
+        let work = tmp.path().join("work");
+        let team_dir = tmp.path().join("teams").join("t1").join("teamclaw-team");
+
+        run(&["init", "--bare", remote.to_str().unwrap()], tmp.path());
+        run(
+            &["clone", remote.to_str().unwrap(), work.to_str().unwrap()],
+            tmp.path(),
+        );
+        cfg_identity(&work);
+        std::fs::create_dir_all(work.join("skills")).unwrap();
+        std::fs::write(work.join("skills/readme.md"), "hi\n").unwrap();
+        run(&["add", "-A"], &work);
+        run(&["commit", "-m", "init"], &work);
+        run(&["push", "origin", "HEAD:refs/heads/main"], &work);
+
+        std::fs::create_dir_all(&team_dir).unwrap();
+        for prefix in crate::config::global_team_store::SHARED_PREFIXES {
+            std::fs::create_dir_all(team_dir.join(prefix)).unwrap();
+        }
+        assert!(crate::config::global_team_store::is_scaffold_only(&team_dir));
+        assert!(!team_dir.join(".git").exists());
+
+        let config = TeamSharedGitConfig {
+            git_url: Some(remote.to_string_lossy().to_string()),
+            git_branch: Some("main".into()),
+            git_token: None,
+            shared_dir_name: "teamclaw-team".into(),
+            env_secret: None,
+            enabled: true,
+        };
+        let status = sync_git_dir(&team_dir, &config).unwrap();
+        assert!(status.synced);
+        assert!(team_dir.join(".git").exists());
+        assert!(team_dir.join("skills/readme.md").exists());
     }
 
     #[test]

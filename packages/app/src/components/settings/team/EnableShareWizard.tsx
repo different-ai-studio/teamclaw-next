@@ -19,6 +19,8 @@ import { humanizeFcError } from '@/lib/fc-error'
 type Mode = 'oss' | 'managed_git' | 'custom_git'
 type AuthKind = 'ssh_key' | 'https_token'
 
+const TEAM_SECRET_HEX64 = /^[0-9a-fA-F]{64}$/
+
 interface Props {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -36,6 +38,7 @@ export function EnableShareWizard({
 }: Props) {
   const { t } = useTranslation()
   const [mode, setMode] = useState<Mode>('oss')
+  const [teamSecret, setTeamSecret] = useState('')
   const [remoteUrl, setRemoteUrl] = useState('')
   const [authKind, setAuthKind] = useState<AuthKind>('ssh_key')
   const [credential, setCredential] = useState('')
@@ -47,6 +50,9 @@ export function EnableShareWizard({
   const enableManagedGit = useTeamShareStore((s) => s.enableManagedGit)
   const enableCustomGit = useTeamShareStore((s) => s.enableCustomGit)
 
+  const teamSecretTrimmed = teamSecret.trim()
+  const teamSecretValid =
+    teamSecretTrimmed.length === 0 || TEAM_SECRET_HEX64.test(teamSecretTrimmed)
   // For SSH the credential is optional: an empty key means "use this machine's
   // ~/.ssh / ssh-agent" (the daemon falls back to local SSH). HTTPS always needs
   // a token.
@@ -54,10 +60,11 @@ export function EnableShareWizard({
     mode !== 'custom_git' ||
     (remoteUrl.trim().length > 0 &&
       (authKind === 'ssh_key' || credential.trim().length > 0))
-  const canSubmit = !submitting && customGitValid
+  const canSubmit = !submitting && customGitValid && teamSecretValid
 
   function reset() {
     setMode('oss')
+    setTeamSecret('')
     setRemoteUrl('')
     setAuthKind('ssh_key')
     setCredential('')
@@ -65,22 +72,33 @@ export function EnableShareWizard({
     setError(null)
   }
 
+  function optionalTeamSecret(): string | undefined {
+    const trimmed = teamSecret.trim()
+    return trimmed.length > 0 ? trimmed : undefined
+  }
+
   async function handleSubmit() {
     if (!canSubmit) return
     setSubmitting(true)
     setError(null)
     try {
+      const secret = optionalTeamSecret()
       if (mode === 'oss') {
-        await enableOss(teamId, workspacePath)
+        await enableOss(teamId, workspacePath, secret)
       } else if (mode === 'managed_git') {
-        await enableManagedGit(teamId, workspacePath)
+        await enableManagedGit(teamId, workspacePath, secret)
       } else {
-        await enableCustomGit(teamId, workspacePath, {
-          remote_url: remoteUrl.trim(),
-          auth_kind: authKind,
-          credential: credential.trim(),
-          branch: branch.trim() || undefined,
-        })
+        await enableCustomGit(
+          teamId,
+          workspacePath,
+          {
+            remoteUrl: remoteUrl.trim(),
+            authKind: authKind,
+            credential: credential.trim(),
+            branch: branch.trim() || undefined,
+          },
+          secret,
+        )
       }
       onSuccess?.()
       reset()
@@ -99,15 +117,15 @@ export function EnableShareWizard({
         if (!submitting) onOpenChange(v)
       }}
     >
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85vh] flex-col gap-0 overflow-hidden sm:max-w-md">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{t('settings.teamShare.enableTitle')}</DialogTitle>
           <DialogDescription>
             {t('settings.teamShare.enableDescription')}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto py-2 pr-1">
           <fieldset className="space-y-2">
             <legend className="text-[12.5px] font-medium text-foreground">
               {t('settings.teamShare.shareModeLegend')}
@@ -204,6 +222,32 @@ export function EnableShareWizard({
             </div>
           )}
 
+          <div className="space-y-1.5 rounded-md border border-border-soft bg-surface p-3">
+            <Label htmlFor="share-team-secret">
+              {t('settings.teamShare.teamSecretOptionalLabel')}
+            </Label>
+            <Input
+              id="share-team-secret"
+              className="font-mono text-[12px]"
+              placeholder={t('settings.teamShare.teamSecretOptionalPlaceholder')}
+              autoComplete="off"
+              spellCheck={false}
+              value={teamSecret}
+              onChange={(e) => {
+                setTeamSecret(e.target.value)
+                setError(null)
+              }}
+            />
+            <p className="text-[12px] text-muted-foreground">
+              {t('settings.teamShare.teamSecretOptionalDesc')}
+            </p>
+            {!teamSecretValid && teamSecretTrimmed.length > 0 && (
+              <p className="text-[12px] text-amber-600">
+                {t('settings.teamSecret.lengthHint')}
+              </p>
+            )}
+          </div>
+
           <p className="text-[12px] text-amber-600">
             {t('settings.teamShare.lockWarning')}
           </p>
@@ -211,7 +255,7 @@ export function EnableShareWizard({
           {error && <p className="text-[12px] text-red-500">{error}</p>}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0 border-t border-border-soft pt-4">
           <Button
             variant="ghost"
             onClick={() => onOpenChange(false)}

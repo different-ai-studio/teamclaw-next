@@ -78,10 +78,13 @@ function CopyButton({ value }: { value: string }) {
 export function TeamSyncPaths({
   teamId,
   workspacePath,
+  refreshKey = 0,
   className,
 }: {
   teamId: string | null
   workspacePath: string | null
+  /** Bump after sync/disconnect to re-fetch path status. */
+  refreshKey?: number
   className?: string
 }) {
   const { t } = useTranslation()
@@ -106,7 +109,7 @@ export function TeamSyncPaths({
     return () => {
       cancelled = true
     }
-  }, [teamId, workspacePath])
+  }, [teamId, workspacePath, refreshKey])
 
   if (!data || (!data.realDir && data.links.length === 0)) return null
 

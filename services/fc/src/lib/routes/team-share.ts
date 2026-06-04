@@ -85,6 +85,11 @@ export function registerTeamShare(router) {
     return { body: result };
   });
 
+  router.delete("/v1/teams/:teamId/share-mode", async (ctx) => {
+    const result = await ctx.repository.disableShareMode(ctx.params.teamId);
+    return { body: result };
+  });
+
   router.get("/v1/teams/:teamId/workspace-config", async (ctx) => {
     const result = await ctx.repository.getWorkspaceConfig(ctx.params.teamId);
     return { body: result };
