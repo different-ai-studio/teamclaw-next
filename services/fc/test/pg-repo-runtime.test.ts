@@ -17,6 +17,7 @@ import {
   members,
   teamMembers,
   sessions,
+  workspaces,
 } from "../src/db/schema/index.js";
 
 // ── Seed helpers ──────────────────────────────────────────────────────────────
@@ -61,6 +62,14 @@ async function seedSession(db: any, teamId: string) {
   return s;
 }
 
+async function seedWorkspace(db: any, teamId: string) {
+  const [w] = await db
+    .insert(workspaces)
+    .values({ teamId, name: `ws-${Date.now()}-${Math.random()}` })
+    .returning();
+  return w;
+}
+
 function makeRepo(db: any, agentActorId?: string) {
   return createPgBusinessRepository({ db, callerActorId: agentActorId });
 }
@@ -103,6 +112,30 @@ test("upsertAgentRuntime upserts on natural key (agent_id, backend_session_id)",
     backendSessionId: "bs-upsert-key", // same natural key
   });
   assert.equal(r1.id, r2.id, "second upsert should return same row id");
+});
+
+// Regression: workspaceId must round-trip through upsert → read. The daemon
+// relies on agent_runtimes.workspace_id for local-daemon session grouping;
+// this assertion fails if the column is ever silently dropped on upsert.
+test("upsertAgentRuntime persists workspaceId (round-trips through read)", async () => {
+  const db = await makeDb();
+  const team = await seedTeam(db);
+  const agentActor = await seedAgentActor(db, team.id);
+  const session = await seedSession(db, team.id);
+  const workspace = await seedWorkspace(db, team.id);
+  const repo = makeRepo(db, agentActor.id);
+
+  await repo.upsertAgentRuntime({
+    agentActorId: agentActor.id,
+    sessionId: session.id,
+    runtimeId: "rt-workspace",
+    backendSessionId: "bs-workspace",
+    workspaceId: workspace.id,
+  });
+
+  const result = await repo.getAgentRuntime({ sessionId: session.id, runtimeId: "rt-workspace" });
+  assert.ok(result, "should find the row");
+  assert.equal(result!.workspaceId, workspace.id, "persisted workspaceId should match the upsert body");
 });
 
 test("getAgentRuntime returns null when absent", async () => {
