@@ -97,33 +97,40 @@ export function LocalDaemonRow() {
   if (!agent) return null
 
   return (
-    <div className="mb-1 border-b border-border-soft pb-1">
-      <div className="group flex items-center gap-1 rounded-md bg-selected/30 pr-1">
+    <>
+      {/* Local daemon = a normal Recents actor row, lightly emphasized (coral
+          device avatar, like the default agent's coral accent) + an expand
+          disclosure and a hover-revealed "new workspace" action. */}
+      <div className="group/daemon flex items-center gap-1 rounded-md pr-1 transition-colors hover:bg-selected/60">
         <button
           type="button"
           onClick={toggle}
-          className="flex flex-1 items-center gap-[9px] rounded-md px-[9px] py-[6px] text-left text-[12.5px] font-medium text-foreground"
+          className="flex min-w-0 flex-1 items-center gap-[9px] rounded-md px-[9px] py-[5px] text-left text-[12.5px]"
         >
-          {expanded ? <ChevronDown className="h-[12px] w-[12px] shrink-0 text-faint" /> : <ChevronRight className="h-[12px] w-[12px] shrink-0 text-faint" />}
-          <MonitorSmartphone className="h-[15px] w-[15px] shrink-0 text-coral" />
-          <span className="min-w-0 flex-1 truncate">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-coral/15 text-coral">
+            <MonitorSmartphone className="h-3 w-3" />
+          </span>
+          <span className="min-w-0 flex-1 truncate font-medium text-foreground">
             {t('sidebar.localDaemon', 'This device')} · {agent.displayName}
           </span>
+          {expanded
+            ? <ChevronDown className="h-3 w-3 shrink-0 text-faint" />
+            : <ChevronRight className="h-3 w-3 shrink-0 text-faint" />}
         </button>
         <button
           type="button"
           onClick={handleNewWorkspace}
           disabled={creating}
-          className="rounded-md p-1 text-faint hover:bg-selected/60 hover:text-foreground disabled:opacity-50"
+          className="shrink-0 rounded-md p-1 text-faint opacity-0 transition-opacity hover:bg-selected/80 hover:text-foreground group-hover/daemon:opacity-100 disabled:opacity-50"
           title={t('sidebar.newWorkspace', 'New workspace')}
           aria-label={t('sidebar.newWorkspace', 'New workspace')}
         >
-          {creating ? <Loader2 className="h-[12px] w-[12px] animate-spin" /> : <FolderPlus className="h-[12px] w-[12px]" />}
+          {creating ? <Loader2 className="h-3 w-3 animate-spin" /> : <FolderPlus className="h-3 w-3" />}
         </button>
       </div>
 
       {expanded && (
-        <div className="mt-0.5 flex flex-col">
+        <div className="flex flex-col">
           {loading && workspaces.length === 0 && (
             <div className="px-[9px] py-1 pl-7 text-[12px] text-faint">{t('sidebar.workspacesLoading', 'Loading workspaces…')}</div>
           )}
@@ -149,6 +156,6 @@ export function LocalDaemonRow() {
           })}
         </div>
       )}
-    </div>
+    </>
   )
 }

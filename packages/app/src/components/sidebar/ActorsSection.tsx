@@ -102,7 +102,6 @@ export function ActorsSection() {
 
   return (
     <div className="flex flex-col">
-      <LocalDaemonRow />
       <div className="flex items-center gap-1 pr-1">
         <button
           type="button"
@@ -163,6 +162,7 @@ export function ActorsSection() {
       </AlertDialog>
       {!collapsed && (
         <div className="flex flex-col">
+          <LocalDaemonRow />
           {loading && (
             <div className="px-[9px] py-1 text-[12px] text-faint">{t('actors.loading', 'Loading actors...')}</div>
           )}
