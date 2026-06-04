@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { makeTestDb } from "./db/pglite.js";
 import { createPgBusinessRepository } from "../src/lib/pg-repo/index.js";
 import { teams, actors, members, teamMembers, agents } from "../src/db/schema/index.js";
+import { actorClientVersions } from "../src/db/schema/telemetry.js";
 
 // ── Seed helpers ──────────────────────────────────────────────────────────────
 
@@ -238,4 +239,36 @@ test("getTeamDirectory only returns actors in the specified team", async () => {
   const resultB = await repo.getTeamDirectory(teamB.id);
   assert.ok(resultA.actors.every((a: any) => a.teamId === teamA.id), "all actors must belong to teamA");
   assert.ok(resultB.actors.every((a: any) => a.teamId === teamB.id), "all actors must belong to teamB");
+});
+
+test("getActor includes clientVersions array", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const actor = await seedMemberActor(db, team.id, { displayName: "Vee" });
+  await db.insert(actorClientVersions).values({
+    actorId: actor.id,
+    teamId: team.id,
+    clientType: "ios",
+    deviceId: "iphone-1",
+    version: "1.1.5",
+    build: "14",
+    lastReportedAt: new Date(),
+  });
+
+  const repo = createPgBusinessRepository({ db });
+  const result = await repo.getActor(actor.id);
+  assert.ok(Array.isArray(result.clientVersions), "clientVersions must be an array");
+  assert.equal(result.clientVersions.length, 1);
+  assert.equal(result.clientVersions[0].clientType, "ios");
+  assert.equal(result.clientVersions[0].version, "1.1.5");
+  assert.equal(result.clientVersions[0].build, "14");
+});
+
+test("getActor returns empty clientVersions when none reported", async () => {
+  const { db } = await makeTestDb();
+  const team = await seedTeam(db);
+  const actor = await seedMemberActor(db, team.id, { displayName: "Empty" });
+  const repo = createPgBusinessRepository({ db });
+  const result = await repo.getActor(actor.id);
+  assert.deepEqual(result.clientVersions, []);
 });
