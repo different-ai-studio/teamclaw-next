@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { Toaster, toast } from "sonner";
 import { cn, isTauri } from "@/lib/utils";
 import { buildConfig } from "@/lib/build-config";
+import { markStartup } from "@/lib/startup-perf";
 import {
   BookOpen,
   FolderGit,
@@ -686,6 +687,12 @@ function AppContent() {
     void useSessionListStore.getState().load();
   }, []);
 
+  // Stamp the first frame where the real three-column shell renders (workspace
+  // resolved + a workspace selected) — the end of the post-skeleton blank gap.
+  useEffect(() => {
+    if (initialWorkspaceResolved && workspacePath) markStartup("first-content");
+  }, [initialWorkspaceResolved, workspacePath]);
+
   // Boot the outbox: hydrate any pending/failed rows from libsql so a
   // crashed/closed app resumes in-flight sends, then start the sender loop
   // (idempotent). `startOutboxSender` schedules a tick every second; the
@@ -840,6 +847,7 @@ function AppContent() {
 
     void (async () => {
       try {
+        markStartup("mqtt:start");
         // amuxd convention: MQTT username = actor_id, password = JWT
         // (see amux/daemon/src/mqtt/client.rs + daemon/server.rs).
         // EMQX validates the JWT and uses actor_id for topic ACL.
@@ -882,6 +890,7 @@ function AppContent() {
           teamId: mqttTeamId,
           useTls,
         });
+        markStartup("mqtt:connected");
         resetSessionLiveSubscriptionState();
         if (cancelled) return;
 

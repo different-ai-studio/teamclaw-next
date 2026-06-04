@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { isTauri } from '@/lib/utils'
+import { markStartup } from '@/lib/startup-perf'
 
 export type RequirementStatus = {
   id: string
@@ -45,8 +46,10 @@ export const useSetupStore = create<SetupState>((set, get) => ({
       set({ loaded: true })
       return
     }
+    markStartup('setup-list:start')
     const { invoke } = await import('@tauri-apps/api/core')
     const requirements = await invoke<RequirementStatus[]>('setup_list_requirements')
+    markStartup('setup-list:end')
     set({ requirements, loaded: true })
   },
 

@@ -10,6 +10,9 @@ import './stores/dev-expose'
 import './lib/i18n'; // Initialize i18n
 import { appShortName, buildConfig } from './lib/build-config'
 import { initJwtBridge } from './lib/jwt-bridge'
+import { markStartup } from './lib/startup-perf'
+
+markStartup('main:start')
 
 // Sync the Supabase JWT into teamclaw.json so FC-backed commands (team share,
 // LiteLLM, OSS sync) can authenticate. Must run at startup, before any of those
@@ -84,7 +87,7 @@ invoke<string | null>('get_system_accent_color')
   })
   .catch(() => { /* non-tauri context or pre-init — fall through */ })
 
-performance.mark('react-mount')
+markStartup('react-mount')
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

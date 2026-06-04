@@ -14,6 +14,7 @@ import { SetupWizard } from "@/components/auth/SetupWizard";
 import { useSetupStore } from "@/stores/setup";
 import { DaemonOnboardingWizard } from "@/components/auth/DaemonOnboardingWizard";
 import { useDaemonOnboardingStore } from "@/stores/daemon-onboarding";
+import { markStartup } from "@/lib/startup-perf";
 
 interface AuthGateProps {
   children: React.ReactNode;
@@ -53,7 +54,9 @@ export function AuthGate({ children }: AuthGateProps) {
   }, [hydrate]);
 
   useEffect(() => {
+    markStartup("authgate:mount");
     document.getElementById("skeleton")?.remove();
+    markStartup("skeleton-removed");
   }, []);
 
   useEffect(() => {
@@ -82,6 +85,7 @@ export function AuthGate({ children }: AuthGateProps) {
     if (bootstrappedUserId.current === session.user.id) return;
     bootstrappedUserId.current = session.user.id;
     setBootstrap("checking");
+    markStartup("team-bootstrap:start");
 
     void (async () => {
       try {
@@ -94,6 +98,7 @@ export function AuthGate({ children }: AuthGateProps) {
         }
 
         const teams = await getBackend().teams.listCurrentUserTeams({ limit: 1 });
+        markStartup("team-list:end");
         const existingTeamId = teams[0]?.id;
         if (existingTeamId) {
           await useCurrentTeamStore.getState().reloadAndSwitchTo(existingTeamId);
@@ -122,6 +127,7 @@ export function AuthGate({ children }: AuthGateProps) {
         console.warn("[AuthGate] team bootstrap threw", err);
       } finally {
         setBootstrap("ready");
+        markStartup("team-bootstrap:end");
       }
     })();
   }, [loading, session]);
@@ -191,5 +197,6 @@ export function AuthGate({ children }: AuthGateProps) {
     }
   }
 
+  markStartup("authgate:children");
   return <>{children}</>;
 }
