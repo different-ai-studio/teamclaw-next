@@ -236,6 +236,18 @@ pub async fn daemon_team_link(workspace_path: &str) -> Result<serde_json::Value,
     .await
 }
 
+/// `POST /v1/team/unlink` `{ path }` — drop workspace symlink + empty global scaffold.
+pub async fn daemon_team_unlink(workspace_path: &str) -> Result<(), String> {
+    daemon_request_unit(
+        reqwest::Method::POST,
+        "/v1/team/unlink",
+        "",
+        &["workspace:write"],
+        Some(&serde_json::json!({ "path": workspace_path })),
+    )
+    .await
+}
+
 // ─── conflict / version helpers (used by Task 7) ────────────────────────────
 
 /// `GET /v1/team/conflicts?teamId=<id>`.
@@ -410,6 +422,29 @@ pub async fn oss_sync_resolve_conflict(
     daemon_team_resolve_conflict(&team_id, &path, &choice).await
 }
 
+fn team_sync_error_from_status(status: &serde_json::Value) -> Result<(), String> {
+    if let Some(err) = status
+        .get("lastError")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+    {
+        return Err(err.to_string());
+    }
+    if status
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .is_none()
+    {
+        return Err(
+            "team share is not enabled for the daemon's team (share_mode unset). \
+             Re-bind amuxd to the current team if you switched teams, then enable Git share again."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 /// `team_sync_repo(workspace?, force?)` (team.rs) → proxy to the daemon sync.
 ///
 /// Returns a `TeamGitResult`-shaped object so existing callers keep working.
@@ -422,7 +457,8 @@ pub async fn team_sync_repo(
     let workspace_path = workspace_path
         .filter(|p| !p.is_empty())
         .ok_or_else(|| "No workspace path set. Please select a workspace first.".to_string())?;
-    daemon_team_sync(&workspace_path).await?;
+    let resp = daemon_team_sync(&workspace_path).await?;
+    team_sync_error_from_status(&resp)?;
     Ok(serde_json::json!({
         "success": true,
         "message": "Synced",
@@ -446,7 +482,8 @@ pub async fn team_shared_git_sync(
         .get("workspacePath")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "config.workspacePath is required".to_string())?;
-    daemon_team_sync(workspace_path).await?;
+    let resp = daemon_team_sync(workspace_path).await?;
+    team_sync_error_from_status(&resp)?;
     Ok(serde_json::json!({
         "success": true,
         "message": "Synced",

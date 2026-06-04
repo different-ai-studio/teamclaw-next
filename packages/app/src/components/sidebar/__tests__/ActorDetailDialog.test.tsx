@@ -50,4 +50,24 @@ describe('ActorDetailDialog', () => {
     expect(screen.getByText('Last active')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Copy ID/i })).toBeInTheDocument()
   })
+
+  it('shows team ID when provided', () => {
+    render(
+      <ActorDetailDialog
+        actor={{
+          id: 'actor-1',
+          actor_type: 'member',
+          display_name: 'Matt-iOS',
+          member_status: 'iOS',
+          agent_status: null,
+          last_active_at: new Date().toISOString(),
+        }}
+        teamId="team-abc"
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Team ID')).toBeInTheDocument()
+    expect(screen.getByText('team-abc')).toBeInTheDocument()
+  })
 })

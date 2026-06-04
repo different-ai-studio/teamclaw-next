@@ -714,23 +714,31 @@ export interface DaemonTeamLinkResult {
  */
 export async function linkDaemonTeamWorkspace(
   workspacePath: string,
+  options?: { strict?: boolean },
 ): Promise<DaemonTeamLinkResult | null> {
   const path = workspacePath.trim()
-  if (!path) return null
+  if (!path) {
+    if (options?.strict) throw new Error('workspace path is required to link team directory')
+    return null
+  }
   try {
     const result = await daemonFetch<DaemonTeamLinkResult>('/v1/team/link', {
       method: 'POST',
       body: JSON.stringify({ path }),
     })
     if (!result.ok) {
-      console.warn('[daemon-local-client] team link failed:', result.error)
+      const msg = result.error ?? 'daemon team link failed'
+      if (options?.strict) throw new Error(msg)
+      console.warn('[daemon-local-client] team link failed:', msg)
       return null
     }
     return result.data
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (options?.strict) throw new Error(msg)
     // Network/IPC errors (daemon not running, no HTTP) are expected and
     // non-fatal — the link is created lazily on the daemon's next start.
-    console.warn('[daemon-local-client] team link unavailable:', err)
+    console.warn('[daemon-local-client] team link unavailable:', msg)
     return null
   }
 }

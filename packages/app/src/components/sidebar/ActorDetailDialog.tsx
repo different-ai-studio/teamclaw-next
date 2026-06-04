@@ -20,10 +20,11 @@ import { cn } from '@/lib/utils'
 
 interface Props {
   actor: ActorRow | null
+  teamId?: string | null
   onOpenChange: (open: boolean) => void
 }
 
-export function ActorDetailDialog({ actor, onOpenChange }: Props) {
+export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
   const { t } = useTranslation()
   const enterActorDraft = useUIStore((s) => s.enterActorDraft)
   const lastActorRef = React.useRef<ActorRow | null>(null)
@@ -200,6 +201,12 @@ export function ActorDetailDialog({ actor, onOpenChange }: Props) {
               <dd className="min-w-0 truncate font-mono text-[12px] text-foreground">
                 {lastActive ?? t('actors.detail.never', 'Never')}
               </dd>
+              {teamId && (
+                <>
+                  <dt className="text-muted-foreground">{t('actors.detail.teamId', 'Team ID')}</dt>
+                  <dd className="min-w-0 truncate font-mono text-[12px] text-foreground">{teamId}</dd>
+                </>
+              )}
               <dt className="text-muted-foreground">{t('actors.detail.actorId', 'Actor ID')}</dt>
               <dd className="min-w-0 truncate font-mono text-[12px] text-foreground">{displayActor.id}</dd>
             </dl>
