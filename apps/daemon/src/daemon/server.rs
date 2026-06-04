@@ -91,16 +91,32 @@ fn load_team_shared_config_for_workspace(workspace_root: &Path) -> Option<TeamSh
     crate::team_shared_git::read_git_team_config(workspace_root)
 }
 
+/// Reject workspace paths that must never receive a `teamclaw-team` link: the
+/// filesystem root, or anything inside the daemon's own config dir
+/// (`~/.amuxd`). The critical case is a team's global store dir
+/// `~/.amuxd/teams/<id>`: linking it would point `teamclaw-team` at itself
+/// (ELOOP) and destroy the synced content. Such bogus entries have appeared in
+/// workspaces.toml (synced from the cloud), so filter them out of the link
+/// sweep defensively in addition to the guard in `ensure_workspace_link`.
+pub(crate) fn is_linkable_workspace_path(path: &str) -> bool {
+    let p = std::path::Path::new(path);
+    if p == std::path::Path::new("/") {
+        return false;
+    }
+    !p.starts_with(crate::config::DaemonConfig::config_dir())
+}
+
 /// Group registered workspaces by their `team_id`. Workspaces without a
-/// team_id are skipped. Returns `(team_id, Vec<workspace_path>)` pairs so the
-/// sweep syncs each team's global dir once, then links every member workspace.
+/// team_id, or with a non-linkable path (root / inside `~/.amuxd`), are
+/// skipped. Returns `(team_id, Vec<workspace_path>)` pairs so the sweep syncs
+/// each team's global dir once, then links every member workspace.
 pub(crate) fn group_workspaces_by_team(
     workspaces: &[crate::config::StoredWorkspace],
 ) -> Vec<(String, Vec<String>)> {
     use std::collections::BTreeMap;
     let mut by_team: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for w in workspaces {
-        if w.path.trim().is_empty() {
+        if w.path.trim().is_empty() || !is_linkable_workspace_path(w.path.trim()) {
             continue;
         }
         if let Some(team_id) = w.team_id.as_deref().filter(|t| !t.trim().is_empty()) {
