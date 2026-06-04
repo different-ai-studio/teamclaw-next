@@ -301,8 +301,9 @@ function contractRepo() {
     },
     async getActor(actorId) {
       if (actorId === "actor-missing") return null;
-      return { id: actorId, teamId: "team-1", kind: "user", displayName: "Test Actor", avatarUrl: null, metadata: null };
+      return { id: actorId, teamId: "team-1", kind: "user", displayName: "Test Actor", avatarUrl: null, metadata: null, clientVersions: [] };
     },
+    async reportClientVersion(_teamId, _body) {},
     async upsertExternalActor(input) {
       assert.equal(input.teamId, "team-1");
       return { actorId: "actor-new" };
