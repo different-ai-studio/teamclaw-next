@@ -159,7 +159,7 @@ export function LocalDaemonRow({
         onCopyId={onCopyId}
         onRequestRemove={onRequestRemove}
         extraItems={
-          <ContextMenuItem onSelect={() => openSettings('daemonGeneral', 'device')}>
+          <ContextMenuItem onSelect={() => openSettings('daemonGeneral')}>
             <Settings className="h-4 w-4" />
             {t('sidebar.deviceSettings', 'Settings')}
           </ContextMenuItem>

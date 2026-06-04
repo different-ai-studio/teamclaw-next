@@ -128,7 +128,6 @@ function UpdateButton() {
 export function Settings(_props?: SettingsProps) {
   const { t } = useTranslation()
   const settingsInitialSection = useUIStore(s => s.settingsInitialSection)
-  const settingsScope = useUIStore(s => s.settingsScope)
   const appVersion = useAppVersion()
 
   // Filter sections based on build config feature flags
@@ -144,15 +143,17 @@ export function Settings(_props?: SettingsProps) {
     return 'client'
   }
 
-  // 'device' scope (opened from the local-daemon row) shows only the merged
-  // Local Agent group (daemon + opencode); default into it.
   const [activeView, setActiveView] = React.useState<SettingsSection>(
-    settingsInitialSection ?? (settingsScope === 'device' ? 'daemonGeneral' : 'general'),
+    settingsInitialSection ?? 'general',
   )
 
+  // Settings is split into two independent dialogs by entry point: the regular
+  // entry opens the Client group; the local-daemon row's "Settings" opens the
+  // Daemon + Local Agent (opencode) group. Which one shows is derived from the
+  // active section's group, so every caller lands in the right place.
   const clientGroup = { id: 'client' as const, label: 'Client', labelKey: 'settings.nav.client', icon: Laptop, sections: filteredPrimarySections, testid: 'client-subnav' }
   const localAgentGroup = { id: 'localAgent' as const, label: 'Local Agent', labelKey: 'settings.nav.localAgent', icon: SlidersHorizontal, sections: filteredLocalAgentSections, testid: 'local-agent-subnav' }
-  const navGroups = settingsScope === 'device' ? [localAgentGroup] : [clientGroup, localAgentGroup]
+  const navGroups = groupForSection(activeView) === 'localAgent' ? [localAgentGroup] : [clientGroup]
   const [expandedGroup, setExpandedGroup] = React.useState<AccordionGroup | null>(() => groupForSection(activeView))
   const toggleGroup = (group: AccordionGroup) => {
     setExpandedGroup(prev => (prev === group ? null : group))

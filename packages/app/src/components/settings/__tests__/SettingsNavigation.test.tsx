@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('react-i18next', () => ({
@@ -66,7 +66,6 @@ vi.mock('@/stores/ui', () => ({
   useUIStore: (selector: (state: unknown) => unknown) =>
     selector({
       settingsInitialSection: null,
-      settingsScope: 'all',
     }),
 }))
 
@@ -75,30 +74,40 @@ vi.mock('../section-registry', () => ({
 }))
 
 describe('Settings navigation', () => {
-  it('merges daemon + opencode sections into one Local Agent group, after Client', async () => {
+  it('default (client) entry shows only the Client group — no Daemon/Local Agent', async () => {
     const { Settings } = await import('../Settings')
 
     render(<Settings />)
 
-    expect(screen.queryByRole('button', { name: 'Channels' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Automation' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'General' })).toBeInTheDocument()
+    // Client group present, expanded by default to a client section.
+    expect(screen.getByRole('button', { name: 'Client' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'General' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Team Shared' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Team' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Workspace' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Runtimes' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Env Variables' })).toBeNull()
+    expect(screen.getByTestId('client-subnav')).toBeInTheDocument()
 
-    // The standalone Daemon group is gone — its sections live under Local Agent.
+    // The Daemon + Local Agent settings are a SEPARATE dialog — not shown here.
     expect(screen.queryByRole('button', { name: 'Daemon' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Local Agent' })).toBeNull()
+    expect(screen.queryByTestId('local-agent-subnav')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Workspace' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'LLM Model' })).toBeNull()
+  })
 
-    const clientButton = screen.getByRole('button', { name: 'Client' })
-    const localAgentButton = screen.getByRole('button', { name: 'Local Agent' })
-    const topLevelButtons = screen.getAllByRole('button')
-    expect(topLevelButtons.indexOf(clientButton)).toBeLessThan(topLevelButtons.indexOf(localAgentButton))
+  it('daemon entry (initial daemon section) shows only the merged Local Agent group', async () => {
+    vi.resetModules()
+    vi.doMock('@/stores/ui', () => ({
+      useUIStore: (selector: (state: unknown) => unknown) =>
+        selector({ settingsInitialSection: 'daemonGeneral' }),
+    }))
+    const { Settings } = await import('../Settings')
 
-    fireEvent.click(localAgentButton)
+    render(<Settings />)
 
+    // The Client group is a separate dialog — not shown here.
+    expect(screen.queryByRole('button', { name: 'Client' })).toBeNull()
+    expect(screen.queryByTestId('client-subnav')).toBeNull()
+
+    expect(screen.getByRole('button', { name: 'Local Agent' })).toBeInTheDocument()
     const localAgentSubnav = screen.getByTestId('local-agent-subnav')
     // Daemon sections first, then the opencode agent config — all in one group.
     expect(
@@ -119,21 +128,6 @@ describe('Settings navigation', () => {
       'Knowledge Base',
       'Dependencies',
     ])
-  })
-
-  it('device scope shows only the Local Agent group (hides Client)', async () => {
-    vi.resetModules()
-    vi.doMock('@/stores/ui', () => ({
-      useUIStore: (selector: (state: unknown) => unknown) =>
-        selector({ settingsInitialSection: 'daemonGeneral', settingsScope: 'device' }),
-    }))
-    const { Settings } = await import('../Settings')
-
-    render(<Settings />)
-
-    expect(screen.queryByRole('button', { name: 'Client' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Local Agent' })).toBeInTheDocument()
-    expect(screen.getByTestId('local-agent-subnav')).toBeInTheDocument()
     vi.doUnmock('@/stores/ui')
   })
 })
