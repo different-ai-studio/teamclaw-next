@@ -1181,6 +1181,16 @@ impl DaemonServer {
             });
         }
 
+        // Report daemon client version once at startup (ops telemetry; non-fatal).
+        {
+            let sb = self.backend.clone();
+            tokio::spawn(async move {
+                if let Err(e) = sb.report_client_version().await {
+                    warn!("failed to report daemon client version: {e}");
+                }
+            });
+        }
+
         // Dispatch to the NATS transport when the operator opted in via
         // `[transport] kind = "nats"`. The MQTT path below is unchanged.
         if matches!(
