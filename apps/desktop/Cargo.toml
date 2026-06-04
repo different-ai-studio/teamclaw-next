@@ -90,6 +90,9 @@ futures-lite = "2"
 axum = "0.7"
 tower-http = { version = "0.6", features = ["cors"] }
 gethostname = "1.1.0"
+# whoami: cross-platform OS account real-name / username for seeding default
+# member display names (macOS/Windows/Linux via one API).
+whoami = "1"
 ignore = "0.4"
 
 # ClawHub skill registry

@@ -309,7 +309,7 @@ export type TeamInviteInput =
 export interface TeamsBackend {
   listCurrentUserTeams(args?: { limit?: number }): Promise<TeamSummary[]>;
   getTeam(teamId: string): Promise<TeamSummary | null>;
-  createTeam(input: { name: string; slug?: string | null }): Promise<TeamSummary>;
+  createTeam(input: { name: string; slug?: string | null; displayName?: string | null }): Promise<TeamSummary>;
   renameTeam(teamId: string, name: string): Promise<TeamSummary>;
   createTeamInvite(input: TeamInviteInput): Promise<TeamInviteResult>;
   removeTeamActor(teamId: string, actorId: string): Promise<void>;
