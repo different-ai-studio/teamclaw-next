@@ -26,21 +26,32 @@ Missing required argument replies: `Usage: /ctx <text>`
 
 ## Architecture
 
+### Two-layer dispatch
+
+Commands are dispatched in priority order:
+
+1. **ACP agent commands** — the agent has reported this command via `AcpAvailableCommands`. Forward to ACP via `send_slash_command()`. The agent handles it and replies.
+2. **Gateway meta commands** — fallback if ACP has no matching command. Handled locally by `dispatch_command()`.
+
+This means if an ACP agent reports `/clear`, its `/clear` wins over the gateway's built-in `/clear`. Gateway meta commands only fire when the agent doesn't know the command.
+
 ### New file: `crates/teamclaw-gateway/src/commands.rs`
 
 **Public API:**
 
 ```rust
-/// Returns Some(Command) if text starts with '/', None otherwise.
-pub fn parse_command(text: &str) -> Option<Command>
+/// Returns Some((name, arg)) if text starts with '/', None otherwise.
+/// arg is the remainder after the command name, trimmed.
+pub fn parse_slash(text: &str) -> Option<(String, Option<String>)>
 
-/// Execute a parsed command. Calls `reply` with the response string.
-/// Returns Ok(()) on success, Err on ACP/store failures.
-pub async fn dispatch_command<S, A>(
-    cmd: Command,
+/// Dispatch a slash command. Checks ACP agent commands first, falls back
+/// to gateway meta commands. Calls `reply` with the response string.
+pub async fn dispatch<S, A>(
+    name: &str,
+    arg: Option<&str>,
     acp: &A,
     store: &S,
-    session_id: &str,
+    session_id: &AmuxSessionId,
     reply: impl Fn(String) + Send,
 ) -> anyhow::Result<()>
 where
@@ -48,12 +59,12 @@ where
     S: ChannelStore + Send + Sync,
 ```
 
-**Command enum:**
+**Gateway meta command enum (internal):**
 
 ```rust
-pub enum Command {
+enum MetaCommand {
     Help,
-    Model(Option<String>),    // None = list, Some(name) = switch
+    Model(Option<String>),      // None = list, Some(name) = switch
     Sessions(Option<String>),   // None = list, Some(id) = switch
     Agents(Option<String>),     // None = list, Some(type) = set
     Workspaces(Option<String>), // None = list, Some(id) = set
@@ -72,10 +83,30 @@ Add `list_sessions` to `AcpHandle`:
 async fn list_sessions(&self) -> Result<Vec<(AmuxSessionId, bool)>, AcpError>;
 ```
 
-The daemon's `AmuxdAcpHandle` implementation queries amuxd for the session list.
-`/sessions <id>` switches the gateway binding to use that session going forward (updates the per-chat session mapping in `ChannelStore`).
+Also add `send_slash_command` for forwarding ACP agent commands:
 
-Also add `list_agents`, `set_agent`, `list_workspaces`, `set_workspace`:
+```rust
+/// Forward a slash command to the ACP agent. Used when the agent has
+/// reported this command via AcpAvailableCommands. Returns the agent's
+/// reply text (same shape as send_prompt).
+async fn send_slash_command(
+    &self,
+    session: &AmuxSessionId,
+    name: &str,
+    input: Option<&str>,
+) -> Result<AcpTurnOutcome, AcpError>;
+
+/// Return the slash commands the agent has currently reported, or empty
+/// if none. Used by dispatch() to check ACP-first priority.
+async fn available_commands(
+    &self,
+    session: &AmuxSessionId,
+) -> Result<Vec<AcpAvailableCommand>, AcpError>;
+```
+
+The daemon's `AmuxdAcpHandle` reads `available_commands` from the cached `RuntimeInfo` (already stored in `runtime/manager.rs`).
+
+Also add `list_sessions`, `list_agents`, `set_agent`, `list_workspaces`, `set_workspace`:
 
 ```rust
 /// List available agent types. Returns (agent_type, is_current) pairs.
@@ -99,8 +130,8 @@ In the text-message handler, before calling `acp.send_prompt()`:
 ```rust
 use crate::commands::{parse_command, dispatch_command};
 
-if let Some(cmd) = parse_command(&text) {
-    dispatch_command(cmd, &acp, &store, &session_id, |reply| {
+if let Some((name, arg)) = parse_slash(&text) {
+    dispatch(&name, arg.as_deref(), &acp, &store, &session_id, |reply| {
         // call existing send_text helper
         send_chat_message(&ws_sink, &chat_id, &reply).await;
     }).await?;
@@ -212,7 +243,7 @@ Unit tests in `commands.rs`:
 ```
 crates/teamclaw-gateway/src/
 ├── commands.rs     ← NEW: parse_command, dispatch_command, Command enum
-├── acp.rs          ← add: list_sessions, list_agents, set_agent, list_workspaces, set_workspace
+├── acp.rs          ← add: send_slash_command, available_commands, list_sessions, list_agents, set_agent, list_workspaces, set_workspace
 ├── lib.rs          ← add: pub mod commands
 └── wecom.rs        ← add: ~5 lines in text message handler
 
