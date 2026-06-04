@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import i18n from '@/lib/i18n'
 
 // Hoisted, mutable test state shared with the module mocks below.
 const h = vi.hoisted(() => ({
@@ -166,7 +167,10 @@ describe('daemon-onboarding refresh() orchestration', () => {
     await p
     const s = useDaemonOnboardingStore.getState()
     expect(s.status).toBe('error')
-    expect(s.error).toMatch(/amuxd/)
+    // De-jargoned: the user-facing error no longer leaks "amuxd"; it surfaces
+    // the i18n start-failure string with a retry hint.
+    expect(s.error).toBe(i18n.t('settings.daemonOnboarding.startFailed'))
+    expect(s.error).not.toMatch(/amuxd/)
     expect(h.invokeCalls).toContain('daemon_install_service')
   })
 

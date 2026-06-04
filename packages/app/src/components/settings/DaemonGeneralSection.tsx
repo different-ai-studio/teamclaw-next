@@ -24,7 +24,6 @@ import { cn, isTauri } from '@/lib/utils'
 import { SectionHeader, SettingCard } from './shared'
 
 const permissionLevels: AgentPermissionLevel[] = ['view', 'prompt', 'admin']
-const visibilityOptions: AgentVisibility[] = ['personal', 'team']
 
 function formatRelative(value: string | null): string {
   if (!value) return '-'
@@ -295,19 +294,19 @@ export function DaemonGeneralSection() {
                   <span className="text-xs font-medium text-muted-foreground">{t('settings.daemonGeneral.displayName', 'Display name')}</span>
                   <Input value={displayName} onChange={(event) => setDisplayName(event.target.value)} disabled={saving || !agent.isOwner} />
                 </label>
-                <label className="space-y-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">{t('settings.daemonGeneral.visibility', 'Visibility')}</span>
-                  <select
-                    value={visibility}
-                    onChange={(event) => setVisibility(event.target.value as AgentVisibility)}
-                    disabled={saving || !agent.isOwner}
-                    className="h-9 w-full rounded-[7px] border border-border bg-paper px-3 text-[13px] transition-colors focus:border-foreground/30 focus:outline-none disabled:opacity-60"
-                  >
-                    {visibilityOptions.map((option) => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                  </select>
-                </label>
+                <div className="space-y-1.5">
+                  <span className="block text-xs font-medium text-muted-foreground">{t('settings.daemonGeneral.visibility', 'Visibility')}</span>
+                  <label className="flex h-9 items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={visibility === 'team'}
+                      onChange={(event) => setVisibility(event.target.checked ? 'team' : 'personal')}
+                      disabled={saving || !agent.isOwner}
+                      className="h-4 w-4 shrink-0 rounded-[5px] border-border accent-coral disabled:opacity-60"
+                    />
+                    <span className="text-[13px] text-foreground">{t('settings.daemonGeneral.shareWithTeam', 'Share with the team')}</span>
+                  </label>
+                </div>
               </div>
 
               <div className="space-y-2.5">

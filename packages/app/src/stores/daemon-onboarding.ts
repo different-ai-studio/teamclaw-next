@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import i18n from '@/lib/i18n'
 import { isTauri } from '@/lib/utils'
 import { getBackend } from '@/lib/backend'
 import { useCurrentTeamStore } from '@/stores/current-team'
@@ -171,7 +172,12 @@ export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get)
     set({
       status: ok ? 'ready' : 'error',
       loaded: true,
-      error: ok ? null : 'amuxd 启动失败：请确认本机 amuxd 可运行后重试。',
+      error: ok
+        ? null
+        : i18n.t(
+            'settings.daemonOnboarding.startFailed',
+            'Failed to start the background service. Make sure it can run on this machine, then retry.',
+          ),
     })
     if (ok) void ensureDefaultWorkspaceRegistered(currentTeamId)
   },
