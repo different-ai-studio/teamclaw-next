@@ -157,6 +157,17 @@ export function createSupabaseBusinessRepository(options) {
       return { defaultAgentId: (value ?? null) as string | null };
     },
 
+    async reportClientVersion(teamId, body) {
+      const { error } = await supabase.rpc("report_client_version", {
+        p_team_id: teamId,
+        p_client_type: body.clientType,
+        p_version: body.version,
+        p_device_id: body.deviceId,
+        p_build: body.build ?? null,
+      });
+      if (error) throw error;
+    },
+
     // --- Team share mode (Task 3 of share-onboarding refactor) ---
 
     async enableShareMode(teamId, mode, gitConfig) {
@@ -1618,7 +1629,25 @@ export function createSupabaseBusinessRepository(options) {
         .eq("id", actorId)
         .maybeSingle();
       if (error) throw error;
-      return data ? mapDirectoryActor(data) : null;
+      if (!data) return null;
+      const actor = mapDirectoryActor(data);
+      const { data: versions, error: vErr } = await supabase
+        .from("actor_client_versions")
+        .select("client_type, version, device_id, build, last_reported_at")
+        .eq("actor_id", actorId)
+        .order("client_type", { ascending: true })
+        .order("last_reported_at", { ascending: false });
+      if (vErr) throw vErr;
+      return {
+        ...actor,
+        clientVersions: (versions ?? []).map((v) => ({
+          clientType: v.client_type,
+          version: v.version,
+          deviceId: v.device_id,
+          build: v.build ?? null,
+          lastReportedAt: v.last_reported_at,
+        })),
+      };
     },
 
     async upsertExternalActor(input) {
