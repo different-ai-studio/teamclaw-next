@@ -1839,13 +1839,16 @@ export function createSupabaseBusinessRepository(options) {
       if (!Array.isArray(agentIds) || agentIds.length === 0) return [];
       const { data, error } = await supabase
         .from("agents")
-        .select("id, agent_types, default_agent_type")
+        .select("id, agent_types, default_agent_type, default_workspace_id")
         .in("id", agentIds);
       if (error) throw error;
       return (data ?? []).map((row) => ({
         id: row.id,
         agentTypes: Array.isArray(row.agent_types) ? row.agent_types : null,
         defaultAgentType: row.default_agent_type ?? null,
+        // The amuxd daemon reads this to resolve the gateway runtime's working
+        // directory from its own agent's default workspace.
+        defaultWorkspaceId: row.default_workspace_id ?? null,
       }));
     },
 

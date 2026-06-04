@@ -498,12 +498,56 @@ impl DaemonServer {
             }
         };
 
+        // Resolve the daemon agent's own configured defaults so gateway
+        // (WeCom/etc.) sessions spawn on its default agent type + default
+        // workspace instead of the daemon-wide fallback type and a /tmp scratch
+        // dir. Best-effort: a fetch failure or unset defaults degrades to the
+        // prior behavior rather than blocking channel startup.
+        let (default_agent_type, default_workspace_dir) = match self
+            .backend
+            .get_agent_defaults(&primary_agent_actor_id)
+            .await
+        {
+            Ok(defaults) => {
+                let agent_type = defaults
+                    .default_agent_type
+                    .as_deref()
+                    .and_then(agent_type_from_name);
+                let workspace_dir = defaults.default_workspace_id.as_deref().and_then(|id| {
+                    let path = self.workspaces.find_by_id(id).map(|w| w.path.clone());
+                    if path.is_none() {
+                        warn!(
+                            workspace_id = %id,
+                            "channel manager: agent default workspace not synced locally; \
+                             gateway sessions fall back to a scratch dir"
+                        );
+                    }
+                    path
+                });
+                info!(
+                    ?agent_type,
+                    workspace_dir = ?workspace_dir,
+                    "channel manager: resolved gateway agent defaults"
+                );
+                (agent_type, workspace_dir)
+            }
+            Err(e) => {
+                warn!(
+                    "channel manager: failed to fetch agent defaults: {e:?}; \
+                     gateway sessions use daemon-wide defaults"
+                );
+                (None, None)
+            }
+        };
+
         let acp_handle: Arc<dyn AcpHandle> = Arc::new(AmuxdAcpHandle {
             manager: self.agents.clone(),
             logical_to_acp: Arc::new(AsyncMutex::new(HashMap::new())),
             team_id: team_id.clone(),
             model_override: Arc::new(AsyncMutex::new(HashMap::new())),
             backend: self.backend.clone(),
+            default_agent_type,
+            default_workspace_dir,
         });
         let store: Arc<dyn ChannelStore> = Arc::new(AmuxdChannelStore {
             client: self.backend.clone(),
