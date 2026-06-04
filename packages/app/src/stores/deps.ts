@@ -35,8 +35,20 @@ interface DepInstallProgressEvent {
 // ─── Persistent setup status ─────────────────────────────────────────────────
 
 const DEPS_SETUP_KEY = `${appShortName}-deps-setup-status`
+/** First-run welcome screen seen flag (shown once, before dependency setup). */
+const WELCOME_SEEN_KEY = `${appShortName}-welcome-seen`
 /** Re-check interval: 24 hours */
 const RECHECK_TTL_MS = 24 * 60 * 60 * 1000
+
+/** Whether the first-run welcome screen has already been dismissed. */
+export function hasSeenWelcome(): boolean {
+  return loadFromStorage<boolean>(WELCOME_SEEN_KEY, false)
+}
+
+/** Mark the first-run welcome screen as seen (called on "Get started"). */
+export function markWelcomeSeen(): void {
+  saveToStorage(WELCOME_SEEN_KEY, true)
+}
 
 interface DepsSetupStatus {
   /** Whether user has completed or skipped the setup guide */
