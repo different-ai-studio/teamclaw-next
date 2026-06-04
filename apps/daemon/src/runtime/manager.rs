@@ -289,6 +289,14 @@ impl RuntimeManager {
             .insert(agent_id.to_string(), commands);
     }
 
+    /// Return the slash commands last reported by `agent_id`, or an empty vec.
+    pub fn get_available_commands(&self, agent_id: &str) -> Vec<amux::AcpAvailableCommand> {
+        self.available_commands_per_agent
+            .get(agent_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// Records that an agent's session is now running on `model_id`.
     /// Caller is responsible for actually invoking ACP set_model on the
     /// adapter; this only updates the tracking map.
