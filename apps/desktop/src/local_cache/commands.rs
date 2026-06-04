@@ -1,6 +1,7 @@
 use super::store::{
     enrich_parts_json_from_opencode, ActorRow, AgentRuntimeEventRow, ClaimRow, IdeaRow,
-    LocalCacheStore, MessageRow, OutboxRow, SessionParticipantRow, SessionRow, SubmissionRow,
+    LocalCacheStore, MessageRow, OutboxRow, SessionParticipantRow, SessionRow, SessionWorkspaceRow,
+    SubmissionRow,
 };
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -211,6 +212,35 @@ pub async fn local_cache_session_soft_delete(
     let owner = db.team_for_session(&id).await?;
     assert_team_opt(&state, owner.as_deref()).await?;
     db.session_soft_delete(&id, &deleted_at).await
+}
+
+// ─── session_workspace commands ───────────────────────────────────────────
+
+#[tauri::command]
+pub async fn local_cache_session_workspace_upsert_batch(
+    state: tauri::State<'_, LocalCacheState>,
+    rows: Vec<SessionWorkspaceRow>,
+) -> Result<(), String> {
+    if let Some(current) = current_team(&state).await {
+        if let Some(bad) = rows.iter().find(|r| r.team_id != current) {
+            return Err(format!(
+                "local_cache: team gate mismatch in session_workspace batch (current={}, row_team={})",
+                current, bad.team_id
+            ));
+        }
+    }
+    let db = get_db(&state).await?;
+    db.session_workspace_upsert_batch(&rows).await
+}
+
+#[tauri::command]
+pub async fn local_cache_session_workspace_load_team(
+    state: tauri::State<'_, LocalCacheState>,
+    team_id: String,
+) -> Result<Vec<SessionWorkspaceRow>, String> {
+    assert_team(&state, &team_id).await?;
+    let db = get_db(&state).await?;
+    db.session_workspace_load_team(&team_id).await
 }
 
 // ─── session_participant commands ─────────────────────────────────────────

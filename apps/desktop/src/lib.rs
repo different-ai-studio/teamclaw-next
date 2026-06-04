@@ -449,6 +449,8 @@ pub fn run() {
             local_cache::commands::local_cache_actor_soft_delete,
             local_cache::commands::local_cache_session_upsert_batch,
             local_cache::commands::local_cache_session_load_team,
+            local_cache::commands::local_cache_session_workspace_upsert_batch,
+            local_cache::commands::local_cache_session_workspace_load_team,
             local_cache::commands::local_cache_session_soft_delete,
             local_cache::commands::local_cache_session_participant_upsert_batch,
             local_cache::commands::local_cache_session_participant_load_session,
