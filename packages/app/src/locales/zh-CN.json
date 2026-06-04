@@ -617,6 +617,14 @@
     "unknown": "未知状态"
   },
   "sidebar": {
+    "localDaemon": "本机",
+    "newWorkspace": "新建工作区",
+    "workspacesLoading": "正在加载工作区…",
+    "noWorkspaces": "暂无工作区",
+    "noWorkspaceSessions": "该工作区下暂无会话",
+    "workspaceAdded": "工作区已添加",
+    "workspaceAddFailed": "添加工作区失败：{{msg}}",
+    "workspaceDaemonRegisterFailed": "工作区已添加，但注册到本机 daemon 失败",
     "invite": "邀请成员",
     "newIdea": "新建想法",
     "searchSessions": "搜索会话",
