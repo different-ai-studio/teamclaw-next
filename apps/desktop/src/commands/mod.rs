@@ -27,7 +27,6 @@ pub mod team;
 pub mod team_litellm;
 pub mod team_secret_store;
 pub mod team_share;
-pub mod team_shared_git;
 pub mod team_sync_proxy;
 pub mod team_types;
 pub mod team_unified;

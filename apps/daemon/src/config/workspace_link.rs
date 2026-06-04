@@ -39,6 +39,29 @@ pub fn ensure_workspace_link(workspace_root: &Path, team_id: &str) -> LinkStatus
     };
     let link = workspace_root.join(TEAM_LINK_NAME);
 
+    // Never link a "workspace" whose `teamclaw-team` path IS the team's own
+    // global store dir (`~/.amuxd/teams/<id>/teamclaw-team`). That happens when
+    // a bogus workspace at `~/.amuxd/teams/<id>` gets registered (such entries
+    // have appeared in workspaces.toml, synced from the cloud). With link ==
+    // target the code below would treat the global real dir as a "legacy dir",
+    // `remove_dir_all` it (destroying the synced content), then symlink it to
+    // itself — a self-referential link that makes every `cd` into it fail with
+    // ELOOP. Clean up any such self-symlink and refuse to (re)create it.
+    if link == target {
+        if std::fs::symlink_metadata(&link)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            let _ = std::fs::remove_file(&link);
+        }
+        tracing::warn!(
+            team_id,
+            workspace = %workspace_root.display(),
+            "skipping team link: workspace path is the team's global dir (would self-symlink)"
+        );
+        return LinkStatus::Fallback;
+    }
+
     // Already a symlink: repoint if stale, else done.
     if let Ok(meta) = std::fs::symlink_metadata(&link) {
         if meta.file_type().is_symlink() {
@@ -270,6 +293,30 @@ mod tests {
         assert_eq!(
             std::fs::read_link(&link).unwrap(),
             global_team_store::global_team_dir("team-1")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_self_symlink_when_workspace_is_the_global_dir() {
+        let (_home, _guard) = temp_home();
+        // Seed the team's global dir with real content.
+        let global = global_team_store::ensure_initialized("team-self").unwrap();
+        std::fs::write(global.join("skills/keep.md"), b"keep me").unwrap();
+
+        // A bogus "workspace" whose path is the team store dir itself makes
+        // link == target. We must NOT migrate/delete the global dir or create a
+        // self-symlink.
+        let ws_root = global.parent().unwrap().to_path_buf();
+        let status = ensure_workspace_link(&ws_root, "team-self");
+        assert_eq!(status, LinkStatus::Fallback);
+
+        // Global dir stays a real dir (not a self-symlink) and keeps its content.
+        let meta = std::fs::symlink_metadata(&global).unwrap();
+        assert!(meta.is_dir() && !meta.file_type().is_symlink());
+        assert_eq!(
+            std::fs::read(global.join("skills/keep.md")).unwrap(),
+            b"keep me"
         );
     }
 
