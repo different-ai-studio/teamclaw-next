@@ -55,6 +55,14 @@ export function ActorsSection() {
     [actors, defaultAgentId, localDaemonAgentId],
   )
 
+  // The local daemon's full actor row (for the pinned LocalDaemonRow + its
+  // shared right-click menu). Resolved from the team actor list by the id we
+  // looked up via getCurrentDaemonAgent.
+  const localDaemonActor = React.useMemo(
+    () => actors.find((a) => a.id === localDaemonAgentId) ?? null,
+    [actors, localDaemonAgentId],
+  )
+
   const handleSelect = (actor: ActorRowData) => {
     setFilter({
       kind: 'actor',
@@ -162,7 +170,14 @@ export function ActorsSection() {
       </AlertDialog>
       {!collapsed && (
         <div className="flex flex-col">
-          <LocalDaemonRow />
+          <LocalDaemonRow
+            actor={localDaemonActor}
+            isDefault={!!localDaemonActor && localDaemonActor.id === defaultAgentId}
+            onViewDetail={setDetailFor}
+            onCopyName={handleCopyName}
+            onCopyId={handleCopyId}
+            onRequestRemove={setRemoveFor}
+          />
           {loading && (
             <div className="px-[9px] py-1 text-[12px] text-faint">{t('actors.loading', 'Loading actors...')}</div>
           )}
