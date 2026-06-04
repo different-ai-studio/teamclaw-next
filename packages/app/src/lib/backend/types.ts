@@ -468,6 +468,10 @@ export interface ActorsBackend {
   }): Promise<void>;
   removeAgentAccess(accessId: string): Promise<void>;
   makeAgentPersonal(agentActorId: string): Promise<void>;
+  /** Returns the calling member's default agent id for a team (null if unset). */
+  getMemberDefaultAgent(teamId: string): Promise<string | null>;
+  /** Sets (agentId) or clears (null) the calling member's default agent. Returns the new value. */
+  setMemberDefaultAgent(teamId: string, agentId: string | null): Promise<string | null>;
 }
 
 export interface SessionMemberCandidate extends ActorDirectoryEntry {

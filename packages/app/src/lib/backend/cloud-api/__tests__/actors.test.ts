@@ -19,7 +19,11 @@ function mockClient(responses: Record<string, unknown>): CloudApiClient {
       if (key) return responses[key] as never;
       return undefined as never;
     },
-    async put() { throw new Error("unexpected put"); },
+    async put(path) {
+      const key = `PUT ${path}`;
+      if (key in responses) return responses[key] as never;
+      throw new Error(`unexpected PUT ${path}`);
+    },
     async delete() { return undefined as never; },
     async postRaw() { throw new Error("not impl"); },
     async getRaw() { throw new Error("not impl"); },
@@ -83,5 +87,37 @@ describe("actors module", () => {
     const mod = createActorsModule(client);
     const out = await mod.listActorDirectoryByIds(["actor-1"]);
     expect(out[0].id).toBe("actor-1");
+  });
+
+  it("getMemberDefaultAgent GETs /v1/teams/:teamId/members/me/default-agent", async () => {
+    const client = mockClient({
+      "GET /v1/teams/team-1/members/me/default-agent": { defaultAgentId: "a-9" },
+    });
+    const mod = createActorsModule(client);
+    expect(await mod.getMemberDefaultAgent("team-1")).toBe("a-9");
+  });
+
+  it("getMemberDefaultAgent returns null when unset", async () => {
+    const client = mockClient({
+      "GET /v1/teams/team-1/members/me/default-agent": { defaultAgentId: null },
+    });
+    const mod = createActorsModule(client);
+    expect(await mod.getMemberDefaultAgent("team-1")).toBeNull();
+  });
+
+  it("setMemberDefaultAgent PUTs the agentId and returns the confirmed value", async () => {
+    const client = mockClient({
+      "PUT /v1/teams/team-1/members/me/default-agent": { defaultAgentId: "a-9" },
+    });
+    const mod = createActorsModule(client);
+    expect(await mod.setMemberDefaultAgent("team-1", "a-9")).toBe("a-9");
+  });
+
+  it("setMemberDefaultAgent PUTs null to clear", async () => {
+    const client = mockClient({
+      "PUT /v1/teams/team-1/members/me/default-agent": { defaultAgentId: null },
+    });
+    const mod = createActorsModule(client);
+    expect(await mod.setMemberDefaultAgent("team-1", null)).toBeNull();
   });
 });

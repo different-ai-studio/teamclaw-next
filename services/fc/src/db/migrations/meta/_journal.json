@@ -57,6 +57,13 @@
       "when": 1780474112354,
       "tag": "0007_bizarre_the_executioner",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1780534441508,
+      "tag": "0008_add_member_default_agent",
+      "breakpoints": true
     }
   ]
 }

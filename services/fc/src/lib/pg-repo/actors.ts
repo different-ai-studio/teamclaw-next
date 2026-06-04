@@ -18,8 +18,8 @@
 
 import { and, eq, or, sql } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
-import { actors, members, teamMembers, actorDirectory } from "../../db/schema/index.js";
-import { resolveActorForTeam } from "./authz.js";
+import { actors, agents, members, teamMembers, actorDirectory } from "../../db/schema/index.js";
+import { resolveActorForTeam, requireActorForTeam } from "./authz.js";
 import { ApiError } from "../http-utils.js";
 
 const iso = (d: Date | string | null | undefined): string | null =>
@@ -220,6 +220,65 @@ export function makeActorsRepo(db: DbLike, ctx: ActorsCtx = {}) {
         created_at: r.createdAt ? new Date(r.createdAt).toISOString() : null,
         updated_at: r.updatedAt ? new Date(r.updatedAt).toISOString() : null,
       }));
+    },
+
+    /**
+     * Returns the calling member's default agent for a team: `{ defaultAgentId }`
+     * (null when unset). The caller's own actor is resolved server-side from the
+     * JWT — never supplied by the client.
+     */
+    async getMemberDefaultAgent(teamId: string) {
+      if (!ctx.userId) throw new ApiError(401, "missing_identity", "authentication required");
+      const callerActorId = await requireActorForTeam(db, ctx.userId, teamId);
+      const [r] = await db
+        .select({ defaultAgentId: members.defaultAgentId })
+        .from(members)
+        .where(eq(members.id, callerActorId))
+        .limit(1);
+      return { defaultAgentId: (r?.defaultAgentId ?? null) as string | null };
+    },
+
+    /**
+     * Sets (agentId) or clears (null) the calling member's default agent.
+     * Rejects an agent that is not in the team, not active, or not visible to
+     * the caller (personal agents owned by someone else) — 409 for the former
+     * two, 403 for visibility. Returns `{ defaultAgentId }`.
+     */
+    async setMemberDefaultAgent(teamId: string, agentId: string | null) {
+      if (!ctx.userId) throw new ApiError(401, "missing_identity", "authentication required");
+      const callerActorId = await requireActorForTeam(db, ctx.userId, teamId);
+
+      if (agentId != null) {
+        const [ag] = await db
+          .select({
+            teamId: actors.teamId,
+            actorType: actors.actorType,
+            status: agents.status,
+            visibility: agents.visibility,
+            ownerMemberId: agents.ownerMemberId,
+          })
+          .from(actors)
+          .innerJoin(agents, eq(agents.id, actors.id))
+          .where(eq(actors.id, agentId))
+          .limit(1);
+        if (!ag || ag.actorType !== "agent" || ag.teamId !== teamId) {
+          throw new ApiError(409, "invalid_agent", "agent is not in this team");
+        }
+        if (ag.status !== "active") {
+          throw new ApiError(409, "invalid_agent", "agent is not active");
+        }
+        const visible = ag.visibility === "team" || ag.ownerMemberId === callerActorId;
+        if (!visible) {
+          throw new ApiError(403, "forbidden", "agent is not visible to caller");
+        }
+      }
+
+      const [r] = await (db.update(members) as any)
+        .set({ defaultAgentId: agentId, updatedAt: new Date() })
+        .where(eq(members.id, callerActorId))
+        .returning({ defaultAgentId: members.defaultAgentId });
+      if (!r) throw new ApiError(404, "not_found", "member not found");
+      return { defaultAgentId: (r.defaultAgentId ?? null) as string | null };
     },
   };
 }

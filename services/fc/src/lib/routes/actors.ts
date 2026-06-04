@@ -68,6 +68,24 @@ export function registerActors(router) {
     return { body: { items: result.items } };
   });
 
+  // Per-member default agent. "me" is resolved server-side from the bearer
+  // token + team — the route never accepts a client-supplied member id, so a
+  // caller can only read/write their own default.
+  router.get("/v1/teams/:teamId/members/me/default-agent", async (ctx) => {
+    const teamId = decodeURIComponent(ctx.params.teamId);
+    const result = await ctx.repository.getMemberDefaultAgent(teamId);
+    return { body: { defaultAgentId: result.defaultAgentId ?? null } };
+  });
+
+  router.put("/v1/teams/:teamId/members/me/default-agent", async (ctx) => {
+    const teamId = decodeURIComponent(ctx.params.teamId);
+    const body = ctx.json ?? {};
+    const agentId =
+      body.agentId === undefined || body.agentId === null ? null : String(body.agentId);
+    const result = await ctx.repository.setMemberDefaultAgent(teamId, agentId);
+    return { body: { defaultAgentId: result.defaultAgentId ?? null } };
+  });
+
   router.patch("/v1/agents/:agentActorId", async (ctx) => {
     const agentActorId = decodeURIComponent(ctx.params.agentActorId);
     const body = ctx.json ?? {};

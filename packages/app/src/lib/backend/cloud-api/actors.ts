@@ -169,5 +169,18 @@ export function createActorsModule(client: CloudApiClient): ActorsBackend {
         {},
       );
     },
+    async getMemberDefaultAgent(teamId: string): Promise<string | null> {
+      const out = await client.get<{ defaultAgentId: string | null }>(
+        `/v1/teams/${encodeURIComponent(teamId)}/members/me/default-agent`,
+      );
+      return out.defaultAgentId ?? null;
+    },
+    async setMemberDefaultAgent(teamId: string, agentId: string | null): Promise<string | null> {
+      const out = await client.put<{ defaultAgentId: string | null }>(
+        `/v1/teams/${encodeURIComponent(teamId)}/members/me/default-agent`,
+        { agentId: agentId ?? null },
+      );
+      return out.defaultAgentId ?? null;
+    },
   };
 }
