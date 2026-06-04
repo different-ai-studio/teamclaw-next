@@ -161,6 +161,7 @@
     "showLess": "收起",
     "streamingBar": {
       "streaming": "正在输出…",
+      "streamingActive": "正在回复",
       "waitingApproval": "等待你审批后继续…"
     },
     "permissionCard": {
@@ -183,6 +184,8 @@
     },
     "todo": {
       "summary": "共 {{count}} 个任务，已经完成 {{completed}} 个",
+      "stackSummary": "{{count}} 项任务 · {{completed}} 已完成",
+      "moreItems": "还有 {{count}} 项 · 展开查看",
       "collapseAria": "收起待办面板",
       "expandAria": "展开待办面板",
       "queueCollapseAria": "收起排队消息",

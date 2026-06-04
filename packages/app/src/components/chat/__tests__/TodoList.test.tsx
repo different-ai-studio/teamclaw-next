@@ -49,21 +49,16 @@ describe("TodoList", () => {
       />,
     );
 
+    expect(screen.getByTestId("composer-plan-slot")).toBeTruthy();
     expect(screen.getByTestId("todo-list-inline")).toBeTruthy();
-    expect(screen.getByText("3 tasks, 1 completed")).toBeTruthy();
+    expect(screen.getByText("3 项任务 · 1 已完成")).toBeTruthy();
     expect(screen.getByTestId("todo-list-inline-queue").textContent).toContain("1 messages queued");
-    expectButtonIcon(screen.getByRole("button", { name: "Collapse todo panel" }), "lucide-chevron-down");
-    expectButtonIcon(screen.getByRole("button", { name: "Collapse queued messages" }), "lucide-chevron-down");
     expect(screen.getByText("Run follow-up checks")).toBeTruthy();
-    expect(screen.getByText("Update role load UI")).toBeTruthy();
-    expect(screen.getByTestId("todo-list-inline-queue-shell").className).toContain("pt-0");
-    expect(screen.getByTestId("todo-list-inline-scroll").className).toContain("max-h-[8.75rem]");
+    expect(screen.getByText(/2\. Update role load UI/)).toBeTruthy();
+    expect(screen.getByTestId("todo-list-inline-scroll").className).toContain("max-h-[7.5rem]");
     expect(screen.getByTestId("todo-list-inline-scroll").className).toContain("overflow-y-auto");
     expect(screen.getByTestId("todo-list-inline-scroll").className).toContain("[scrollbar-width:thin]");
     expect(screen.getByTestId("todo-list-inline-queue-body").className).toContain("[scrollbar-width:thin]");
-    expect(screen.getByTestId("todo-list-inline-queue-body").className).toContain("[scrollbar-gutter:stable]");
-    expect(screen.getByTestId("todo-list-inline-queue-body").className).toContain("pr-2");
-    expect((screen.getByTestId("todo-list-inline-scroll").firstChild as HTMLElement).className).toContain("items-center");
   });
 
   it("hides todo content when the inline todo section is collapsed", () => {
@@ -81,12 +76,10 @@ describe("TodoList", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse todo panel" }));
+    fireEvent.click(screen.getByTestId("todo-list-inline"));
 
     expect(screen.getByTestId("todo-list-inline-scroll-shell").getAttribute("aria-hidden")).toBe("true");
-    expect(screen.queryByText("In progress: Update role load UI")).toBeNull();
-    expectButtonIcon(screen.getByRole("button", { name: "Expand todo panel" }), "lucide-chevron-up");
-    expect(screen.getByRole("button", { name: "Collapse queued messages" })).toBeTruthy();
+    expect(screen.getByTestId("todo-list-inline").getAttribute("aria-expanded")).toBe("false");
     expect(screen.getByText("Run follow-up checks")).toBeTruthy();
   });
 
@@ -101,10 +94,7 @@ describe("TodoList", () => {
       />,
     );
 
-    expect(screen.getByTestId("todo-list-inline").className).toContain("-mb-1");
-    expect(screen.getByTestId("todo-list-inline").firstElementChild?.className).toContain("rounded-b-none");
-    expect(screen.queryByText("All tasks completed")).toBeNull();
-    expect(screen.getByRole("button", { name: "Expand todo panel" })).toBeTruthy();
+    expect(screen.getByTestId("todo-list-inline").getAttribute("aria-expanded")).toBe("false");
     expect(screen.getByTestId("todo-list-inline-scroll-shell").getAttribute("aria-hidden")).toBe("true");
   });
 
@@ -115,8 +105,8 @@ describe("TodoList", () => {
     ];
     const { rerender } = render(<TodoList variant="inline" todos={initialTodos} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse todo panel" }));
-    expect(screen.getByRole("button", { name: "Expand todo panel" })).toBeTruthy();
+    fireEvent.click(screen.getByTestId("todo-list-inline"));
+    expect(screen.getByTestId("todo-list-inline").getAttribute("aria-expanded")).toBe("false");
 
     rerender(
       <TodoList
@@ -129,8 +119,8 @@ describe("TodoList", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Collapse todo panel" })).toBeTruthy();
-    expect(screen.getByText("Verify markdown rendering")).toBeTruthy();
+    expect(screen.getByTestId("todo-list-inline").getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText(/3\. Verify markdown rendering/)).toBeTruthy();
   });
 
   it("lets queue collapse independently while keeping both headers visible", () => {
@@ -146,12 +136,13 @@ describe("TodoList", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse queued messages" }));
+    const queueToggle = screen
+      .getByTestId("todo-list-inline-queue")
+      .querySelector("button") as HTMLButtonElement;
+    fireEvent.click(queueToggle);
 
-    expect(screen.getByRole("button", { name: "Collapse todo panel" })).toBeTruthy();
-    expectButtonIcon(screen.getByRole("button", { name: "Expand queued messages" }), "lucide-chevron-up");
     expect(screen.getByTestId("todo-list-inline-queue-shell").getAttribute("aria-hidden")).toBe("true");
-    expect(screen.getByText("Update role load UI")).toBeTruthy();
+    expect(screen.getByText(/1\. Update role load UI/)).toBeTruthy();
   });
 
   it("keeps both headers visible when both sections are collapsed", () => {
@@ -167,17 +158,16 @@ describe("TodoList", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse todo panel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Collapse queued messages" }));
+    fireEvent.click(screen.getByTestId("todo-list-inline"));
+    const queueToggle = screen
+      .getByTestId("todo-list-inline-queue")
+      .querySelector("button") as HTMLButtonElement;
+    fireEvent.click(queueToggle);
 
-    expect(screen.getByTestId("todo-list-inline").className).toContain("-mb-1");
-    expect(screen.getByTestId("todo-list-inline").firstElementChild?.className).toContain("rounded-b-none");
-    expect(screen.getByRole("button", { name: "Expand todo panel" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Expand queued messages" })).toBeTruthy();
-    expect(screen.getByText("1 tasks, 0 completed")).toBeTruthy();
+    expect(screen.getByText("1 项任务 · 0 已完成")).toBeTruthy();
     expect(screen.getByTestId("todo-list-inline-queue").textContent).toContain("1 messages queued");
-    expect(screen.queryByText("In progress: Update role load UI")).toBeNull();
     expect(screen.getByTestId("todo-list-inline-scroll-shell").getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByTestId("todo-list-inline").getAttribute("aria-expanded")).toBe("false");
     expect(screen.getByTestId("todo-list-inline-queue-shell").getAttribute("aria-hidden")).toBe("true");
   });
 
@@ -192,8 +182,8 @@ describe("TodoList", () => {
       />,
     );
 
-    expect(screen.getByTestId("todo-list-inline")).toBeTruthy();
-    expect(screen.queryByText("All tasks completed")).toBeNull();
+    expect(screen.getByTestId("composer-plan-slot")).toBeTruthy();
+    expect(screen.queryByTestId("todo-list-inline")).toBeNull();
     expect(screen.getByTestId("todo-list-inline-queue").textContent).toContain("2 messages queued");
     expect(screen.getByText("Run follow-up checks")).toBeTruthy();
     expect(screen.getByText("Summarize findings")).toBeTruthy();
