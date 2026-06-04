@@ -88,7 +88,7 @@ export function ActorsSection() {
           className="group flex flex-1 items-center gap-1.5 rounded-md px-[9px] py-1 text-left text-[10.5px] font-semibold uppercase tracking-[0.08em] text-faint hover:text-foreground"
         >
           {collapsed ? <ChevronRight className="h-[10px] w-[10px]" /> : <ChevronDown className="h-[10px] w-[10px]" />}
-          <span>{t('sidebar.actorsSection', 'Recent Contacts')}</span>
+          <span>{t('sidebar.actorsSection', 'Recents')}</span>
           {recentActors.length > 0 && (
             <span className="font-mono font-normal normal-case tracking-normal text-faint/80">
               · {recentActors.length}
