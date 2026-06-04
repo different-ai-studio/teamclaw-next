@@ -25,6 +25,10 @@ function actor(id: string, lastActiveAt: string | null): ActorRow {
   }
 }
 
+function agent(id: string, lastActiveAt: string | null): ActorRow {
+  return { ...actor(id, lastActiveAt), actor_type: 'agent' }
+}
+
 describe('sidebar list helpers', () => {
   it('returns the top 10 ideas by highest rank', () => {
     const ideas = Array.from({ length: 12 }, (_, index) =>
@@ -59,5 +63,39 @@ describe('sidebar list helpers', () => {
     expect(rows[0].id).toBe('actor-22')
     expect(rows.at(-1)?.id).toBe('actor-3')
     expect(rows.some((row) => row.id === 'never-contacted')).toBe(false)
+  })
+
+  it('pins the default agent to the top even with no recent activity', () => {
+    const actors = [
+      agent('default-bot', null),
+      ...Array.from({ length: 5 }, (_, index) =>
+        actor(`actor-${index + 1}`, `2026-05-0${index + 1}T00:00:00Z`),
+      ),
+    ]
+
+    const rows = getRecentContactActors(actors, 'default-bot')
+
+    expect(rows[0].id).toBe('default-bot')
+    // The default agent appears exactly once (not duplicated).
+    expect(rows.filter((row) => row.id === 'default-bot')).toHaveLength(1)
+  })
+
+  it('moves an already-recent default agent to the top without duplicating it', () => {
+    const actors = [
+      actor('actor-late', '2026-05-09T00:00:00Z'),
+      agent('default-bot', '2026-05-01T00:00:00Z'),
+      actor('actor-mid', '2026-05-05T00:00:00Z'),
+    ]
+
+    const rows = getRecentContactActors(actors, 'default-bot')
+
+    expect(rows[0].id).toBe('default-bot')
+    expect(rows.filter((row) => row.id === 'default-bot')).toHaveLength(1)
+    expect(rows).toHaveLength(3)
+  })
+
+  it('ignores a default id that is not an agent in the list', () => {
+    const actors = [actor('actor-1', '2026-05-01T00:00:00Z')]
+    expect(getRecentContactActors(actors, 'missing').map((r) => r.id)).toEqual(['actor-1'])
   })
 })

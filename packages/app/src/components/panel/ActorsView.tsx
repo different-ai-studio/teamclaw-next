@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, Filter, Loader2, Plus, Search, Sparkles, User as UserIcon, Users } from 'lucide-react'
+import { Check, Filter, Loader2, Plus, Search, Sparkles, Star, User as UserIcon, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { InviteActorDialog } from '@/components/sidebar/InviteActorDialog'
@@ -10,7 +10,9 @@ import {
   ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
 } from '@/components/ui/context-menu'
+import { useMemberPreferencesStore } from '@/stores/member-preferences-store'
 import { SidebarCollapseToggle } from '@/components/app-sidebar'
 import { TrafficLights } from '@/components/ui/traffic-lights'
 import { useSidebar } from '@/components/ui/sidebar'
@@ -183,9 +185,17 @@ export function isActorOnline(lastActiveAt: string | null): boolean {
 
 type ActorTypeFilter = 'all' | 'agent' | 'member'
 
-function ActorRowView({ actor, onViewProfile }: { actor: ActorRow; onViewProfile: (actor: ActorRow) => void }) {
+function ActorRowView({ actor, teamId, onViewProfile }: { actor: ActorRow; teamId: string | null; onViewProfile: (actor: ActorRow) => void }) {
   const { t } = useTranslation()
   const isAgent = actor.actor_type === 'agent'
+  const isDefaultAgent = useMemberPreferencesStore((s) => isAgent && s.defaultAgentId === actor.id)
+  const setDefaultAgent = useMemberPreferencesStore((s) => s.setDefaultAgent)
+  const onToggleDefault = React.useCallback(() => {
+    if (!teamId) return
+    void setDefaultAgent(teamId, isDefaultAgent ? null : actor.id).catch((e) => {
+      console.error('[ActorsView] set default agent failed', e)
+    })
+  }, [teamId, isDefaultAgent, actor.id, setDefaultAgent])
   // Members: heartbeat-based — last_active_at within 5min.
   // Agents: authoritative MQTT presence from actor-presence-store
   // (daemon LWT flips this to offline within seconds of disconnect).
@@ -239,6 +249,12 @@ function ActorRowView({ actor, onViewProfile }: { actor: ActorRow; onViewProfile
                   Agent
                 </span>
               )}
+              {isDefaultAgent && (
+                <Star
+                  className="h-3 w-3 shrink-0 fill-coral text-coral"
+                  aria-label={t('actors.defaultAgent', 'Default agent')}
+                />
+              )}
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[11.5px] leading-[18px] text-muted-foreground">
               <span className="truncate">{subtitle}</span>
@@ -258,6 +274,17 @@ function ActorRowView({ actor, onViewProfile }: { actor: ActorRow; onViewProfile
           <UserIcon className="h-4 w-4" />
           {t('actors.contextMenu.viewProfile', 'View profile')}
         </ContextMenuItem>
+        {isAgent && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={onToggleDefault} disabled={!teamId}>
+              <Star className={cn('h-4 w-4', isDefaultAgent && 'fill-current')} />
+              {isDefaultAgent
+                ? t('actors.contextMenu.removeDefault', 'Remove as default agent')
+                : t('actors.contextMenu.setDefault', 'Set as default agent')}
+            </ContextMenuItem>
+          </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   )
@@ -297,7 +324,12 @@ export function ActorsView() {
   const { t } = useTranslation()
   const { state: sidebarState } = useSidebar()
   const sidebarCollapsed = sidebarState === 'collapsed'
-  const { actors, loading, error } = useActorsForTeam()
+  const { actors, loading, error, teamId } = useActorsForTeam()
+  const ensureDefaultAgentLoaded = useMemberPreferencesStore((s) => s.ensureLoaded)
+
+  React.useEffect(() => {
+    if (teamId) void ensureDefaultAgentLoaded(teamId)
+  }, [teamId, ensureDefaultAgentLoaded])
   const [query, setQuery] = React.useState('')
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [filter, setFilter] = React.useState<ActorTypeFilter>('all')
@@ -354,7 +386,7 @@ export function ActorsView() {
 
     return (
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-        {visibleActors.map((a) => <ActorRowView key={a.id} actor={a} onViewProfile={setDetailFor} />)}
+        {visibleActors.map((a) => <ActorRowView key={a.id} actor={a} teamId={teamId} onViewProfile={setDetailFor} />)}
       </div>
     )
   }

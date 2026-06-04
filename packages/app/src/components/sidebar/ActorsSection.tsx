@@ -18,6 +18,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useUIStore } from '@/stores/ui'
+import { useMemberPreferencesStore } from '@/stores/member-preferences-store'
 import { cn } from '@/lib/utils'
 import { getRecentContactActors } from '@/components/sidebar/sidebar-list-helpers'
 
@@ -28,11 +29,21 @@ export function ActorsSection() {
   const filter = useUIStore((s) => s.sidebarFilter)
   const setFilter = useUIStore((s) => s.setSidebarFilter)
   const { actors, loading, refetch, teamId } = useActorsForTeam()
+  const defaultAgentId = useMemberPreferencesStore((s) => s.defaultAgentId)
+  const ensureDefaultAgentLoaded = useMemberPreferencesStore((s) => s.ensureLoaded)
   const [inviteOpen, setInviteOpen] = React.useState(false)
   const [detailFor, setDetailFor] = React.useState<ActorRowData | null>(null)
   const [removeFor, setRemoveFor] = React.useState<ActorRowData | null>(null)
   const [removing, setRemoving] = React.useState(false)
-  const recentActors = React.useMemo(() => getRecentContactActors(actors), [actors])
+
+  React.useEffect(() => {
+    if (teamId) void ensureDefaultAgentLoaded(teamId)
+  }, [teamId, ensureDefaultAgentLoaded])
+
+  const recentActors = React.useMemo(
+    () => getRecentContactActors(actors, defaultAgentId),
+    [actors, defaultAgentId],
+  )
 
   const handleSelect = (actor: ActorRowData) => {
     setFilter({
@@ -152,6 +163,7 @@ export function ActorsSection() {
               key={actor.id}
               actor={actor}
               active={filter.kind === 'actor' && filter.actorId === actor.id}
+              isDefault={actor.id === defaultAgentId}
               onSelect={handleSelect}
               onViewDetail={setDetailFor}
               onCopyName={handleCopyName}

@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Copy, Sparkles, User as UserIcon, UserMinus } from 'lucide-react'
+import { Copy, Sparkles, Star, User as UserIcon, UserMinus } from 'lucide-react'
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -12,10 +12,14 @@ import type { ActorRow as ActorRowData } from '@/components/panel/ActorsView'
 import { isActorOnline } from '@/components/panel/ActorsView'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { cn } from '@/lib/utils'
+import { useMemberPreferencesStore } from '@/stores/member-preferences-store'
+import { useCurrentTeamStore } from '@/stores/current-team'
 
 interface Props {
   actor: ActorRowData
   active: boolean
+  /** True when this actor is the current user's default agent (pinned + starred). */
+  isDefault?: boolean
   onSelect: (actor: ActorRowData) => void
   onViewDetail: (actor: ActorRowData) => void
   onCopyName: (actor: ActorRowData) => void
@@ -26,6 +30,7 @@ interface Props {
 export function ActorRow({
   actor,
   active,
+  isDefault = false,
   onSelect,
   onViewDetail,
   onCopyName,
@@ -36,6 +41,14 @@ export function ActorRow({
   const isAgent = actor.actor_type === 'agent'
   const online = isActorOnline(actor.last_active_at)
   const c = actorAvatarColor(actor.id)
+  const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
+  const setDefaultAgent = useMemberPreferencesStore((s) => s.setDefaultAgent)
+  const onToggleDefault = React.useCallback(() => {
+    if (!teamId) return
+    void setDefaultAgent(teamId, isDefault ? null : actor.id).catch((e) => {
+      console.error('[ActorRow] set default agent failed', e)
+    })
+  }, [teamId, isDefault, actor.id, setDefaultAgent])
 
   return (
     <ContextMenu>
@@ -62,6 +75,12 @@ export function ActorRow({
             )}
           </div>
           <span className="min-w-0 flex-1 truncate">{actor.display_name}</span>
+          {isDefault && (
+            <Star
+              className="h-3 w-3 shrink-0 fill-coral text-coral"
+              aria-label={t('actors.defaultAgent', 'Default agent')}
+            />
+          )}
           {isAgent && (
             <span className="shrink-0 font-mono text-[9px] font-semibold tracking-wider text-coral">Agent</span>
           )}
@@ -80,6 +99,17 @@ export function ActorRow({
           <Copy className="h-4 w-4" />
           {t('actors.contextMenu.copyId', 'Copy ID')}
         </ContextMenuItem>
+        {isAgent && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={onToggleDefault} disabled={!teamId}>
+              <Star className={cn('h-4 w-4', isDefault && 'fill-current')} />
+              {isDefault
+                ? t('actors.contextMenu.removeDefault', 'Remove as default agent')
+                : t('actors.contextMenu.setDefault', 'Set as default agent')}
+            </ContextMenuItem>
+          </>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" onSelect={() => onRequestRemove(actor)}>
           <UserMinus className="h-4 w-4" />

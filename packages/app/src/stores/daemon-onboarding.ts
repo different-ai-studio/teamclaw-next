@@ -2,7 +2,25 @@ import { create } from 'zustand'
 import { isTauri } from '@/lib/utils'
 import { getBackend } from '@/lib/backend'
 import { useCurrentTeamStore } from '@/stores/current-team'
+import { useMemberPreferencesStore } from '@/stores/member-preferences-store'
 import { probeDaemonHttp, invalidateDaemonConnection } from '@/lib/daemon-local-client'
+
+/**
+ * After onboarding a local daemon, adopt it as the user's default agent — but
+ * only when they don't already have one, so we never clobber an explicit choice.
+ * Best-effort: failures here must not fail daemon onboarding.
+ */
+async function adoptAsDefaultAgentIfUnset(teamId: string, agentId: string): Promise<void> {
+  try {
+    const prefs = useMemberPreferencesStore.getState()
+    await prefs.ensureLoaded(teamId)
+    if (!useMemberPreferencesStore.getState().defaultAgentId) {
+      await useMemberPreferencesStore.getState().setDefaultAgent(teamId, agentId)
+    }
+  } catch (e) {
+    console.warn('[daemon-onboarding] could not set local daemon as default agent', e)
+  }
+}
 
 // 'unknown'        — no current team yet (don't block)
 // 'needs-onboard'  — daemon not bound to any team -> interactive wizard
@@ -148,6 +166,7 @@ export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get)
       if (visibility === 'personal') {
         await getBackend().actors.makeAgentPersonal(agentId)
       }
+      await adoptAsDefaultAgentIfUnset(teamId, agentId)
       await get().refresh()
     } catch (e) {
       set({ error: String(e) })
@@ -161,7 +180,8 @@ export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get)
     if (!teamId) { set({ error: 'no current team' }); return }
     set({ busy: true, error: null })
     try {
-      await onboard(teamId, displayName, agentId)
+      const claimedAgentId = await onboard(teamId, displayName, agentId)
+      await adoptAsDefaultAgentIfUnset(teamId, claimedAgentId)
       await get().refresh()
     } catch (e) {
       set({ error: String(e) })
