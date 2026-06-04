@@ -4,13 +4,10 @@ use tauri::{AppHandle, State};
 
 use super::local_secret_store;
 
-/// Single keychain entry that stores all env vars as a JSON blob.
-pub(crate) const KEYRING_SERVICE: &str = concat!(env!("APP_SHORT_NAME"), ".env");
 const LEGACY_MIGRATION_MARKER_KEY: &str = "_localPersonalSecretsMigrationComplete";
 
-/// Disk-based fallback path for the env blob.
-/// Used when keychain is inaccessible (e.g. after an unsigned app update
-/// changes the binary signature and macOS revokes keychain access).
+/// Disk-based path for the legacy plaintext env blob written by older versions.
+/// Read-only now (kept as a one-time migration source); never written.
 fn env_blob_fallback_path() -> Option<std::path::PathBuf> {
     dirs::home_dir().map(|h| h.join(concat!(".", env!("APP_SHORT_NAME"), "/env-blob.json")))
 }
@@ -26,83 +23,29 @@ fn read_env_blob_from_disk() -> Option<serde_json::Map<String, serde_json::Value
     }
 }
 
-/// Write the env blob to the disk fallback file.
-fn write_env_blob_to_disk(map: &serde_json::Map<String, serde_json::Value>) {
-    if let Some(path) = env_blob_fallback_path() {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let json_str = match serde_json::to_string(map) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        if let Err(e) = std::fs::write(&path, &json_str) {
-            eprintln!("[EnvVars] Failed to write disk fallback: {}", e);
-        }
-    }
-}
-
 fn personal_secret_store_paths() -> Result<local_secret_store::SecretStorePaths, String> {
     local_secret_store::SecretStorePaths::for_home_dir()
 }
 
-pub(crate) fn read_legacy_keychain_blob(
-    workspace_path: &str,
+/// Read the legacy plaintext env blob from the disk fallback file, if present.
+///
+/// The macOS/Windows keychain is no longer read — the disk fallback
+/// (`~/.<app>/env-blob.json`, written by older versions) is the only remaining
+/// legacy migration source. Pre-migration secrets that lived *only* in the OS
+/// keychain are intentionally no longer recovered.
+pub(crate) fn read_legacy_disk_blob(
+    _workspace_path: &str,
 ) -> Result<Option<serde_json::Map<String, serde_json::Value>>, String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, "teamclaw")
-        .map_err(|e| format!("Failed to open keychain entry: {}", e))?;
-
-    match entry.get_password() {
-        Ok(json_str) => {
-            let val: serde_json::Value = serde_json::from_str(&json_str).unwrap_or_else(|e| {
-                eprintln!(
-                    "[EnvVars] Failed to parse keychain blob as JSON (corrupt?): {}",
-                    e
-                );
-                serde_json::Value::Object(serde_json::Map::new())
-            });
-            match val {
-                serde_json::Value::Object(map) => Ok(Some(map)),
-                _ => Ok(Some(serde_json::Map::new())),
-            }
-        }
-        Err(keyring::Error::NoEntry) => {
-            let migrated = migrate_legacy_keyring(workspace_path);
-            if !migrated.is_empty() {
-                println!(
-                    "[EnvVars] Migrated {} legacy keychain entries to local encrypted store",
-                    migrated.len()
-                );
-                return Ok(Some(migrated));
-            }
-            if let Some(disk_blob) = read_env_blob_from_disk() {
-                if !disk_blob.is_empty() {
-                    println!(
-                        "[EnvVars] Restored {} entries from legacy disk fallback",
-                        disk_blob.len()
-                    );
-                    return Ok(Some(disk_blob));
-                }
-            }
-            Ok(None)
-        }
-        Err(e) => {
-            eprintln!(
-                "[EnvVars] Legacy keychain read failed: {}. Trying disk fallback...",
-                e
+    if let Some(disk_blob) = read_env_blob_from_disk() {
+        if !disk_blob.is_empty() {
+            println!(
+                "[EnvVars] Restored {} entries from legacy disk fallback",
+                disk_blob.len()
             );
-            if let Some(disk_blob) = read_env_blob_from_disk() {
-                if !disk_blob.is_empty() {
-                    println!(
-                        "[EnvVars] Restored {} entries from legacy disk fallback",
-                        disk_blob.len()
-                    );
-                    return Ok(Some(disk_blob));
-                }
-            }
-            Err(format!("Failed to read legacy keychain blob: {}", e))
+            return Ok(Some(disk_blob));
         }
     }
+    Ok(None)
 }
 
 fn read_personal_secret_blob(
@@ -116,18 +59,14 @@ pub(crate) fn read_personal_secret_blob_from_paths(
     workspace_path: &str,
     paths: &local_secret_store::SecretStorePaths,
 ) -> Result<serde_json::Map<String, serde_json::Value>, String> {
-    read_personal_secret_blob_with_reader(workspace_path, paths, read_legacy_keychain_blob)
+    read_personal_secret_blob_with_reader(workspace_path, paths, read_legacy_disk_blob)
 }
 
 pub(crate) fn read_personal_secret_blob_for_startup_from_paths(
     workspace_path: &str,
     paths: &local_secret_store::SecretStorePaths,
 ) -> Result<(serde_json::Map<String, serde_json::Value>, bool), String> {
-    read_personal_secret_blob_with_reader_for_startup(
-        workspace_path,
-        paths,
-        read_legacy_keychain_blob,
-    )
+    read_personal_secret_blob_with_reader_for_startup(workspace_path, paths, read_legacy_disk_blob)
 }
 
 fn read_personal_secret_blob_with_reader<F>(
@@ -217,7 +156,7 @@ fn write_personal_secret_blob(
 }
 
 /// Read the entire env var blob from the local encrypted personal secret store.
-/// On first read, migrate legacy keychain or disk-snapshot data if present.
+/// On first read, migrate legacy plaintext disk-blob data if present.
 pub(crate) fn read_env_blob(
     workspace_path: &str,
 ) -> Result<serde_json::Map<String, serde_json::Value>, String> {
@@ -229,78 +168,6 @@ pub(crate) fn write_env_blob(
     map: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
     write_personal_secret_blob(map)
-}
-
-/// Snapshot legacy keychain data to the disk fallback file only when migration
-/// has not yet produced a local encrypted blob. Called by the updater before
-/// replacing the app bundle so pre-migration installs can still recover their
-/// personal secrets after a signature-changing update.
-pub(crate) fn snapshot_env_blob_to_disk() {
-    let Ok(paths) = personal_secret_store_paths() else {
-        return;
-    };
-    if paths.blob_path.exists() {
-        return;
-    }
-
-    let entry = match keyring::Entry::new(KEYRING_SERVICE, "teamclaw") {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    if let Ok(json_str) = entry.get_password() {
-        if let Ok(serde_json::Value::Object(map)) =
-            serde_json::from_str::<serde_json::Value>(&json_str)
-        {
-            write_env_blob_to_disk(&map);
-            println!(
-                "[EnvVars] Snapshot {} keychain entries to disk before update",
-                map.len()
-            );
-        }
-    }
-}
-
-/// Read old per-key keychain entries and consolidate into a map.
-/// Legacy entries are intentionally retained so migration can be retried safely
-/// and additional workspaces can still top up the local encrypted store.
-fn migrate_legacy_keyring(workspace_path: &str) -> serde_json::Map<String, serde_json::Value> {
-    let path = format!("{}/{}/teamclaw.json", workspace_path, super::TEAMCLAW_DIR);
-    let json: serde_json::Value = match std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|c| serde_json::from_str(&c).ok())
-    {
-        Some(v) => v,
-        None => return serde_json::Map::new(),
-    };
-
-    let entries = match json.get("envVars").and_then(|v| v.as_array()) {
-        Some(arr) => arr.clone(),
-        None => return serde_json::Map::new(),
-    };
-
-    let mut map = serde_json::Map::new();
-    for entry_val in &entries {
-        let key = match entry_val.get("key").and_then(|k| k.as_str()) {
-            Some(k) => k,
-            None => continue,
-        };
-        // Legacy service name was `{KEYRING_SERVICE}.<KEY>`
-        let legacy_service = format!("{}.{}", KEYRING_SERVICE, key);
-        if let Ok(e) = keyring::Entry::new(&legacy_service, "teamclaw") {
-            match e.get_password() {
-                Ok(value) => {
-                    map.insert(key.to_string(), serde_json::Value::String(value));
-                }
-                Err(e) => {
-                    eprintln!(
-                        "[EnvVars] Migration: failed to read legacy keychain entry '{}': {}",
-                        key, e
-                    );
-                }
-            }
-        }
-    }
-    map
 }
 
 fn workspace_legacy_migration_pending(workspace_path: &str) -> Result<bool, String> {

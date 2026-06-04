@@ -1089,9 +1089,9 @@ async fn team_git_join_impl(
         super::CONFIG_FILE_NAME
     );
 
-    // 11. Save team_secret to keychain
+    // 11. Save team_secret to the local encrypted store
     crate::commands::team_secret_store::save_team_secret(&workspace_path, &team_id, &team_secret)?;
-    println!("[Team Join] Saved team_secret to keychain");
+    println!("[Team Join] Saved team_secret to local encrypted store");
 
     // 12. Init shared secrets
     {
@@ -1321,7 +1321,7 @@ pub async fn init_git_team_secrets(
     Ok(())
 }
 
-/// Load the team secret from keychain for display in settings.
+/// Load the team secret from the local encrypted store for display in settings.
 #[tauri::command]
 pub async fn get_git_team_secret(
     team_id: String,
