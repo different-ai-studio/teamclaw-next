@@ -738,3 +738,77 @@ test("submitSessionReport inserts a report row and expands skillUsage into skill
   assert.equal(skills.rows.length, 2);
   assert.deepEqual(skills.rows.map((r) => r.skill).sort(), ["bar", "foo"]);
 });
+
+// --- Gateway session contract (daemon round-trip) ---
+//
+// The amuxd daemon deserializes these two endpoints into structs with
+// REQUIRED, camelCase fields:
+//   POST /v1/sessions/gateway/ensure  → { sessionId, gatewaySessionId, created }
+//       (apps/daemon/src/backend/cloud_api/mod.rs rpc_ensure_gateway_session,
+//        gatewaySessionId is a required String)
+//   GET  /v1/sessions/by-acp/:acpId   → { sessionId, gatewaySessionId? }
+//       (get_gateway_session_by_acp_id; sessionId is a required String)
+//
+// The daemon uses ensure's `gatewaySessionId` as the logical ACP session id it
+// later looks up via getSessionByAcp, which queries the `acp_session_id` column
+// — so gatewaySessionId MUST equal the row's acp_session_id to round-trip. A
+// WeCom inbound message hits ensure first; when this field was missing the
+// daemon failed with "missing field gatewaySessionId" and dropped the message.
+
+test("ensureGatewaySession returns gatewaySessionId (daemon-required field) = acp_session_id", async () => {
+  const repo = createRepo(fakeSupabase({
+    rpcData: {
+      ensure_gateway_session: [{
+        session_id: "sess-1",
+        acp_session_id: "acp-hex-1",
+        created: true,
+      }],
+    },
+  }));
+
+  const out = await repo.ensureGatewaySession({
+    teamId: "team-1",
+    binding: "wecom://bot/bot/single/u1",
+    title: "WeCom chat",
+    primaryAgentActorId: "actor-1",
+    ownerMemberActorIds: [],
+    participantActorIds: [],
+  });
+
+  assert.equal(out.sessionId, "sess-1");
+  // The daemon deserializes this as a required String; it must round-trip to
+  // acp_session_id so a later getSessionByAcp lookup finds the row.
+  assert.equal(out.gatewaySessionId, "acp-hex-1");
+  assert.equal(out.created, true);
+});
+
+test("getSessionByAcp returns the {sessionId, gatewaySessionId} shape the daemon deserializes", async () => {
+  const repo = createRepo(fakeSupabase({
+    tableData: {
+      sessions: [{
+        id: "sess-1",
+        team_id: "team-1",
+        title: "WeCom chat",
+        mode: "collab",
+        idea_id: null,
+        primary_agent_id: "actor-1",
+        created_by_actor_id: "actor-1",
+        summary: null,
+        last_message_preview: null,
+        last_message_at: null,
+        acp_session_id: "acp-hex-1",
+        binding: "wecom://bot/bot/single/u1",
+        created_at: "2026-06-04T00:00:00Z",
+        updated_at: "2026-06-04T00:00:00Z",
+      }],
+    },
+  }));
+
+  const out = await repo.getSessionByAcp("acp-hex-1");
+
+  // Daemon requires sessionId (mapped from the row id).
+  assert.equal(out.sessionId, "sess-1");
+  // Daemon uses gatewaySessionId as the chat binding for the per-session MCP
+  // config so `send` defaults to the originating chat.
+  assert.equal(out.gatewaySessionId, "wecom://bot/bot/single/u1");
+});
