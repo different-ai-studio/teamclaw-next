@@ -2,7 +2,7 @@ use std::path::Path;
 
 pub const LAUNCHD_LABEL: &str = "cc.ucar.amuxd";
 
-pub fn launchd_plist(exe: &Path) -> String {
+pub fn launchd_plist(exe: &Path, log_dir: &Path) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -19,11 +19,17 @@ pub fn launchd_plist(exe: &Path) -> String {
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>StandardOutPath</key>
+  <string>{out}</string>
+  <key>StandardErrorPath</key>
+  <string>{err}</string>
 </dict>
 </plist>
 "#,
         label = LAUNCHD_LABEL,
         exe = exe.display(),
+        out = log_dir.join("amuxd.out.log").display(),
+        err = log_dir.join("amuxd.err.log").display(),
     )
 }
 
@@ -62,7 +68,10 @@ pub fn install_service() -> anyhow::Result<()> {
         .join("Library/LaunchAgents");
     std::fs::create_dir_all(&plist_dir)?;
     let plist_path = plist_dir.join(format!("{LAUNCHD_LABEL}.plist"));
-    std::fs::write(&plist_path, launchd_plist(&exe))?;
+    // launchd redirects amuxd's stdout/stderr into ~/.amuxd so logs survive
+    // restarts and are tailable; the dir already holds bin/ + config so it exists.
+    let log_dir = DaemonConfig::config_dir();
+    std::fs::write(&plist_path, launchd_plist(&exe, &log_dir))?;
     let uid = nix_uid();
     let target = format!("gui/{uid}/{LAUNCHD_LABEL}");
 
@@ -191,12 +200,19 @@ mod tests {
 
     #[test]
     fn launchd_plist_contains_exec_and_label() {
-        let p = launchd_plist(Path::new("/Users/x/.amuxd/bin/amuxd"));
+        let p = launchd_plist(
+            Path::new("/Users/x/.amuxd/bin/amuxd"),
+            Path::new("/Users/x/.amuxd"),
+        );
         assert!(p.contains("<string>cc.ucar.amuxd</string>"));
         assert!(p.contains("<string>/Users/x/.amuxd/bin/amuxd</string>"));
         assert!(p.contains("<string>start</string>"));
         assert!(p.contains("<key>RunAtLoad</key>"));
         assert!(p.contains("<key>KeepAlive</key>"));
+        assert!(p.contains("<key>StandardOutPath</key>"));
+        assert!(p.contains("<string>/Users/x/.amuxd/amuxd.out.log</string>"));
+        assert!(p.contains("<key>StandardErrorPath</key>"));
+        assert!(p.contains("<string>/Users/x/.amuxd/amuxd.err.log</string>"));
     }
 
     #[test]
