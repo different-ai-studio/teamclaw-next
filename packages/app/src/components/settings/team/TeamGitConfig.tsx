@@ -221,13 +221,13 @@ export function TeamGitConfig() {
               disabled={syncing || !workspacePath}
               className="shrink-0 gap-2"
             >
+              {/* Keep the label text CONSTANT — only spin the icon while syncing.
+                  Swapping the text in place ("Sync Now" ↔ "Syncing...") made
+                  WKWebView paint the new glyphs over the old ones (a ghost);
+                  the spinner + disabled state convey progress without mutating
+                  the text node. */}
               <RefreshCw className={cn('h-3 w-3 shrink-0', syncing && 'animate-spin')} />
-              {/* Fixed-width centered label so the "Sync Now" ↔ "Syncing..."
-                  swap never reflows the button (a width change mid-swap caused
-                  WKWebView to leave a ghost of the previous label). */}
-              <span className="inline-block min-w-[4.75rem] text-center">
-                {syncing ? t('settings.team.syncing', 'Syncing...') : t('settings.team.syncNow', 'Sync Now')}
-              </span>
+              {t('settings.team.syncNow', 'Sync Now')}
             </Button>
           </div>
         </div>
