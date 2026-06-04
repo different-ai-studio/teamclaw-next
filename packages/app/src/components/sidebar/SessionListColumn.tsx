@@ -29,6 +29,7 @@ import { formatRelativeTime } from '@/lib/date-format'
 import { useTypeAhead } from '@/hooks/use-type-ahead'
 import { buildSessionListActivityMap, type SessionListActivity } from '@/lib/session-list-activity'
 import { loadSessionIdsForActor } from '@/lib/session-by-actor'
+import { loadSessionIdsForWorkspace } from '@/lib/session-by-workspace'
 import { actorAvatarColor } from '@/lib/actor-color'
 
 /**
@@ -165,6 +166,20 @@ export function SessionListColumn() {
     return () => { cancelled = true }
   }, [filter, teamIdFromList])
 
+  // Load workspace-session set when filter switches to workspace mode.
+  // Reads the LOCAL libsql cache only — no cloud round-trip.
+  const [workspaceSessionIds, setWorkspaceSessionIds] = React.useState<Set<string> | null>(null)
+  React.useEffect(() => {
+    if (filter.kind !== 'workspace') {
+      setWorkspaceSessionIds(null)
+      return
+    }
+    let cancelled = false
+    void loadSessionIdsForWorkspace(teamIdFromList, { workspaceId: filter.workspaceId, path: filter.path })
+      .then((ids) => { if (!cancelled) setWorkspaceSessionIds(ids) })
+    return () => { cancelled = true }
+  }, [filter, teamIdFromList])
+
   // ⌘K opens search
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -198,6 +213,9 @@ export function SessionListColumn() {
     } else if (filter.kind === 'actor') {
       if (!actorSessionIds) return []
       base = base.filter((r) => actorSessionIds.has(r.id))
+    } else if (filter.kind === 'workspace') {
+      if (!workspaceSessionIds) return []
+      base = base.filter((r) => workspaceSessionIds.has(r.id))
     }
 
     return base.sort((a, b) => {
@@ -207,7 +225,7 @@ export function SessionListColumn() {
       if (!b.lastMessageAt) return 1
       return b.lastMessageAt.getTime() - a.lastMessageAt.getTime()
     })
-  }, [listRows, pinnedSessionIds, cronSessionIds, showCronSessions, filter, actorSessionIds])
+  }, [listRows, pinnedSessionIds, cronSessionIds, showCronSessions, filter, actorSessionIds, workspaceSessionIds])
 
   /** Load participants for any visible row we haven't seen yet. */
   const visibleIds = filteredRows.map((r) => r.id).join('|')
@@ -273,6 +291,7 @@ export function SessionListColumn() {
     if (filter.kind === 'pinned') return t('sidebar.pinned', 'Pinned')
     if (filter.kind === 'idea') return filter.title
     if (filter.kind === 'actor') return filter.displayName
+    if (filter.kind === 'workspace') return filter.name
     return ''
   })()
 
@@ -519,7 +538,11 @@ export function SessionListColumn() {
         ) : filteredRows.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <MessageSquare className="h-8 w-8 text-muted-foreground mb-2" />
-            <p className="text-sm text-muted-foreground">{t('sidebar.noConversations', 'No conversations')}</p>
+            <p className="text-sm text-muted-foreground">
+              {filter.kind === 'workspace'
+                ? t('sidebar.noWorkspaceSessions', 'No sessions in this workspace yet')
+                : t('sidebar.noConversations', 'No conversations')}
+            </p>
           </div>
         ) : (
           <SidebarMenu>
