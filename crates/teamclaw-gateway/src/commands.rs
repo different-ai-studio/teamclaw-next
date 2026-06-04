@@ -85,8 +85,8 @@ pub async fn dispatch<A, S>(
     reply: impl Fn(String) + Send,
 ) -> Result<bool, AcpError>
 where
-    A: AcpHandle + Send + Sync,
-    S: ChannelStore + Send + Sync,
+    A: AcpHandle + Send + Sync + ?Sized,
+    S: ChannelStore + Send + Sync + ?Sized,
 {
     // 1. ACP agent commands take priority.
     let agent_cmds = acp.available_commands(session).await?;

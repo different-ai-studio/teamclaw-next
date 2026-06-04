@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
-use crate::{AcpHandle, AttachmentRecord, ChannelStore};
+use crate::{commands, AcpHandle, AttachmentRecord, ChannelStore};
 
 /// Global reference to the active WeComGateway for proactive message sending.
 static ACTIVE_GATEWAY: OnceLock<Arc<RwLock<Option<WeComGateway>>>> = OnceLock::new();
@@ -1264,26 +1264,52 @@ impl WeComGateway {
             return;
         }
 
-        // Check for slash commands (text only). /help and unknown commands
-        // are handled without resolving a session; /stop /reset /model fall
-        // through to the regular session-resolve path below.
-        let trimmed = text_content.trim();
-        if !trimmed.is_empty() && trimmed.starts_with('/') {
-            let lower = trimmed.to_lowercase();
-            let needs_session = lower == "/stop"
-                || lower == "/reset"
-                || lower == "/model"
-                || lower.starts_with("/model ");
-            if !needs_session {
-                if let Err(e) = self
-                    .handle_slash_command(trimmed, &req_id, &ws_sink)
+        // Slash commands that don't need a resolved session (/help, unknown)
+        // are short-circuited here; those that do need a session fall through
+        // and are dispatched after session resolve below.
+        let trimmed_early = text_content.trim();
+        if !trimmed_early.is_empty() && trimmed_early.starts_with('/') {
+            if let Some((cmd_name, _)) = commands::parse_slash(trimmed_early) {
+                let needs_session =
+                    matches!(cmd_name.as_str(), "stop" | "reset" | "model" | "sessions" | "agents" | "workspaces" | "clear" | "ctx");
+                if !needs_session {
+                    // /help or any ACP-advertised command that doesn't need a session
+                    // is handled generically; unknown commands also land here.
+                    // We have no session yet, so pass a placeholder session id.
+                    use std::sync::{Arc as SArc, Mutex};
+                    let reply_cell: SArc<Mutex<Option<String>>> = SArc::new(Mutex::new(None));
+                    let reply_cell_clone = reply_cell.clone();
+                    let handled = commands::dispatch(
+                        &cmd_name,
+                        None,
+                        self.acp.as_ref(),
+                        self.store.as_ref(),
+                        &String::new(),
+                        move |r| {
+                            *reply_cell_clone.lock().unwrap() = Some(r);
+                        },
+                    )
                     .await
-                {
-                    eprintln!("[WeCom] Slash command error: {}", e);
+                    .unwrap_or(false);
+                    let reply_text = reply_cell.lock().unwrap().take();
+                    if handled {
+                        if let Some(text) = reply_text {
+                            let _ = self.send_reply(&req_id, &text, &ws_sink).await;
+                        }
+                    } else {
+                        let locale = i18n::get_locale(&self.workspace_path);
+                        let _ = self
+                            .send_reply(
+                                &req_id,
+                                &i18n::t(i18n::MsgKey::UnknownCommand(&format!("/{cmd_name}")), locale),
+                                &ws_sink,
+                            )
+                            .await;
+                    }
+                    return;
                 }
-                return;
+                // session-requiring commands fall through to session resolve below.
             }
-            // /stop /reset /model — fall through; dispatch happens after session resolve.
         }
 
         // Determine chat type and build binding URI per spec:
@@ -1375,21 +1401,40 @@ impl WeComGateway {
             eprintln!("[WeCom] add_participant failed: {}", e);
         }
 
-        // Slash-command dispatch — /stop /reset /model — against the resolved session.
-        let trimmed_for_cmd = text_content.trim();
-        if trimmed_for_cmd.starts_with('/') {
-            let lower = trimmed_for_cmd.to_lowercase();
-            if lower == "/stop"
-                || lower == "/reset"
-                || lower == "/model"
-                || lower.starts_with("/model ")
-            {
-                let reply_text = self
-                    .dispatch_session_slash_cmd(&lower, &outcome.acp_session_id)
+        // Slash-command dispatch: two-layer (ACP agent commands first, then
+        // gateway meta-commands: /help, /model, /sessions, /agents,
+        // /workspaces, /clear, /stop, /ctx).
+        if let Some((cmd_name, cmd_arg)) = commands::parse_slash(text_content.trim()) {
+            use std::sync::{Arc as SArc, Mutex};
+            let reply_cell: SArc<Mutex<Option<String>>> = SArc::new(Mutex::new(None));
+            let reply_cell_clone = reply_cell.clone();
+            let handled = commands::dispatch(
+                &cmd_name,
+                cmd_arg.as_deref(),
+                self.acp.as_ref(),
+                self.store.as_ref(),
+                &outcome.acp_session_id,
+                move |r| {
+                    *reply_cell_clone.lock().unwrap() = Some(r);
+                },
+            )
+            .await
+            .unwrap_or(false);
+            let reply_text = reply_cell.lock().unwrap().take();
+            if handled {
+                if let Some(text) = reply_text {
+                    let _ = self.send_reply(&req_id, &text, &ws_sink).await;
+                }
+            } else {
+                let _ = self
+                    .send_reply(
+                        &req_id,
+                        &format!("Unknown command: /{cmd_name}. Send /help for list."),
+                        &ws_sink,
+                    )
                     .await;
-                let _ = self.send_reply(&req_id, &reply_text, &ws_sink).await;
-                return;
             }
+            return;
         }
 
         // Dual-write attachments: save to local cache for the agent to read,
@@ -1581,86 +1626,6 @@ impl WeComGateway {
         let mut tracker = self.processed_messages.write().await;
         !tracker.is_duplicate(msg_id)
     }
-
-    /// Dispatch /stop, /reset, /model against a resolved acp session id.
-    /// Returns the user-facing reply text.
-    async fn dispatch_session_slash_cmd(
-        &self,
-        lower_content: &str,
-        acp_session_id: &str,
-    ) -> String {
-        let session = acp_session_id.to_string();
-        if lower_content == "/stop" {
-            return match self.acp.cancel(&session).await {
-                Ok(_) => "⏹ Stopped current turn.".to_string(),
-                Err(e) => format!("⚠️ Could not stop: {e}"),
-            };
-        }
-        if lower_content == "/reset" {
-            return match self.acp.reset_session(&session).await {
-                Ok(_) => "🔄 Session reset. Next message starts fresh.".to_string(),
-                Err(e) => format!("⚠️ Could not reset: {e}"),
-            };
-        }
-        if lower_content == "/model" {
-            return match self.acp.list_models().await {
-                Ok(models) => {
-                    if models.is_empty() {
-                        "No models available.".to_string()
-                    } else {
-                        let body = models
-                            .iter()
-                            .map(|m| {
-                                format!("• `{}/{}` — {}", m.provider, m.model, m.display_name)
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        format!(
-                            "Available models:\n{body}\n\nUsage: `/model <provider>/<model>`"
-                        )
-                    }
-                }
-                Err(e) => format!("⚠️ Could not list models: {e}"),
-            };
-        }
-        if let Some(arg) = lower_content.strip_prefix("/model ") {
-            let arg = arg.trim();
-            let (provider, model) = match arg.split_once('/') {
-                Some((p, m)) => (p, m),
-                None => ("anthropic", arg),
-            };
-            return match self.acp.set_model(&session, provider, model).await {
-                Ok(_) => format!(
-                    "✅ Switched to `{provider}/{model}`. **Note: conversation context was cleared.**"
-                ),
-                Err(e) => format!("⚠️ Could not switch model: {e}"),
-            };
-        }
-        format!("Unknown command: {lower_content}")
-    }
-
-    async fn handle_slash_command(
-        &self,
-        content: &str,
-        req_id: &str,
-        ws_sink: &WsSink,
-    ) -> Result<(), String> {
-        let parts: Vec<&str> = content.splitn(2, ' ').collect();
-        let cmd = parts[0].to_lowercase();
-        let locale = i18n::get_locale(&self.workspace_path);
-
-        let reply = match cmd.as_str() {
-            "/help" => i18n::t(i18n::MsgKey::HelpWecom, locale),
-            // /stop, /reset, /model now route through the session-resolve
-            // path; they should never reach this branch. /sessions is
-            // intentionally unsupported in v2.
-            "/sessions" => "This command is not supported in v2 yet.".to_string(),
-            _ => i18n::t(i18n::MsgKey::UnknownCommand(&cmd), locale),
-        };
-
-        self.send_reply(req_id, &reply, ws_sink).await
-    }
-
 
     /// Handle enter_chat event — send welcome message
     async fn handle_enter_chat(&self, req_id: &str, ws_sink: &WsSink) {
