@@ -454,32 +454,37 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
         &self,
         session: &AmuxSessionId,
     ) -> Result<Vec<AcpAvailableCommand>, AcpError> {
-        let map = self.logical_to_acp.lock().await;
-        let real = match map.get(session) {
-            Some(s) => s.real_acp_sid.clone(),
-            None => return Ok(vec![]),
+        // ── 1. Agent-reported commands (only if session is already spawned) ────
+        // Built-ins (step 2) and workspace skills (step 3) are always returned
+        // regardless of whether a runtime has been spawned for this session.
+        let mut result: Vec<AcpAvailableCommand> = {
+            let map = self.logical_to_acp.lock().await;
+            let real = map.get(session).map(|s| s.real_acp_sid.clone());
+            drop(map);
+            if let Some(real) = real {
+                let mgr = self.manager.lock().await;
+                if let Some(agent_id) = mgr.agent_id_by_acp_session(&real) {
+                    mgr.get_available_commands(&agent_id)
+                        .into_iter()
+                        .map(|c| AcpAvailableCommand {
+                            name: c.name,
+                            description: c.description,
+                            input_hint: if c.input_hint.is_empty() { None } else { Some(c.input_hint) },
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            }
         };
-        drop(map);
 
-        // ── 1. Agent-reported commands ────────────────────────────────────────
-        let (proto_commands, agent_type) = {
-            let mgr = self.manager.lock().await;
-            let agent_id = match mgr.agent_id_by_acp_session(&real) {
-                Some(id) => id,
-                None => return Ok(vec![]),
-            };
-            let cmds = mgr.get_available_commands(&agent_id);
-            let atype = mgr.agent_type_for_acp_session(&real);
-            (cmds, atype)
+        // Resolve agent type: per-session override → default → ClaudeCode fallback.
+        let agent_type = {
+            let overrides = self.agent_type_override.lock().await;
+            overrides.get(session.as_str()).copied().or(self.default_agent_type)
         };
-        let mut result: Vec<AcpAvailableCommand> = proto_commands
-            .into_iter()
-            .map(|c| AcpAvailableCommand {
-                name: c.name,
-                description: c.description,
-                input_hint: if c.input_hint.is_empty() { None } else { Some(c.input_hint) },
-            })
-            .collect();
 
         // ── 2. Agent built-in commands (ClaudeCode doesn't report via AcpAvailableCommands) ──
         let known = match agent_type {
