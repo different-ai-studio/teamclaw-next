@@ -99,9 +99,16 @@ export function AuthGate({ children }: AuthGateProps) {
 
         const teams = await getBackend().teams.listCurrentUserTeams({ limit: 1 });
         markStartup("team-list:end");
-        const existingTeamId = teams[0]?.id;
-        if (existingTeamId) {
-          await useCurrentTeamStore.getState().reloadAndSwitchTo(existingTeamId);
+        // The list row already carries {id,name,slug}, so adopt it directly via
+        // setActiveTeam instead of reloadAndSwitchTo — the latter re-fetches the
+        // same team with a redundant GET /v1/teams/:id on the critical path.
+        const existing = teams[0];
+        if (existing) {
+          await useCurrentTeamStore.getState().setActiveTeam({
+            id: existing.id,
+            name: existing.name,
+            slug: existing.slug ?? "",
+          });
           return;
         }
 

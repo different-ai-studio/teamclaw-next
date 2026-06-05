@@ -152,6 +152,31 @@ describe("AuthGate", () => {
     expect(screen.queryByText("App shell")).not.toBeInTheDocument();
   });
 
+  it("switches to an existing team using the listed row, without a redundant getTeam fetch", async () => {
+    backendMock.teams.listCurrentUserTeams.mockResolvedValueOnce([
+      { id: "team-existing", name: "Acme", slug: "acme" },
+    ]);
+    currentTeamMock.setActiveTeam.mockResolvedValueOnce(undefined);
+
+    render(
+      <AuthGate>
+        <div>App shell</div>
+      </AuthGate>,
+    );
+
+    await waitFor(() =>
+      expect(currentTeamMock.setActiveTeam).toHaveBeenCalledWith({
+        id: "team-existing",
+        name: "Acme",
+        slug: "acme",
+      }),
+    );
+    // The list row already carries {id,name,slug}; bootstrap must not re-fetch
+    // the same team via reloadAndSwitchTo (which does an extra GET /v1/teams/:id).
+    expect(currentTeamMock.reloadAndSwitchTo).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText("App shell")).toBeInTheDocument());
+  });
+
   it("creates a first team and switches to it before rendering the shell", async () => {
     backendMock.teams.listCurrentUserTeams.mockResolvedValueOnce([]);
     backendMock.teams.createTeam.mockResolvedValueOnce({
