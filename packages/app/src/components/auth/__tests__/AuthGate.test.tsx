@@ -44,6 +44,7 @@ vi.mock("@/lib/backend", () => ({
 vi.mock("@/lib/utils", () => ({
   cn: (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(" "),
   isTauri: () => true,
+  removeStartupSkeleton: () => {},
 }));
 
 vi.mock("@/lib/random-team-name", () => ({
@@ -53,6 +54,7 @@ vi.mock("@/lib/random-team-name", () => ({
 vi.mock("@/stores/setup", () => ({
   useSetupStore: (selector: (s: { loaded: boolean; requiredSatisfied: () => boolean; listRequirements: () => void }) => unknown) =>
     selector({ loaded: true, requiredSatisfied: () => true, listRequirements: () => {} }),
+  setupPreviouslySatisfied: () => false,
 }));
 
 vi.mock("../SetupWizard", () => ({
@@ -98,14 +100,16 @@ describe("AuthGate", () => {
   it("keeps the shell blocked while an authenticated onboarding operation is loading", async () => {
     authState.loading = true;
 
-    render(
+    const { container } = render(
       <AuthGate>
         <div>App shell</div>
       </AuthGate>,
     );
 
-    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    // Loading gates now render nothing (the static #skeleton shows through #root
+    // in the real app) instead of a Lobster spinner — the shell stays blocked.
     await waitFor(() => expect(screen.queryByText("App shell")).not.toBeInTheDocument());
+    expect(container).toBeEmptyDOMElement();
   });
 
   it("keeps desktop onboarding mounted while an unauthenticated action is loading", async () => {

@@ -8,8 +8,9 @@ import {
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Toaster, toast } from "sonner";
-import { cn, isTauri } from "@/lib/utils";
+import { cn, isTauri, removeStartupSkeleton } from "@/lib/utils";
 import { buildConfig } from "@/lib/build-config";
+import { markStartup } from "@/lib/startup-perf";
 import {
   BookOpen,
   FolderGit,
@@ -691,6 +692,18 @@ function AppContent() {
     void useSessionListStore.getState().load();
   }, []);
 
+  // Hand off from the static #skeleton the moment the workspace resolves — to
+  // real three-column content (workspacePath set) or the workspace picker
+  // (none). AuthGate keeps the skeleton up through every loading gate and lets
+  // App own the final removal, so the cold-start hand-off is skeleton → real UI
+  // with no intermediate blank or spinner. Also stamp first-content for the perf
+  // timeline on the happy path.
+  useEffect(() => {
+    if (!initialWorkspaceResolved) return;
+    removeStartupSkeleton();
+    if (workspacePath) markStartup("first-content");
+  }, [initialWorkspaceResolved, workspacePath]);
+
   // Boot the outbox: hydrate any pending/failed rows from libsql so a
   // crashed/closed app resumes in-flight sends, then start the sender loop
   // (idempotent). `startOutboxSender` schedules a tick every second; the
@@ -845,6 +858,7 @@ function AppContent() {
 
     void (async () => {
       try {
+        markStartup("mqtt:start");
         // amuxd convention: MQTT username = actor_id, password = JWT
         // (see amux/daemon/src/mqtt/client.rs + daemon/server.rs).
         // EMQX validates the JWT and uses actor_id for topic ACL.
@@ -887,6 +901,7 @@ function AppContent() {
           teamId: mqttTeamId,
           useTls,
         });
+        markStartup("mqtt:connected");
         resetSessionLiveSubscriptionState();
         if (cancelled) return;
 
@@ -1885,6 +1900,13 @@ function App() {
   // Dismissing it (Get started) is what unblocks the dependency initialization.
   const [welcomeAck, setWelcomeAck] = useState(() => !isTauri() || hasSeenWelcome());
   const showWelcome = isTauri() && !welcomeAck;
+
+  // Welcome / dependency-setup are immediately-interactive first-run screens — if
+  // either shows, hand off from the static skeleton right away (AppContent owns
+  // the removal on the normal path; this covers the screens that render instead).
+  useEffect(() => {
+    if (showWelcome || showSetupGuide) removeStartupSkeleton();
+  }, [showWelcome, showSetupGuide]);
 
   const mainContent = showWelcome ? (
     <WelcomeScreen

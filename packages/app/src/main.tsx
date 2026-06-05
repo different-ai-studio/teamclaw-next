@@ -10,6 +10,10 @@ import './stores/dev-expose'
 import './lib/i18n'; // Initialize i18n
 import { appShortName, buildConfig } from './lib/build-config'
 import { initJwtBridge } from './lib/jwt-bridge'
+import { markStartup } from './lib/startup-perf'
+import { removeStartupSkeleton } from './lib/utils'
+
+markStartup('main:start')
 
 // Sync the Supabase JWT into teamclaw.json so FC-backed commands (team share,
 // LiteLLM, OSS sync) can authenticate. Must run at startup, before any of those
@@ -84,7 +88,7 @@ invoke<string | null>('get_system_accent_color')
   })
   .catch(() => { /* non-tauri context or pre-init — fall through */ })
 
-performance.mark('react-mount')
+markStartup('react-mount')
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -95,3 +99,9 @@ createRoot(document.getElementById('root')!).render(
     </ErrorBoundary>
   </StrictMode>,
 )
+
+// Backstop: the skeleton is normally handed off by AuthGate/App once real UI is
+// ready (see removeStartupSkeleton call sites). If startup wedges before any of
+// those fire, force it down after a generous deadline so the user is never stuck
+// staring at a frozen skeleton with no way forward.
+setTimeout(() => removeStartupSkeleton(), 20000)

@@ -5,6 +5,7 @@ import { useCurrentTeamStore } from "./current-team";
 import { isTauri } from "@/lib/utils";
 import { loadPinnedSessionIds, savePinnedSessionIds } from "./session-pins";
 import { syncSessionWorkspaces } from "@/lib/session-workspace-sync";
+import { markStartup } from "@/lib/startup-perf";
 import {
   loadSessionsForTeam,
   softDeleteSession,
@@ -180,6 +181,7 @@ export const useSessionListStore = create<State>((set, get) => ({
       return;
     }
     set({ loading: true, error: null });
+    markStartup("session-list:start");
 
     // Derive the team_id for libsql hydrate:
     //   1. First row already in store (set by prior load), OR
@@ -205,6 +207,7 @@ export const useSessionListStore = create<State>((set, get) => ({
             sortEntries(localRows.map(mapCacheToEntry)),
           ),
         });
+        markStartup("session-list:local-cache");
       }
     }
 
@@ -253,6 +256,7 @@ export const useSessionListStore = create<State>((set, get) => ({
       hasMore: rows.length === limit,
       nextCursor: cursorFromRows(rows),
     });
+    markStartup("session-list:loaded");
   },
   loadMore: async (limit = 50) => {
     const session = useAuthStore.getState().session;
