@@ -460,22 +460,70 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
             None => return Ok(vec![]),
         };
         drop(map);
-        let proto_commands = {
+
+        // ── 1. Agent-reported commands ────────────────────────────────────────
+        let (proto_commands, agent_type) = {
             let mgr = self.manager.lock().await;
             let agent_id = match mgr.agent_id_by_acp_session(&real) {
                 Some(id) => id,
                 None => return Ok(vec![]),
             };
-            mgr.get_available_commands(&agent_id)
-        }; // manager lock dropped here
-        Ok(proto_commands
+            let cmds = mgr.get_available_commands(&agent_id);
+            let atype = mgr.agent_type_for_acp_session(&real);
+            (cmds, atype)
+        };
+        let mut result: Vec<AcpAvailableCommand> = proto_commands
             .into_iter()
             .map(|c| AcpAvailableCommand {
                 name: c.name,
                 description: c.description,
                 input_hint: if c.input_hint.is_empty() { None } else { Some(c.input_hint) },
             })
-            .collect())
+            .collect();
+
+        // ── 2. Agent built-in commands (ClaudeCode doesn't report via AcpAvailableCommands) ──
+        let known = match agent_type {
+            Some(t) if t == amux::AgentType::ClaudeCode => &[
+                ("compact", "Compact the conversation history", ""),
+                ("cost", "Show token cost for this session", ""),
+            ][..],
+            _ => &[][..],
+        };
+        for (name, description, hint) in known {
+            if !result.iter().any(|c| c.name == *name) {
+                result.push(AcpAvailableCommand {
+                    name: name.to_string(),
+                    description: description.to_string(),
+                    input_hint: if hint.is_empty() { None } else { Some(hint.to_string()) },
+                });
+            }
+        }
+
+        // ── 3. Workspace skills ───────────────────────────────────────────────
+        if let Some(ws_dir) = &self.default_workspace_dir {
+            use crate::config::scan_roles_skills_state;
+            let ws_path = std::path::Path::new(ws_dir);
+            if let Ok(state) = scan_roles_skills_state(ws_path) {
+                for skill in state.skills {
+                    let slash_name = skill
+                        .invocation_name
+                        .as_deref()
+                        .unwrap_or_else(|| {
+                            skill.filename.trim_end_matches(".md")
+                        })
+                        .to_string();
+                    if !result.iter().any(|c| c.name == slash_name) {
+                        result.push(AcpAvailableCommand {
+                            name: slash_name,
+                            description: skill.description,
+                            input_hint: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(result)
     }
 
     async fn send_slash_command(
