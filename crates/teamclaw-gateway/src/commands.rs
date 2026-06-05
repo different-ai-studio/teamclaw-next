@@ -57,8 +57,8 @@ fn parse_meta(name: &str, arg: Option<&str>) -> Option<MetaCommand> {
     }
 }
 
-const HELP_TEXT: &str = "\
-Available commands:
+const GATEWAY_HELP: &str = "\
+Gateway commands:
 /help - Show this help
 /model [name] - List or switch models
 /sessions [id] - List sessions
@@ -107,7 +107,19 @@ where
     };
 
     let response = match meta {
-        MetaCommand::Help => HELP_TEXT.to_string(),
+        MetaCommand::Help => {
+            let mut text = GATEWAY_HELP.to_string();
+            if !agent_cmds.is_empty() {
+                text.push_str("\n\nAgent commands:");
+                for cmd in &agent_cmds {
+                    match &cmd.input_hint {
+                        Some(hint) => text.push_str(&format!("\n/{} <{}> - {}", cmd.name, hint, cmd.description)),
+                        None => text.push_str(&format!("\n/{} - {}", cmd.name, cmd.description)),
+                    }
+                }
+            }
+            text
+        }
 
         MetaCommand::Model(None) => {
             let models = acp.list_models().await?;
