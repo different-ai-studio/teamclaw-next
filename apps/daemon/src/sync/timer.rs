@@ -17,6 +17,10 @@ pub fn spawn(dispatcher: SyncDispatcher, workspaces: Vec<(String, Vec<String>)>)
             tick.tick().await;
             for (team_id, paths) in &workspaces {
                 if let Some(ws) = paths.first() {
+                    if dispatcher.status(team_id).await.syncing {
+                        tracing::debug!(team_id, "timer sync skipped: sync already in progress");
+                        continue;
+                    }
                     let st = dispatcher.sync_team(team_id, ws).await;
                     if let Some(err) = &st.last_error {
                         tracing::warn!(team_id, "timer sync error: {err}");

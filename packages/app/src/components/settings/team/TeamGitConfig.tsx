@@ -1,26 +1,6 @@
-/**
- * TeamGitConfig — Git-mode team-share status panel.
- *
- * Source of truth is the FC share-mode (`useTeamShareStore`), exactly like the
- * OSS panel reads the daemon sync store. The desktop proxies team-sync to the
- * amuxd daemon, which owns the clone, credentials, and materialization — this
- * panel is a pure status surface:
- *   - enabled mode + repo URL + daemon global copy path + workspace link status
- *   - a "Sync now" button (→ team_shared_git_sync proxy; daemon-owned, the proxy
- *     only needs workspacePath)
- *   - the TeamSyncPaths view (real dir + every workspace symlink)
- *   - a static repo setup guide
- *
- * This panel is only mounted for a team whose share mode is already locked to a
- * git mode (managed_git / custom_git) — see TeamSection's router — so it never
- * renders an "unconfigured" empty state. The legacy local-config plumbing
- * (get/save/clear_team_config, the enabled toggle, the embedded LLM
- * service config, and the git-installed precheck) has been removed: team
- * identity now lives behind the Cloud API, the daemon owns sync, and LLM hosting
- * is configured from the LLM settings pane (TeamSharedLlmPane).
- */
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
+import { invoke } from '@tauri-apps/api/core'
 import {
   Users,
   AlertCircle,
@@ -30,6 +10,7 @@ import {
   KeyRound,
   ChevronRight,
   BookOpen,
+  Loader2,
 } from 'lucide-react'
 import { cn, isTauri } from '@/lib/utils'
 import { TeamSyncPaths } from './TeamSyncPaths'
@@ -50,6 +31,13 @@ import {
 interface TeamGitResult {
   success: boolean
   message: string
+}
+
+interface DaemonSyncStatus {
+  mode: string | null
+  lastSyncAt: string | null
+  syncing: boolean
+  lastError: string | null
 }
 
 async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -85,18 +73,46 @@ export function TeamGitConfig() {
 
   const [syncing, setSyncing] = React.useState(false)
   const [pathsRefreshKey, setPathsRefreshKey] = React.useState(0)
-  const [lastSyncAt, setLastSyncAt] = React.useState<string | null>(null)
+  const [syncStatus, setSyncStatus] = React.useState<DaemonSyncStatus | null>(null)
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
   const [repoGuideOpen, setRepoGuideOpen] = React.useState(false)
 
   const sharedDirName = TEAM_REPO_DIR
+
+  const refreshSyncStatus = React.useCallback(async () => {
+    if (!workspacePath || !teamId || !isTauri()) return
+    try {
+      const daemonStatus = await invoke<DaemonSyncStatus>('oss_sync_status', {
+        workspacePath,
+        teamId,
+      })
+      setSyncStatus({
+        mode: daemonStatus.mode ?? null,
+        lastSyncAt: daemonStatus.lastSyncAt ?? null,
+        syncing: daemonStatus.syncing ?? false,
+        lastError: daemonStatus.lastError ?? null,
+      })
+    } catch (err) {
+      console.warn('[TeamGitConfig] failed to load daemon sync status:', err)
+    }
+  }, [teamId, workspacePath])
 
   // Keep the FC share-mode status fresh (TeamSection resolves it before mounting
   // us; this re-fetch covers team/workspace switches while the pane is open).
   React.useEffect(() => {
     if (!teamId || !workspacePath || !isTauri()) return
     void refresh(teamId, workspacePath)
-  }, [teamId, workspacePath, refresh])
+    void refreshSyncStatus()
+  }, [teamId, workspacePath, refresh, refreshSyncStatus])
+
+  // Poll while the daemon reports an in-flight sync (e.g. background timer clone).
+  React.useEffect(() => {
+    if (!syncStatus?.syncing || !workspacePath || !teamId || !isTauri()) return
+    const id = window.setInterval(() => {
+      void refreshSyncStatus()
+    }, 3000)
+    return () => window.clearInterval(id)
+  }, [syncStatus?.syncing, workspacePath, teamId, refreshSyncStatus])
 
   const modeLabel =
     status.mode === 'managed_git'
@@ -104,6 +120,9 @@ export function TeamGitConfig() {
       : status.mode === 'custom_git'
         ? t('settings.teamShare.modeCustomGitLabel', 'Self-hosted Git')
         : t('settings.team.teamRepo', 'Team Shared Directory')
+
+  const daemonSyncing = syncing || (syncStatus?.syncing ?? false)
+  const combinedError = errorMessage ?? syncStatus?.lastError ?? null
 
   // ─── Sync flow — daemon-owned; the proxy only needs workspacePath ─────────
 
@@ -139,9 +158,9 @@ export function TeamGitConfig() {
         return
       }
       window.dispatchEvent(new CustomEvent(TEAM_SYNCED_EVENT))
-      setLastSyncAt(new Date().toISOString())
       setPathsRefreshKey((k) => k + 1)
       if (teamId) void refresh(teamId, workspacePath)
+      await refreshSyncStatus()
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err))
     } finally {
@@ -171,21 +190,24 @@ export function TeamGitConfig() {
   return (
     <>
       {/* Error Banner */}
-      {errorMessage && (
+      {combinedError && (
         <SettingCard className="bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-950/30 dark:to-rose-950/30 border-red-200 dark:border-red-800">
           <div className="flex items-start gap-3">
             <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="font-medium text-red-900 dark:text-red-100">{t('common.error', 'Error')}</p>
               <p className="text-[13px] text-red-700 dark:text-red-300 mt-1 break-words">
-                {errorMessage}
+                {combinedError}
               </p>
             </div>
             <Button
               variant="ghost"
               size="sm"
               className="shrink-0"
-              onClick={() => setErrorMessage(null)}
+              onClick={() => {
+                setErrorMessage(null)
+                setSyncStatus((prev) => (prev ? { ...prev, lastError: null } : prev))
+              }}
             >
               ✕
             </Button>
@@ -231,32 +253,39 @@ export function TeamGitConfig() {
           </div>
 
           {/* Last sync info + actions */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t">
-            <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
-              <Clock className="h-3.5 w-3.5" />
-              {t('settings.team.lastSynced', 'Last synced')}: {formatLastSync(lastSyncAt)}
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void performSync()}
-              disabled={syncing || !workspacePath}
-              className="shrink-0 gap-2"
-            >
-              <RefreshCw className={cn('h-3 w-3 shrink-0', syncing && 'animate-spin')} />
-              {t('settings.team.syncNow', 'Sync Now')}
-            </Button>
-          </div>
+          <TeamShareDisconnect
+            variant="footer"
+            onDisconnected={() => {
+              setSyncStatus(null)
+              setPathsRefreshKey((k) => k + 1)
+            }}
+            leading={
+              <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+                {daemonSyncing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Clock className="h-3.5 w-3.5" />
+                )}
+                {t('settings.team.lastSynced', 'Last synced')}:{' '}
+                {formatLastSync(syncStatus?.lastSyncAt ?? null)}
+              </div>
+            }
+            trailingActions={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void performSync()}
+                disabled={daemonSyncing || !workspacePath}
+                className="shrink-0 gap-2"
+              >
+                <RefreshCw className={cn('h-3 w-3 shrink-0', daemonSyncing && 'animate-spin')} />
+                {t('settings.team.syncNow', 'Sync Now')}
+              </Button>
+            }
+          />
         </div>
       </SettingCard>
-
-      <TeamShareDisconnect
-        onDisconnected={() => {
-          setLastSyncAt(null)
-          setPathsRefreshKey((k) => k + 1)
-        }}
-      />
 
       {/* Real sync directory + every workspace symlink (all 3 share modes) */}
       <TeamSyncPaths

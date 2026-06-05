@@ -23,7 +23,6 @@ import {
   Database,
   Server,
   FolderOpen,
-  Activity,
   Bot,
   Laptop,
 } from 'lucide-react'
@@ -62,7 +61,6 @@ const primarySections: Section[] = [
 const daemonSections: Section[] = [
   { id: 'daemonGeneral', label: 'General', labelKey: 'settings.nav.daemonGeneral', icon: Bot },
   { id: 'daemonWorkspaces', label: 'Workspace', labelKey: 'settings.nav.daemonWorkspaces', icon: FolderOpen },
-  { id: 'daemonRuntimes', label: 'Runtimes', labelKey: 'settings.nav.daemonRuntimes', icon: Activity },
   { id: 'automation', label: 'Automation', labelKey: 'settings.nav.automation', icon: Clock },
   { id: 'channels', label: 'Channels', labelKey: 'settings.nav.channels', icon: MessageSquare },
 ]

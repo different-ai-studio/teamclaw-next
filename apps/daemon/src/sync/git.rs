@@ -1,6 +1,8 @@
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -251,6 +253,50 @@ fn unix_ts() -> u64 {
         .unwrap_or(0)
 }
 
+fn active_git_syncs() -> &'static Mutex<HashSet<PathBuf>> {
+    static LOCK: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+struct GitSyncGuard {
+    team_dir: PathBuf,
+}
+
+impl Drop for GitSyncGuard {
+    fn drop(&mut self) {
+        active_git_syncs()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.team_dir);
+    }
+}
+
+fn acquire_git_sync(team_dir: &Path) -> anyhow::Result<GitSyncGuard> {
+    let key = team_dir.to_path_buf();
+    let mut set = active_git_syncs()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if !set.insert(key.clone()) {
+        anyhow::bail!(
+            "team git sync already in progress for {}",
+            team_dir.display()
+        );
+    }
+    Ok(GitSyncGuard { team_dir: key })
+}
+
+/// True when the team dir is missing or an empty scaffold without `.git`.
+/// An existing `.git` (even a broken/partial clone) must never trigger a wipe.
+fn needs_initial_clone(team_dir: &Path) -> bool {
+    if !team_dir.exists() {
+        return true;
+    }
+    if team_dir.join(".git").exists() {
+        return false;
+    }
+    crate::config::global_team_store::is_scaffold_only(team_dir)
+}
+
 /// Sync a git-backed team dir at an explicit path (used for the global,
 /// per-team copy). The dir is created/cloned if missing.
 ///
@@ -277,6 +323,7 @@ pub fn sync_git_dir_with_cred(
     config: &TeamSharedGitConfig,
     cred: GitCredential,
 ) -> anyhow::Result<TeamSharedGitStatus> {
+    let _sync_guard = acquire_git_sync(team_dir)?;
     let Some(git_url) = config.git_url.as_deref().filter(|u| !u.trim().is_empty()) else {
         return Ok(TeamSharedGitStatus {
             shared_dir_path: team_dir.to_path_buf(),
@@ -309,10 +356,14 @@ pub fn sync_git_dir_with_cred(
     };
     let extra_env = extra_env.as_slice();
 
-    let needs_clone = !team_dir.exists()
-        || (!team_dir.join(".git").exists()
-            && crate::config::global_team_store::is_scaffold_only(team_dir));
+    let needs_clone = needs_initial_clone(team_dir);
     if needs_clone {
+        if team_dir.join(".git").exists() {
+            anyhow::bail!(
+                "refusing to wipe {}: .git already exists (repair via fetch/pull instead)",
+                team_dir.display()
+            );
+        }
         if team_dir.exists() {
             std::fs::remove_dir_all(team_dir).map_err(|e| {
                 anyhow::anyhow!(
@@ -521,6 +572,26 @@ mod tests {
         assert!(status.synced);
         assert!(team_dir.join(".git").exists());
         assert!(team_dir.join("skills/readme.md").exists());
+    }
+
+    #[test]
+    fn needs_initial_clone_is_false_when_git_metadata_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let team_dir = tmp.path().join("teamclaw-team");
+        std::fs::create_dir_all(team_dir.join(".git")).unwrap();
+        assert!(!super::needs_initial_clone(&team_dir));
+    }
+
+    #[test]
+    fn concurrent_git_sync_is_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let team_dir = tmp.path().join("teamclaw-team");
+        std::fs::create_dir_all(&team_dir).unwrap();
+        let guard = super::acquire_git_sync(&team_dir).unwrap();
+        let err = super::acquire_git_sync(&team_dir).unwrap_err();
+        assert!(err.to_string().contains("already in progress"));
+        drop(guard);
+        assert!(super::acquire_git_sync(&team_dir).is_ok());
     }
 
     #[test]

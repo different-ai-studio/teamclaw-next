@@ -5,6 +5,7 @@ mod session_store;
 mod workspace_store;
 pub mod global_team_store;
 pub mod workspace_link;
+pub mod workspace_path;
 pub mod provider_auth;
 pub mod workspace_control;
 

@@ -353,8 +353,9 @@ pub struct RegisteredDaemonWorkspace {
 /// Register `workspace_path` into the daemon's local registry
 /// (`~/.amuxd/workspaces.toml`) **and** the cloud `public.workspaces` table by
 /// calling the daemon's loopback `POST /v1/workspaces`. Idempotent — safe to
-/// call on every launch. The desktop uses this on first launch to ensure its
-/// default team workspace (`~/.amuxd/teams/<teamId>`) exists in both registries.
+/// call on every launch. The desktop registers the user's chosen project
+/// workspace, not the daemon's internal `~/.amuxd/teams/<id>` global sync store
+/// (that path is rejected by the workspace registry).
 ///
 /// Returns `Ok(None)` when the daemon HTTP listener isn't up yet (port/token
 /// files missing) so the caller can treat it as a soft no-op and retry later.
@@ -365,6 +366,15 @@ pub async fn register_daemon_workspace(
     let path = workspace_path.trim().to_string();
     if path.is_empty() {
         return Err("workspace_path must not be empty".into());
+    }
+
+    let amuxd_dir = dirs::home_dir()
+        .ok_or_else(|| "no home dir".to_string())?
+        .join(".amuxd");
+    if std::path::Path::new(&path).starts_with(&amuxd_dir) {
+        return Err(format!(
+            "workspace path must not be inside the daemon config directory (~/.amuxd): {path}"
+        ));
     }
 
     // The daemon's `WorkspaceStore::add` requires the path to already exist (it

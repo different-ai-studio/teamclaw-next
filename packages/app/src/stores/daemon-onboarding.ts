@@ -110,32 +110,20 @@ async function ensureHealthy(): Promise<boolean> {
 }
 
 /**
- * Ensure the team's default workspace (`~/.amuxd/teams/<teamId>`) is registered
- * in the daemon's local registry (`~/.amuxd/workspaces.toml`) AND the cloud
- * `public.workspaces` table.
- *
- * The desktop auto-selects this dir as the workspace on first launch (see
- * `useAppInit`), but the daemon only learns about a workspace when one is
- * explicitly registered — so without this the default workspace would be
- * absent from both lists. We run it right after confirming the daemon is bound
- * to the current team and healthy, i.e. at the same point we verify daemon and
- * actor share a team.
- *
- * Idempotent + best-effort: the daemon dedupes by canonical path and tops up
- * whichever side (local/cloud) is missing; `register_daemon_workspace` returns
- * `null` when the daemon HTTP listener isn't up yet. Any failure here must not
- * break onboarding.
+ * Register the user's active workspace in the daemon registry + cloud when it is
+ * a real project directory. The old default (`~/.amuxd/teams/<teamId>`) must
+ * never be registered — that path is the global sync store, not a workspace.
  */
 async function ensureDefaultWorkspaceRegistered(teamId: string | null): Promise<void> {
   if (!isTauri() || !teamId) return
+  const { useWorkspaceStore } = await import('@/stores/workspace')
+  const workspacePath = useWorkspaceStore.getState().workspacePath
+  if (!workspacePath || workspacePath.includes('/.amuxd/')) return
   try {
-    const { homeDir, join } = await import('@tauri-apps/api/path')
-    const home = await homeDir()
-    const workspacePath = await join(home, '.amuxd', 'teams', teamId)
     const { invoke } = await import('@tauri-apps/api/core')
     await invoke('register_daemon_workspace', { workspacePath })
   } catch (e) {
-    console.warn('[daemon-onboarding] default workspace registration failed (non-critical)', e)
+    console.warn('[daemon-onboarding] workspace registration failed (non-critical)', e)
   }
 }
 

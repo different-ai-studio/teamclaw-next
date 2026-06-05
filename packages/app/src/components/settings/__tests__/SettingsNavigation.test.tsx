@@ -117,7 +117,7 @@ describe('Settings navigation', () => {
     const daemonSubnav = screen.getByTestId('daemon-subnav')
     expect(
       within(daemonSubnav).getAllByRole('button').map((button) => button.textContent)
-    ).toEqual(['General', 'Workspace', 'Runtimes', 'Automation', 'Channels'])
+    ).toEqual(['General', 'Workspace', 'Automation', 'Channels'])
 
     // Local Agent starts collapsed (accordion) — expand it to read its sections.
     fireEvent.click(localAgentButton)

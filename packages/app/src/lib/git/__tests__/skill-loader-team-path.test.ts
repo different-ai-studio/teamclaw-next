@@ -6,7 +6,7 @@ import {
   getSourceDirHint,
   readConfigSkillPaths,
 } from "../skill-loader"
-import { collectTeamSkillPaths } from "@/lib/team-skill-paths"
+import { collectTeamSkillPaths, TEAM_SHARE_LINK_DIR } from "@/lib/team-skill-paths"
 
 const mockExists = vi.fn()
 const mockReadDir = vi.fn()
@@ -139,7 +139,7 @@ describe("skill-loader dynamic team paths (from teamclaw.json)", () => {
     mockExists.mockImplementation((path: string) => {
       if (path === `${workspacePath}/teamclaw.json`) return Promise.resolve(true)
       if (path === `${workspacePath}/opencode.json`) return Promise.resolve(false)
-      if (path === `${workspacePath}/${TEAM_REPO_DIR}/skills`) return Promise.resolve(false)
+      if (path === `${workspacePath}/${TEAM_SHARE_LINK_DIR}/skills`) return Promise.resolve(false)
       return Promise.resolve(false)
     })
     mockReadTextFile.mockImplementation((path: string) => {
@@ -152,11 +152,49 @@ describe("skill-loader dynamic team paths (from teamclaw.json)", () => {
     expect(skills.filter((s) => s.source === "team")).toHaveLength(0)
   })
 
+  it("falls back to global team dir when workspace teamclaw-team link is broken", async () => {
+    const brokenLinkSkills = `${workspacePath}/${TEAM_SHARE_LINK_DIR}/skills`
+    const globalSkills = `/home/user/.amuxd/teams/team-abc/${TEAM_SHARE_LINK_DIR}/skills`
+
+    mockExists.mockImplementation((path: string) => {
+      if (path === `${workspacePath}/teamclaw.json`) return Promise.resolve(false)
+      if (path === `${workspacePath}/opencode.json`) return Promise.resolve(true)
+      if (path === brokenLinkSkills) return Promise.resolve(false)
+      if (path === `${workspacePath}/${TEAM_SHARE_LINK_DIR}`) return Promise.resolve(false)
+      if (path === `/home/user/.amuxd/daemon.toml`) return Promise.resolve(true)
+      if (path === globalSkills) return Promise.resolve(true)
+      if (path === `/home/user/.amuxd/teams/team-abc/${TEAM_SHARE_LINK_DIR}`) return Promise.resolve(true)
+      if (path.includes("shared-skill") && path.endsWith("SKILL.md")) return Promise.resolve(true)
+      return Promise.resolve(false)
+    })
+    mockReadTextFile.mockImplementation((path: string) => {
+      if (path === `${workspacePath}/opencode.json`)
+        return Promise.resolve(JSON.stringify({ skills: { paths: ["teamclaw-team/skills"] } }))
+      if (path === `/home/user/.amuxd/daemon.toml`)
+        return Promise.resolve('team_id = "team-abc"\n')
+      if (path.includes("shared-skill")) return Promise.resolve("# shared-skill\n")
+      return Promise.resolve("")
+    })
+    mockReadDir.mockImplementation((path: string) => {
+      if (path === globalSkills)
+        return Promise.resolve([{ name: "shared-skill", isDirectory: true }])
+      return Promise.resolve([])
+    })
+
+    const paths = await collectTeamSkillPaths(workspacePath)
+    expect(paths).toContain(globalSkills)
+
+    const { skills } = await loadAllSkills(workspacePath)
+    expect(skills.some((s) => s.source === "team" && s.filename === "shared-skill")).toBe(true)
+  })
+
   it("auto-loads teamclaw-team/skills without teamclaw.json skills.paths", async () => {
-    const teamDir = `${workspacePath}/${TEAM_REPO_DIR}/skills`
+    const teamDir = `${workspacePath}/${TEAM_SHARE_LINK_DIR}/skills`
+    expect(TEAM_SHARE_LINK_DIR).toBe("teamclaw-team")
 
     mockExists.mockImplementation((path: string) => {
       if (path === teamDir) return Promise.resolve(true)
+      if (path === `${workspacePath}/${TEAM_SHARE_LINK_DIR}`) return Promise.resolve(true)
       if (path.includes("shared-skill") && path.endsWith("SKILL.md")) return Promise.resolve(true)
       return Promise.resolve(false)
     })

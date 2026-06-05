@@ -853,9 +853,8 @@ pub struct RegisterWorkspaceResponseBody {
 ///
 /// Idempotent: re-registering an existing path returns its current record
 /// without creating a duplicate (the actor's `apply_add_workspace` still tops
-/// up the cloud row + default if either is missing). The desktop calls this on
-/// first launch to ensure its default team workspace (`~/.amuxd/teams/<teamId>`)
-/// exists in both registries.
+/// up the cloud row + default if either is missing). The desktop calls this for
+/// the user's project workspace after onboarding — not for `~/.amuxd` paths.
 ///
 /// Requires `workspace:write`. Returns 503 when no daemon actor is wired behind
 /// the HTTP server (focused tests).

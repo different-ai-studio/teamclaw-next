@@ -1,6 +1,45 @@
 import { exists, readTextFile } from '@tauri-apps/plugin-fs'
 import { homeDir } from '@tauri-apps/api/path'
-import { TEAM_REPO_DIR } from '@/lib/build-config'
+
+/**
+ * Workspace symlink/dir name for team-shared content.
+ * Must match `TEAM_LINK_NAME` in `apps/daemon/src/config/global_team_store.rs`.
+ */
+export const TEAM_SHARE_LINK_DIR = 'teamclaw-team'
+
+async function readOnboardedTeamId(): Promise<string | null> {
+  try {
+    const home = trimTrailingPathSeparators(await homeDir())
+    const configPath = `${home}/.amuxd/daemon.toml`
+    if (!(await exists(configPath))) return null
+    const content = await readTextFile(configPath)
+    const match = content.match(/team_id\s*=\s*"([^"]+)"/)
+    const teamId = match?.[1]?.trim()
+    return teamId || null
+  } catch {
+    return null
+  }
+}
+
+/** Global team share dir: `~/.amuxd/teams/<team_id>/teamclaw-team`. */
+async function globalTeamDir(teamId: string): Promise<string> {
+  const home = trimTrailingPathSeparators(await homeDir())
+  return `${home}/.amuxd/teams/${teamId}/${TEAM_SHARE_LINK_DIR}`
+}
+
+/**
+ * Resolve the workspace team dir, falling back to the global copy when the
+ * in-workspace `teamclaw-team` link is missing or dangling.
+ */
+export async function resolveTeamDir(workspacePath: string): Promise<string | null> {
+  const linkDir = `${workspacePath}/${TEAM_SHARE_LINK_DIR}`
+  if (await exists(linkDir)) return linkDir
+
+  const teamId = await readOnboardedTeamId()
+  if (!teamId) return null
+  const globalDir = await globalTeamDir(teamId)
+  return (await exists(globalDir)) ? globalDir : null
+}
 
 function trimTrailingPathSeparators(path: string): string {
   return path.replace(/[/\\]+$/, '')
@@ -53,19 +92,42 @@ async function readSkillPathsFromConfig(
  * - `opencode.json` → `skills.paths` (legacy / OpenCode-aligned config)
  * - `<workspace>/teamclaw-team/skills` when the team share link exists on disk
  */
+async function remapTeamSkillPath(
+  workspacePath: string,
+  path: string,
+  teamId: string | null,
+): Promise<string | null> {
+  if (await exists(path)) return path
+  if (!teamId) return null
+
+  const linkRoot = `${workspacePath}/${TEAM_SHARE_LINK_DIR}`
+  if (!path.startsWith(linkRoot)) return null
+
+  const rel = path.slice(linkRoot.length).replace(/^[/\\]+/, '')
+  const globalDir = await globalTeamDir(teamId)
+  const remapped = rel ? joinPath(globalDir, rel) : globalDir
+  return (await exists(remapped)) ? remapped : null
+}
+
 export async function collectTeamSkillPaths(workspacePath: string): Promise<string[]> {
   const dirs = new Set<string>()
+  const teamId = await readOnboardedTeamId()
 
   for (const path of await readSkillPathsFromConfig(workspacePath, 'teamclaw.json')) {
-    dirs.add(path)
+    const resolved = await remapTeamSkillPath(workspacePath, path, teamId)
+    if (resolved) dirs.add(resolved)
   }
   for (const path of await readSkillPathsFromConfig(workspacePath, 'opencode.json')) {
-    dirs.add(path)
+    const resolved = await remapTeamSkillPath(workspacePath, path, teamId)
+    if (resolved) dirs.add(resolved)
   }
 
-  const defaultTeamSkillsDir = `${workspacePath}/${TEAM_REPO_DIR}/skills`
-  if (await exists(defaultTeamSkillsDir)) {
-    dirs.add(defaultTeamSkillsDir)
+  const teamDir = await resolveTeamDir(workspacePath)
+  if (teamDir) {
+    const defaultTeamSkillsDir = joinPath(teamDir, 'skills')
+    if (await exists(defaultTeamSkillsDir)) {
+      dirs.add(defaultTeamSkillsDir)
+    }
   }
 
   return Array.from(dirs)
