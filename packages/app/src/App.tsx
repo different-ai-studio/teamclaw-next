@@ -110,7 +110,6 @@ import { getDesktopDeviceId } from "./lib/backend/cloud-api/device-id";
 import { create as createMessage } from "@bufbuild/protobuf";
 import { MessageSchema, MessageKind, type Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
 import {
-  PENDING_AGENT_REPLY_FALLBACK_MS,
   agentStreamKey,
   isAgentActiveStatus,
   isTerminalAgentStatus,
@@ -120,7 +119,6 @@ import {
   registerDiscardPendingStreamReply,
   rememberLiveEventId,
   streamEntryHasVisibleContent,
-  shouldFlushPendingAgentReplyFallback,
 } from "@/lib/live-agent-stream";
 import {
   mapAcpPlanEntries,
@@ -756,41 +754,24 @@ function AppContent() {
     accessToken: mqttAccessToken,
   });
   const pendingStreamRepliesRef = useRef<Record<string, TeamclawMessage[]>>({});
-  const pendingStreamReplyTimersRef = useRef<
-    Record<string, ReturnType<typeof setTimeout>>
-  >({});
-  const pendingStreamReplySinceRef = useRef<Record<string, number>>({});
+  /** Set on terminal statusChange; late message.created triggers flush. */
+  const terminalFlushPendingRef = useRef<Record<string, boolean>>({});
   const seenLiveEventIdsRef = useRef<Set<string>>(new Set());
 
-  function clearPendingStreamReplyTimer(streamKey: string) {
-    const timer = pendingStreamReplyTimersRef.current[streamKey];
-    if (timer !== undefined) {
-      clearTimeout(timer);
-      delete pendingStreamReplyTimersRef.current[streamKey];
-    }
+  function clearTurnAgentReplyParking(streamKey: string) {
+    delete pendingStreamRepliesRef.current[streamKey];
   }
 
-  function appendStreamReplyAfterPartsPersist(
-    sessionId: string,
-    actorId: string,
-    reply: TeamclawMessage,
-  ) {
-    void (async () => {
-      const enrichedReply = await persistStreamingPartsForReply(
-        sessionId,
-        actorId,
-        reply,
-      );
-      useSessionMessageStore.getState().appendMessage(sessionId, enrichedReply);
-      const persistedPartsJson = (enrichedReply as { partsJson?: string }).partsJson;
-      useV2StreamingStore.getState().releaseActorAfterPersist(sessionId, actorId, {
-        persistedPartsJson,
-      });
-    })();
+  function clearTerminalFlushPending(streamKey: string) {
+    delete terminalFlushPendingRef.current[streamKey];
   }
 
-  function flushPendingStreamReply(sessionId: string, actorId: string): boolean {
+  const flushTurnAgentReplyInFlightRef = useRef<Record<string, boolean>>({});
+
+  function flushTurnAgentReply(sessionId: string, actorId: string): boolean {
     const streamKey = agentStreamKey(sessionId, actorId);
+    if (flushTurnAgentReplyInFlightRef.current[streamKey]) return false;
+
     const pendingReplies = pendingStreamRepliesRef.current[streamKey];
     if (!pendingReplies?.length) return false;
 
@@ -798,53 +779,68 @@ function AppContent() {
     const mergedReply = mergePendingAgentReplies(pendingReplies, streamEntry);
     if (!mergedReply) return false;
 
-    clearPendingStreamReplyTimer(streamKey);
-    delete pendingStreamReplySinceRef.current[streamKey];
-    delete pendingStreamRepliesRef.current[streamKey];
-    useV2StreamingStore.getState().finishSessionActor(sessionId, actorId, {
-      reason: "flushPendingStreamReply",
-    });
-    appendStreamReplyAfterPartsPersist(sessionId, actorId, mergedReply);
+    flushTurnAgentReplyInFlightRef.current[streamKey] = true;
+    const pendingSnapshot = [...pendingReplies];
+    clearTurnAgentReplyParking(streamKey);
+
+    void (async () => {
+      useV2StreamingStore.getState().finalize(sessionId, actorId);
+      const enrichedReply = await persistStreamingPartsForReply(
+        sessionId,
+        actorId,
+        mergedReply,
+        pendingSnapshot,
+      );
+      useSessionMessageStore
+        .getState()
+        .replaceTurnAgentRepliesInStore(sessionId, enrichedReply);
+      const teamId =
+        useSessionListStore.getState().rows.find((r) => r.id === sessionId)
+          ?.team_id ?? "";
+      const now = new Date().toISOString();
+      const m = enrichedReply;
+      const kindStr = "agent_reply";
+      const msgRow: MessageRow = {
+        id: m.messageId,
+        teamId,
+        sessionId: m.sessionId,
+        turnId: m.turnId || null,
+        senderActorId: m.senderActorId || null,
+        replyToMessageId: null,
+        kind: kindStr,
+        content: m.content,
+        metadataJson: m.metadataJson || null,
+        model: m.model || null,
+        mentionsJson: null,
+        origin: "mqtt-live",
+        createdAt: new Date(Number(m.createdAt) * 1000).toISOString(),
+        updatedAt: now,
+        deletedAt: null,
+        syncedAt: now,
+        partsJson:
+          (m as unknown as { partsJson?: string | null }).partsJson ?? null,
+      };
+      upsertMessagesBatch([msgRow]).catch((e) => {
+        console.warn("[cache] flush agent_reply upsert failed:", e);
+      });
+      const persistedPartsJson = (enrichedReply as { partsJson?: string }).partsJson;
+      useV2StreamingStore.getState().finishSessionActor(sessionId, actorId, {
+        reason: "flushTurnAgentReply",
+      });
+      useV2StreamingStore.getState().releaseActorAfterPersist(sessionId, actorId, {
+        persistedPartsJson,
+      });
+      delete flushTurnAgentReplyInFlightRef.current[streamKey];
+    })();
+
     return true;
-  }
-
-  function schedulePendingStreamReplyFallback(
-    sessionId: string,
-    actorId: string,
-    reply: TeamclawMessage,
-  ) {
-    const streamKey = agentStreamKey(sessionId, actorId);
-    clearPendingStreamReplyTimer(streamKey);
-    pendingStreamReplySinceRef.current[streamKey] ??= Date.now();
-    pendingStreamReplyTimersRef.current[streamKey] = setTimeout(() => {
-      const pendingReplies = pendingStreamRepliesRef.current[streamKey];
-      const pendingReply = pendingReplies?.[pendingReplies.length - 1];
-      if (!pendingReply || pendingReply.messageId !== reply.messageId) return;
-
-      const streamEntry = useV2StreamingStore.getState().byKey[streamKey];
-      const pendingSince =
-        pendingStreamReplySinceRef.current[streamKey] ?? Date.now();
-      if (
-        shouldFlushPendingAgentReplyFallback(
-          streamEntry,
-          Date.now(),
-          pendingSince,
-        )
-      ) {
-        flushPendingStreamReply(sessionId, actorId);
-        return;
-      }
-
-      schedulePendingStreamReplyFallback(sessionId, actorId, pendingReply);
-    }, PENDING_AGENT_REPLY_FALLBACK_MS);
   }
 
   useEffect(() => {
     registerDiscardPendingStreamReply((sessionId, actorId) => {
       const streamKey = agentStreamKey(sessionId, actorId);
-      clearPendingStreamReplyTimer(streamKey);
-      delete pendingStreamReplySinceRef.current[streamKey];
-      delete pendingStreamRepliesRef.current[streamKey];
+      clearTurnAgentReplyParking(streamKey);
+      clearTerminalFlushPending(streamKey);
     });
     return () => {
       registerDiscardPendingStreamReply(null);
@@ -998,21 +994,15 @@ function AppContent() {
             const streamEntry = streamKey
               ? streamingStore.byKey[streamKey]
               : undefined;
+            let parkedAgentReply = false;
             if (
               streamEntry &&
               senderActorId &&
               msg.kind === MessageKind.AGENT_REPLY
             ) {
-              // AGENT_REPLY rows can be emitted for intermediate output
-              // chunks before later tool calls arrive. Keep them parked until
-              // terminal status + flush. statusChange may mark the stream
-              // inactive first; re-activate so acp deltas keep rendering.
-              if (!streamEntry.active) {
-                streamingStore.markActorStreamActive(sid, senderActorId);
-              }
-              // Live text comes from acp.event output only (iOS alignment).
-              // ingestReplyPreview here duplicated stream when message.created
-              // content differed slightly from accumulated deltas.
+              // Mid-turn daemon AgentReply slices stay parked until terminal
+              // statusChange (or a late message.created after terminal).
+              parkedAgentReply = true;
               const pendingReplies =
                 pendingStreamRepliesRef.current[streamKey] ?? [];
               if (
@@ -1020,19 +1010,14 @@ function AppContent() {
                   (message) => message.messageId === msg.messageId,
                 )
               ) {
-                if (pendingReplies.length === 0) {
-                  delete pendingStreamReplySinceRef.current[streamKey];
-                }
                 pendingStreamRepliesRef.current[streamKey] = [
                   ...pendingReplies,
                   msg,
                 ];
               }
-              schedulePendingStreamReplyFallback(
-                sid,
-                senderActorId,
-                msg,
-              );
+              if (terminalFlushPendingRef.current[streamKey]) {
+                flushTurnAgentReply(sid, senderActorId);
+              }
             } else if (streamEntry && senderActorId) {
               streamingStore.finalize(
                 sid,
@@ -1051,7 +1036,7 @@ function AppContent() {
             // TODO(cleanup): remove insertAgentRuntimeEvent writes once all
             //   clients have upgraded past this version and the old read path
             //   in history loader above is cleaned up.
-            {
+            if (!parkedAgentReply) {
               const m = decoded.message;
               const kindStr =
                 m.kind === MessageKind.AGENT_TOOL_CALL
@@ -1186,9 +1171,12 @@ function AppContent() {
                 newStatus: sc.newStatus,
               });
               if (isAgentActiveStatus(sc.newStatus)) {
+                flushTurnAgentReply(sid, actorId);
+                clearTerminalFlushPending(agentStreamKey(sid, actorId));
                 useV2StreamingStore.getState().beginPlanningPlaceholder(sid, actorId);
               } else if (isTerminalAgentStatus(sc.newStatus)) {
-                if (!flushPendingStreamReply(sid, actorId)) {
+                terminalFlushPendingRef.current[agentStreamKey(sid, actorId)] = true;
+                if (!flushTurnAgentReply(sid, actorId)) {
                   const streamEntry = useV2StreamingStore.getState().byKey[
                     agentStreamKey(sid, actorId)
                   ];
@@ -1211,6 +1199,8 @@ function AppContent() {
               }
             } else if (event?.case === "error") {
               const er = event.value as { message?: string; details?: string };
+              terminalFlushPendingRef.current[agentStreamKey(sid, actorId)] = true;
+              flushTurnAgentReply(sid, actorId);
               useV2StreamingStore.getState().setError(
                 sid,
                 actorId,
@@ -1328,9 +1318,8 @@ function AppContent() {
     return () => {
       cancelled = true;
       unlisten?.();
-      for (const streamKey of Object.keys(pendingStreamReplyTimersRef.current)) {
-        clearPendingStreamReplyTimer(streamKey);
-      }
+      pendingStreamRepliesRef.current = {};
+      terminalFlushPendingRef.current = {};
       disposeTeamclawRpc();
       disposeRuntimeStateStore();
       disposeActorPresenceStore();

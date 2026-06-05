@@ -31,3 +31,22 @@ export function agentReplyTextsEquivalent(a: string, b: string): boolean {
   // Only whitespace / light punctuation drift (acp.output vs message.created).
   return /^[\s.,;:!?、。，；：！？…]*$/.test(tail);
 }
+
+/**
+ * True when acp.output and message.created are the same reply with minor
+ * mid-body drift (e.g. 改、 vs 改改) that fails prefix-only equivalence.
+ */
+export function agentReplyBodiesCollapsible(a: string, b: string): boolean {
+  if (agentReplyTextsEquivalent(a, b)) return true;
+  const na = normalizeAgentReplyText(a);
+  const nb = normalizeAgentReplyText(b);
+  if (!na || !nb) return false;
+
+  const minLen = Math.min(na.length, nb.length);
+  const maxLen = Math.max(na.length, nb.length);
+  if (minLen < 20) return false;
+  if (maxLen - minLen > Math.max(8, Math.floor(maxLen * 0.05))) return false;
+
+  const prefixLen = Math.min(40, minLen - 1);
+  return na.slice(0, prefixLen) === nb.slice(0, prefixLen);
+}

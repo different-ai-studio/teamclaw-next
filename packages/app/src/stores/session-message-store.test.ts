@@ -63,4 +63,32 @@ describe("session-message-store", () => {
 
     expect(useSessionMessageStore.getState().messageRefreshForceFull).toBe(true);
   });
+
+  it("replaceTurnAgentRepliesInStore keeps one agent_reply per turn", () => {
+    const first = createMessage(MessageSchema, {
+      messageId: "r1",
+      sessionId: "s1",
+      senderActorId: "agent",
+      kind: MessageKind.AGENT_REPLY,
+      content: "first",
+      turnId: "turn-1",
+      createdAt: BigInt(1),
+    });
+    const second = createMessage(MessageSchema, {
+      messageId: "r2",
+      sessionId: "s1",
+      senderActorId: "agent",
+      kind: MessageKind.AGENT_REPLY,
+      content: "second",
+      turnId: "turn-1",
+      createdAt: BigInt(2),
+    });
+    useSessionMessageStore.getState().appendMessage("s1", first);
+    useSessionMessageStore.getState().replaceTurnAgentRepliesInStore("s1", second);
+
+    const rows = useSessionMessageStore.getState().messages.s1 ?? [];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.messageId).toBe("r2");
+    expect(rows[0]?.content).toBe("second");
+  });
 });
