@@ -389,7 +389,14 @@ pub async fn team_share_enable_custom_git(
     access_token: String,
     team_secret_hex: Option<String>,
 ) -> Result<EnableShareResult, String> {
-    enable_custom_git_impl(team_id, workspace_path, input, access_token, team_secret_hex).await
+    enable_custom_git_impl(
+        team_id,
+        workspace_path,
+        input,
+        access_token,
+        team_secret_hex,
+    )
+    .await
 }
 
 // ─── set_team_secret ────────────────────────────────────────────────────

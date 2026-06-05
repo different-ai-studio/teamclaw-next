@@ -147,10 +147,7 @@ impl FcClient {
 /// FC returns `{ error: { code, message, requestId, details? } }` (not a bare string).
 fn fc_api_error_message(body: &Value) -> String {
     if let Some(obj) = body.get("error").and_then(|v| v.as_object()) {
-        let msg = obj
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let msg = obj.get("message").and_then(|v| v.as_str()).unwrap_or("");
         let code = obj.get("code").and_then(|v| v.as_str()).unwrap_or("");
         let upstream = obj
             .get("details")

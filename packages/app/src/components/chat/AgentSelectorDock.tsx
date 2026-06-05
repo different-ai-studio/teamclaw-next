@@ -53,8 +53,6 @@ interface AgentSelectorDockProps {
   onRemoveAgent: (agentId: string) => void
 }
 
-type AgentModelOption = { id: string; displayName: string }
-
 export { resolveAgentAvailableModels } from '@/lib/agent-available-models'
 
 /** Gray = waiting for init / unknown. Green = idle. Red = active or errored. */

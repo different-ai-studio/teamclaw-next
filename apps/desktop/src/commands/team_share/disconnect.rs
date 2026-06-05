@@ -35,28 +35,21 @@ pub fn remove_workspace_team_repo_entry(workspace_path: &str) -> Result<(), Stri
     let link = std::path::Path::new(workspace_path).join(TEAM_REPO_DIR);
     match std::fs::symlink_metadata(&link) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!(
-            "Failed to inspect {}: {}",
-            link.display(),
-            e
-        )),
+        Err(e) => Err(format!("Failed to inspect {}: {}", link.display(), e)),
         Ok(meta) if meta.file_type().is_symlink() => {
             #[cfg(unix)]
             {
-                std::fs::remove_file(&link).map_err(|e| {
-                    format!("Failed to remove symlink {}: {}", link.display(), e)
-                })
+                std::fs::remove_file(&link)
+                    .map_err(|e| format!("Failed to remove symlink {}: {}", link.display(), e))
             }
             #[cfg(windows)]
             {
-                std::fs::remove_dir(&link).map_err(|e| {
-                    format!("Failed to remove junction {}: {}", link.display(), e)
-                })
+                std::fs::remove_dir(&link)
+                    .map_err(|e| format!("Failed to remove junction {}: {}", link.display(), e))
             }
         }
-        Ok(_) => std::fs::remove_dir_all(&link).map_err(|e| {
-            format!("Failed to remove directory {}: {}", link.display(), e)
-        }),
+        Ok(_) => std::fs::remove_dir_all(&link)
+            .map_err(|e| format!("Failed to remove directory {}: {}", link.display(), e)),
     }
 }
 
@@ -129,9 +122,7 @@ async fn disable_cloud_share_mode(
 ) -> Result<(), String> {
     let fc = FcClient::new(get_fc_endpoint(workspace_path), access_token.to_string());
     let path = format!("/v1/teams/{team_id}/share-mode");
-    fc.delete_json(&path)
-        .await
-        .map_err(|e| e.to_string())?;
+    fc.delete_json(&path).await.map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -144,8 +135,7 @@ pub async fn team_disconnect_repo(
     window: WebviewWindow,
     registry: State<'_, crate::commands::window::WindowRegistry>,
 ) -> Result<serde_json::Value, String> {
-    let workspace_path =
-        resolve_workspace_path(workspace_path, &window, &registry)?;
+    let workspace_path = resolve_workspace_path(workspace_path, &window, &registry)?;
     let team_id = team_id
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| "teamId is required to disconnect team share".to_string())?;
@@ -158,9 +148,7 @@ pub async fn team_disconnect_repo(
 
     let token = access_token
         .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| {
-            "accessToken is required to clear cloud team-share binding".to_string()
-        })?;
+        .ok_or_else(|| "accessToken is required to clear cloud team-share binding".to_string())?;
 
     disable_cloud_share_mode(&workspace_path, &team_id, &token).await?;
 

@@ -2,7 +2,6 @@ import * as React from "react";
 import { collectAcpStreamingPermissions } from "@/lib/teamclaw/acp-permission-entries";
 import { useSessionPermissionMode } from "@/lib/session-permission-mode";
 import { useSessionStore } from "@/stores/session";
-import type { PendingPermissionEntry } from "@/stores/session-types";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { collectVisiblePermissions } from "./permission-queue";
 
