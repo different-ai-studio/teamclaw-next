@@ -55,20 +55,53 @@ function readWindowParams(): { workspace: string; port: number } | null {
 
 const windowParams = readWindowParams();
 
+// How long to keep the launch loader up while waiting for the current team to
+// load before falling through to the manual workspace picker. The team usually
+// resolves in well under a second; this only bites on a genuinely team-less or
+// offline first launch with no saved workspace.
+const TEAM_WORKSPACE_WAIT_MS = 8000;
+
 export function useWorkspaceInit() {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const setWorkspace = useWorkspaceStore((s) => s.setWorkspace);
   const setOpenCodeBootstrapped = useWorkspaceStore((s) => s.setOpenCodeBootstrapped);
   const setOpenCodeReady = useWorkspaceStore((s) => s.setOpenCodeReady);
   const setDaemonHttpReady = useWorkspaceStore((s) => s.setDaemonHttpReady);
+  // Reactive team id. The current-team store is NOT persisted — it starts null
+  // on every launch and is filled by an async network load — so this can still
+  // be null at mount even though AuthGate gates rendering on team bootstrap.
+  // The late-team effect below depends on this so a team that arrives after the
+  // mount restore still gets us into the daemon team dir automatically.
+  const teamId = useCurrentTeamStore((s) => s.team?.id ?? null);
   const [openCodeError, setOpenCodeError] = useState<string | null>(null);
   const [initialWorkspaceResolved, setInitialWorkspaceResolved] = useState(false);
+
+  // Set when the mount restore found no saved workspace on desktop but the
+  // current team wasn't loaded yet. While true we keep the loader up instead of
+  // dropping to <WorkspacePrompt />; the teamId effect (or a grace timeout)
+  // clears it.
+  const awaitingTeamRef = useRef(false);
+
+  // Adopt the daemon team dir (`~/.amuxd/teams/<teamId>`) as the workspace.
+  // Shared by the mount restore (team already loaded) and the late-team effect
+  // (team arrived afterward). The dir already holds a synced `teamclaw-team/`,
+  // so it is an established team workspace — suppress the "new workspace"
+  // Personal/Team chooser that setWorkspace() raises when it finds no local
+  // `.teamclaw/` marker.
+  const adoptTeamWorkspace = useCallback(
+    async (id: string) => {
+      await setWorkspace(`~/.amuxd/teams/${id}`);
+      useWorkspaceStore.getState().setIsNewWorkspace(false);
+    },
+    [setWorkspace],
+  );
 
   // Auto-restore last workspace on launch (runs once on mount).
   // Secondary windows opened via create_workspace_window skip the localStorage
   // path and use the URL-provided workspace so they don't clobber main's saved value.
   useEffect(() => {
     let cancelled = false;
+    let waitTimer: ReturnType<typeof setTimeout> | null = null;
 
     void (async () => {
       if (!workspacePath) {
@@ -108,29 +141,37 @@ export function useWorkspaceInit() {
               // No saved workspace. On desktop the amuxd daemon has already
               // created the team's global sync dir (`~/.amuxd/teams/<teamId>`,
               // which holds the `teamclaw-team/` repo) by the time the app
-              // mounts — AuthGate only renders children after daemon onboarding
-              // completes, and the current team is always set by then. Auto-use
-              // that dir as the workspace so first launch skips the manual
-              // picker entirely.
+              // mounts. Auto-use that dir as the workspace so first launch skips
+              // the manual picker entirely.
               //
-              // Falls through to <WorkspacePrompt /> when the team isn't known
-              // (e.g. web mode, which has no ~/.amuxd and instead auto-selects
-              // its own default inside the prompt). We deliberately do NOT fall
-              // back to a bare ~/TeamClaw here: that silently dropped freshly
-              // joined teams into a workspace with no teamclaw-team/.
-              const teamId = useCurrentTeamStore.getState().team?.id;
-              if (isTauri() && teamId) {
-                const teamWorkspace = `~/.amuxd/teams/${teamId}`;
-                console.log(
-                  "[App] No saved workspace — auto-using daemon team dir:",
-                  teamWorkspace,
-                );
-                await setWorkspace(teamWorkspace);
-                // The daemon team dir already holds a synced `teamclaw-team/`,
-                // so it is an established team workspace. Suppress the
-                // "new workspace" Personal/Team chooser that setWorkspace()
-                // raises whenever it finds no local `.teamclaw/` marker.
-                useWorkspaceStore.getState().setIsNewWorkspace(false);
+              // The current team can still be unknown at this tick (the store is
+              // not persisted and loads asynchronously). Reading it once and
+              // falling straight to <WorkspacePrompt /> on a miss is the bug
+              // behind the picker reappearing: the team loads moments later but
+              // the mount-once effect never re-runs. So when the team isn't
+              // known yet, DEFER — keep the loader up and let the teamId effect
+              // below adopt the dir once it arrives (grace timeout falls through
+              // to the picker if the team genuinely never loads).
+              //
+              // Web mode has no ~/.amuxd and instead auto-selects its own
+              // default inside the prompt, so resolve immediately there. We
+              // deliberately do NOT fall back to a bare ~/TeamClaw: that
+              // silently dropped freshly joined teams into a workspace with no
+              // teamclaw-team/.
+              const id = useCurrentTeamStore.getState().team?.id;
+              if (isTauri()) {
+                if (id) {
+                  console.log(
+                    "[App] No saved workspace — auto-using daemon team dir:",
+                    `~/.amuxd/teams/${id}`,
+                  );
+                  await adoptTeamWorkspace(id);
+                } else {
+                  console.log(
+                    "[App] No saved workspace and team not loaded yet — deferring picker until team resolves",
+                  );
+                  awaitingTeamRef.current = true;
+                }
               } else {
                 console.log("[App] No saved workspace — prompting user to pick one");
               }
@@ -141,17 +182,70 @@ export function useWorkspaceInit() {
         }
       }
 
-      if (!cancelled) {
-        setInitialWorkspaceResolved(true);
-        performance.mark('workspace-restored');
+      if (cancelled) return;
+
+      if (awaitingTeamRef.current) {
+        // Deferred for a late team load — stay on the loader. Fall through to
+        // the manual picker only if the team never resolves within the grace
+        // window (e.g. offline first launch with no saved workspace).
+        waitTimer = setTimeout(() => {
+          if (cancelled || !awaitingTeamRef.current) return;
+          if (useWorkspaceStore.getState().workspacePath) return;
+          console.log(
+            "[App] Team still not loaded after grace window — prompting user to pick a workspace",
+          );
+          awaitingTeamRef.current = false;
+          setInitialWorkspaceResolved(true);
+          performance.mark('workspace-restored');
+        }, TEAM_WORKSPACE_WAIT_MS);
+        return;
       }
+
+      setInitialWorkspaceResolved(true);
+      performance.mark('workspace-restored');
+    })();
+
+    return () => {
+      cancelled = true;
+      if (waitTimer) clearTimeout(waitTimer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Late-team adoption: when the mount restore deferred because the current
+  // team wasn't loaded yet, adopt the daemon team dir as soon as the team id
+  // becomes available, then leave the loader. Fixes the workspace picker
+  // reappearing on launches where the team load lost the race with mount.
+  useEffect(() => {
+    if (!awaitingTeamRef.current || !teamId) return;
+
+    if (useWorkspaceStore.getState().workspacePath) {
+      awaitingTeamRef.current = false;
+      setInitialWorkspaceResolved(true);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      console.log(
+        "[App] Team loaded after launch — auto-using daemon team dir:",
+        `~/.amuxd/teams/${teamId}`,
+      );
+      try {
+        await adoptTeamWorkspace(teamId);
+      } catch (error) {
+        console.warn("[App] Late team-dir adoption failed; prompting user:", error);
+      }
+      if (cancelled) return;
+      awaitingTeamRef.current = false;
+      setInitialWorkspaceResolved(true);
+      performance.mark('workspace-restored');
     })();
 
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [teamId, adoptTeamWorkspace]);
 
   // Probe daemon HTTP — required on desktop; no OpenCode sidecar fallback.
   useEffect(() => {
