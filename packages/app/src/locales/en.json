@@ -183,13 +183,7 @@
       "approve": "Allow"
     },
     "todo": {
-      "summary": "{{count}} tasks, {{completed}} completed",
-      "stackSummary": "{{count}} tasks · {{completed}} done",
-      "moreItems": "{{count}} more · expand to view",
-      "collapseAria": "Collapse todo panel",
-      "expandAria": "Expand todo panel",
-      "queueCollapseAria": "Collapse queued messages",
-      "queueExpandAria": "Expand queued messages"
+      "stackSummary": "{{count}} tasks · {{completed}} done"
     },
     "toolCall": {
       "status": {

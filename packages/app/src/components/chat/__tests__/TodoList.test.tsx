@@ -13,10 +13,6 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-function expectButtonIcon(button: HTMLElement, iconClass: string) {
-  expect(button.querySelector(`.${iconClass}`)).toBeTruthy();
-}
-
 describe("TodoList", () => {
   it("renders as a lightweight card with task summary", () => {
     render(

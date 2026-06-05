@@ -735,7 +735,7 @@ export async function linkDaemonTeamWorkspace(
     return result.data
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    if (options?.strict) throw new Error(msg)
+    if (options?.strict) throw new Error(msg, { cause: err })
     // Network/IPC errors (daemon not running, no HTTP) are expected and
     // non-fatal — the link is created lazily on the daemon's next start.
     console.warn('[daemon-local-client] team link unavailable:', msg)
