@@ -126,7 +126,7 @@ export function SessionListColumn() {
   const pendingPermissions = useSessionStore((s) => s.pendingPermissions) || []
   const streamingMessageId = useStreamingStore((s) => s.streamingMessageId)
   const childSessionStreaming = useStreamingStore((s) => s.childSessionStreaming)
-  const archiveSession = useSessionListStore((s) => s.archiveSession)
+  const archiveSession = useSessionStore((s) => s.archiveSession)
   const updateSessionTitle = useSessionListStore((s) => s.updateSessionTitle)
   const toggleSessionPinned = useSessionListStore((s) => s.toggleSessionPinned)
   const initPinnedSessionIds = useSessionListStore((s) => s.initPinnedSessionIds)

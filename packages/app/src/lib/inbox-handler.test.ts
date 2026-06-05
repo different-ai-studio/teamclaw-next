@@ -1,5 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
-import { handleInboxEnvelope, type InboxStore } from "./inbox-handler";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import {
+  handleInboxEnvelope,
+  INBOX_LIST_REFRESH_MS,
+  resetInboxListRefreshForTests,
+  type InboxStore,
+} from "./inbox-handler";
 
 function makeEnv(topic: string, payload: unknown): { topic: string; bytes: number[] } {
   const text = JSON.stringify(payload);
@@ -18,7 +23,17 @@ function makeStore(rowIds: string[]): InboxStore & {
 }
 
 describe("handleInboxEnvelope", () => {
-  it("patches has_unread for a session already in the cache", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetInboxListRefreshForTests();
+  });
+
+  afterEach(() => {
+    resetInboxListRefreshForTests();
+    vi.useRealTimers();
+  });
+
+  it("patches has_unread immediately and debounces list reload for cached sessions", () => {
     const store = makeStore(["s1", "s2"]);
     handleInboxEnvelope(
       makeEnv("inbox/u1", { session_id: "s1", ts: 12345 }),
@@ -27,9 +42,12 @@ describe("handleInboxEnvelope", () => {
     );
     expect(store.patchRow).toHaveBeenCalledWith("s1", { has_unread: true });
     expect(store.loadFirstPage).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(INBOX_LIST_REFRESH_MS);
+    expect(store.loadFirstPage).toHaveBeenCalledOnce();
   });
 
-  it("refreshes the first page when session is not in cache", () => {
+  it("debounces list reload when session is not in cache", () => {
     const store = makeStore(["s1"]);
     handleInboxEnvelope(
       makeEnv("inbox/u1", { session_id: "newsession" }),
@@ -37,6 +55,18 @@ describe("handleInboxEnvelope", () => {
       store,
     );
     expect(store.patchRow).not.toHaveBeenCalled();
+    expect(store.loadFirstPage).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(INBOX_LIST_REFRESH_MS);
+    expect(store.loadFirstPage).toHaveBeenCalledOnce();
+  });
+
+  it("coalesces burst pings into a single list reload", () => {
+    const store = makeStore(["s1", "s2"]);
+    handleInboxEnvelope(makeEnv("inbox/u1", { session_id: "s1" }), "u1", store);
+    vi.advanceTimersByTime(100);
+    handleInboxEnvelope(makeEnv("inbox/u1", { session_id: "s2" }), "u1", store);
+    vi.advanceTimersByTime(INBOX_LIST_REFRESH_MS);
     expect(store.loadFirstPage).toHaveBeenCalledOnce();
   });
 
@@ -50,6 +80,7 @@ describe("handleInboxEnvelope", () => {
       logger,
     );
     expect(store.patchRow).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(INBOX_LIST_REFRESH_MS);
     expect(store.loadFirstPage).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalled();
   });
@@ -64,6 +95,7 @@ describe("handleInboxEnvelope", () => {
       logger,
     );
     expect(store.patchRow).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(INBOX_LIST_REFRESH_MS);
     expect(store.loadFirstPage).not.toHaveBeenCalled();
     expect(logger.warn).not.toHaveBeenCalled();
   });
@@ -86,6 +118,7 @@ describe("handleInboxEnvelope", () => {
     const logger = { warn: vi.fn() };
     handleInboxEnvelope(makeEnv("inbox/u1", { ts: 123 }), "u1", store, logger);
     expect(store.patchRow).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(INBOX_LIST_REFRESH_MS);
     expect(store.loadFirstPage).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalled();
   });

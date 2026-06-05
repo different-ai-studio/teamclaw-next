@@ -19,6 +19,7 @@ import { useCurrentTeamStore } from "@/stores/current-team";
 import { TEAMCLAW_DIR, CONFIG_FILE_NAME, TEAM_REPO_DIR } from "@/lib/build-config";
 import { adaptTeamclawMessages } from "@/lib/v2-message-adapter";
 import { useAuthStore } from "@/stores/auth-store";
+import { bumpSessionListLastMessage } from "@/lib/session-list-preview";
 import { useSessionListStore } from "@/stores/session-list-store";
 import { useEngagedAgentStore } from "@/stores/engaged-agent-store";
 import { useUIStore } from "@/stores/ui";
@@ -1415,6 +1416,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             teamId: teamIdForSend,
             messageId,
           });
+
+          bumpSessionListLastMessage(sid, outgoing, { at: new Date().toISOString() });
 
           const noticeText = buildPostSendSessionNotice(engagedUiEntries, t);
           if (noticeText) {

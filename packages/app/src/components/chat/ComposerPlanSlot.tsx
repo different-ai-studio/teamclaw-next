@@ -5,13 +5,15 @@ import type { Todo } from "@/stores/session-types";
 import type { QueuedMessage } from "@/stores/session";
 import { cn } from "@/lib/utils";
 import {
-  composerGlassFocusClass,
-  composerGlassHoverClass,
   composerGlassSurfaceClass,
+  composerStackRowDividerClass,
 } from "./composer-glass";
 
 const planListScrollbarClass =
   "[scrollbar-width:thin] [scrollbar-color:rgba(113,113,122,0.42)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/35";
+
+/** Neutral gray — avoid warm --selected / --foreground tints on paper. */
+const planRowHoverClass = "hover:bg-black/[0.04] dark:hover:bg-white/[0.06]";
 
 function planStatusDotClass(status: Todo["status"]): string {
   if (status === "in_progress") {
@@ -92,6 +94,7 @@ export function ComposerPlanSlot({
       className={cn(
         "box-border w-full",
         composerGlassSurfaceClass,
+        composerStackRowDividerClass,
         roundsTop && "overflow-hidden rounded-t-[14px]",
         hidden && "hidden",
       )}
@@ -103,8 +106,8 @@ export function ComposerPlanSlot({
             data-testid="todo-list-inline"
             className={cn(
               "flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition-colors outline-none",
-              composerGlassHoverClass,
-              composerGlassFocusClass,
+              planRowHoverClass,
+              "focus-visible:bg-black/[0.04] dark:focus-visible:bg-white/[0.06]",
               roundsTop && "rounded-t-[14px]",
             )}
             aria-expanded={!planCollapsed}
@@ -144,7 +147,7 @@ export function ComposerPlanSlot({
                     key={todo.id}
                     className={cn(
                       "grid grid-cols-[14px_1fr_auto] items-center gap-2 rounded-md px-1 py-[5px]",
-                      composerGlassHoverClass,
+                      planRowHoverClass,
                     )}
                   >
                     <span
@@ -174,7 +177,7 @@ export function ComposerPlanSlot({
       ) : null}
 
       {hasQueue ? (
-        <section data-testid="todo-list-inline-queue" className="border-t border-border-soft">
+        <section data-testid="todo-list-inline-queue" className="border-t border-border">
           <button
             type="button"
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] font-medium text-muted-foreground"
