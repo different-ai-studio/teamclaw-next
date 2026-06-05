@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "@/stores/auth-store";
-import { useCurrentTeamStore } from "@/stores/current-team";
+import { useCurrentTeamStore, setLocalCacheTeamGate } from "@/stores/current-team";
 import { getBackend } from "@/lib/backend";
 import { isTauri, removeStartupSkeleton } from "@/lib/utils";
 import { devSkipDaemonOnboarding, devSkipSetup } from "@/lib/dev-onboarding-flags";
@@ -84,19 +84,31 @@ export function AuthGate({ children }: AuthGateProps) {
     }
     if (bootstrappedUserId.current === session.user.id) return;
     bootstrappedUserId.current = session.user.id;
-    setBootstrap("checking");
     markStartup("team-bootstrap:start");
+
+    // Optimistic cold start: if we already hold a team for THIS user — hydrated
+    // synchronously from the persisted cache, or just set by an invite flow —
+    // render the shell immediately instead of blocking first paint behind the
+    // team-bootstrap network round-trips. App's mount-time load() revalidates
+    // and reconciles in the background. The teamUserId match is mandatory: a
+    // cached team from a previous user (localStorage survives logout) must NOT
+    // be reused; that session falls through to a full re-resolve below.
+    const snapshot = useCurrentTeamStore.getState();
+    if (snapshot.team && snapshot.teamUserId === session.user.id) {
+      // Prime the backend's team gate so the team-scoped session-cache reads
+      // App fires on mount are accepted (cold path used to set this during
+      // bootstrap, before App mounted). Fire-and-forget: the IPC is fast and
+      // App's load() re-sets it shortly after anyway.
+      void setLocalCacheTeamGate(snapshot.team.id);
+      setBootstrap("ready");
+      markStartup("team-bootstrap:end");
+      return;
+    }
+
+    setBootstrap("checking");
 
     void (async () => {
       try {
-        // If the user just joined a team via invite (or any other flow already
-        // populated current-team), don't probe the team list — skip straight to
-        // ready so we never race into auto-creating a duplicate team when the
-        // freshly-added membership isn't yet visible to RLS.
-        if (useCurrentTeamStore.getState().team) {
-          return;
-        }
-
         const teams = await getBackend().teams.listCurrentUserTeams({ limit: 1 });
         markStartup("team-list:end");
         // The list row already carries {id,name,slug}, so adopt it directly via
