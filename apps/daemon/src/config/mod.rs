@@ -1,6 +1,7 @@
 mod daemon_config;
 mod member_store;
 mod roles_skills;
+pub mod team_mcp;
 mod session_store;
 mod workspace_store;
 pub mod global_team_store;

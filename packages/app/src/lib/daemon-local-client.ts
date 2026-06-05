@@ -664,6 +664,8 @@ export async function putDaemonAllowlist(
 export interface DaemonMcpServerConfig {
   /** `"local"` (stdio) or `"remote"` (HTTP). May be absent for legacy entries. */
   type?: string
+  /** Provenance from daemon merge: workspace custom, team shared, or built-in. */
+  source?: 'workspace' | 'team' | 'inherent'
   enabled?: boolean
   /** Command + args for local stdio servers. */
   command?: string[]

@@ -12,6 +12,7 @@ import {
   ChevronUp,
   Lock,
   Shield,
+  Users,
 } from 'lucide-react'
 
 import { useMCPStore, type MCPServerConfig } from '@/stores/mcp'
@@ -32,6 +33,14 @@ import { AddMCPDialog } from './AddMCPDialog'
 
 // MCP names that are always auto-injected by TeamClaw and cannot be deleted
 const INHERENT_MCP_NAMES = new Set(['playwright', 'chrome-control', 'autoui', 'teamclaw-introspect'])
+
+type McpEntrySource = 'inherent' | 'team' | 'workspace'
+
+function resolveMcpSource(name: string, config: MCPServerConfig): McpEntrySource {
+  if (config.source === 'team') return 'team'
+  if (config.source === 'inherent' || INHERENT_MCP_NAMES.has(name)) return 'inherent'
+  return 'workspace'
+}
 
 // Status indicator component
 function StatusDot({ status }: { status?: 'ready' | 'disabled' | 'failed' }) {
@@ -164,6 +173,7 @@ function MCPServerRow({
   toolsLoading,
   nodeInstalled,
   isInherent,
+  isTeam,
   onRetry,
   onToggle,
   onEdit,
@@ -176,6 +186,7 @@ function MCPServerRow({
   toolsLoading: boolean
   nodeInstalled: boolean
   isInherent?: boolean
+  isTeam?: boolean
   onRetry: () => void
   onToggle: (enabled: boolean) => void
   onEdit: () => void
@@ -214,6 +225,12 @@ function MCPServerRow({
                 {t('settings.mcp.inherent')}
               </span>
             )}
+            {isTeam && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-panel text-ink-2 border border-border">
+                <Users className="h-2.5 w-2.5" />
+                {t('settings.mcp.team')}
+              </span>
+            )}
           </div>
           {/* Description: command/URL */}
           <p className="text-xs text-muted-foreground truncate mt-0.5">
@@ -243,18 +260,27 @@ function MCPServerRow({
 
         {/* Actions */}
         <div className="flex items-center gap-1.5 shrink-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            onClick={onEdit}
-          >
-            <Edit2 className="h-4 w-4" />
-          </Button>
-          {isInherent ? (
+          {isTeam ? (
+            <div
+              className="h-8 w-8 flex items-center justify-center text-faint cursor-not-allowed"
+              title={t('settings.mcp.teamCannotEdit')}
+            >
+              <Lock className="h-3.5 w-3.5" />
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={onEdit}
+            >
+              <Edit2 className="h-4 w-4" />
+            </Button>
+          )}
+          {isInherent || isTeam ? (
             <div
               className="h-8 w-8 flex items-center justify-center text-blue-400/60 dark:text-blue-500/50 cursor-not-allowed"
-              title={t('settings.mcp.inherentCannotDelete')}
+              title={isTeam ? t('settings.mcp.teamCannotDelete') : t('settings.mcp.inherentCannotDelete')}
             >
               <Lock className="h-3.5 w-3.5" />
             </div>
@@ -268,10 +294,12 @@ function MCPServerRow({
               <Trash2 className="h-4 w-4" />
             </Button>
           )}
-          <ToggleSwitch
-            enabled={enabled}
-            onChange={onToggle}
-          />
+          {!isTeam && (
+            <ToggleSwitch
+              enabled={enabled}
+              onChange={onToggle}
+            />
+          )}
         </div>
       </div>
 
@@ -339,8 +367,9 @@ export const MCPSection = React.memo(function MCPSection() {
   }
 
   const allEntries = Object.entries(servers).sort(([a], [b]) => a.localeCompare(b))
-  const inherentEntries = allEntries.filter(([name]) => INHERENT_MCP_NAMES.has(name))
-  const customEntries = allEntries.filter(([name]) => !INHERENT_MCP_NAMES.has(name))
+  const inherentEntries = allEntries.filter(([name, cfg]) => resolveMcpSource(name, cfg) === 'inherent')
+  const teamEntries = allEntries.filter(([name, cfg]) => resolveMcpSource(name, cfg) === 'team')
+  const customEntries = allEntries.filter(([name, cfg]) => resolveMcpSource(name, cfg) === 'workspace')
   const nodeInstalled = useDepsStore((s) => s.isInstalled('node'))
 
   return (
@@ -423,6 +452,41 @@ export const MCPSection = React.memo(function MCPSection() {
                     setDialogOpen(true)
                   }}
                   onDelete={() => setDeleteConfirm(name)}
+                />
+              )
+            })}
+          </div>
+        </SettingCard>
+      )}
+
+      {/* Team Shared MCP Servers */}
+      {teamEntries.length > 0 && (
+        <SettingCard>
+          <h4 className="font-medium mb-4 flex items-center gap-2">
+            <Users className="h-4 w-4 text-muted-foreground" />
+            {t('settings.mcp.teamMCP')}
+            <span className="text-xs font-normal text-muted-foreground ml-auto">
+              {t('settings.mcp.teamManagedHint')}
+            </span>
+          </h4>
+          <div className="space-y-3">
+            {teamEntries.map(([name, config]) => {
+              const tools = serverTools[name] || []
+              const probe = serverProbe[name]
+              return (
+                <MCPServerRow
+                  key={name}
+                  name={name}
+                  config={config}
+                  serverProbe={probe}
+                  tools={tools}
+                  toolsLoading={toolsLoading}
+                  nodeInstalled={nodeInstalled}
+                  isTeam
+                  onRetry={() => loadTools({ refresh: true })}
+                  onToggle={() => {}}
+                  onEdit={() => {}}
+                  onDelete={() => {}}
                 />
               )
             })}

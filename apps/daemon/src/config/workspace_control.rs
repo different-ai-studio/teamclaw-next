@@ -163,6 +163,9 @@ pub struct McpServerConfig {
     pub headers: HashMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
+    /// Provenance for merged MCP views (`workspace` | `team` | `inherent`). Omitted on disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     /// Unknown fields are preserved so the daemon never silently drops
     /// opencode.json keys it does not yet understand.
     #[serde(flatten)]
@@ -706,8 +709,7 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
         workspace_id: &str,
     ) -> Result<HashMap<String, McpServerConfig>, WorkspaceControlError> {
         let wpath = self.workspace_path(workspace_id)?;
-        let cfg = Self::read_opencode_json(&wpath)?;
-        Ok(cfg.mcp)
+        super::team_mcp::load_merged_mcp(&wpath)
     }
 
     fn put_mcp(
@@ -717,9 +719,11 @@ impl WorkspaceControlStore for OpenCodeCompatStore {
     ) -> Result<ApplyOutcome, WorkspaceControlError> {
         let wpath = self.workspace_path(workspace_id)?;
         let _lock = self.write_lock.lock().unwrap();
+        let workspace_only = super::team_mcp::filter_put_body(&wpath, servers);
         let mut cfg = Self::read_opencode_json(&wpath)?;
-        cfg.mcp = servers;
+        cfg.mcp = workspace_only;
         Self::write_opencode_json(&wpath, &cfg)?;
+        super::team_mcp::materialize_team_mcp_for_runtime(&wpath)?;
         // OpenCode re-reads mcp on next session start; a running session
         // needs a restart to pick up server changes.
         Ok(ApplyOutcome::RestartRequired)
@@ -1291,6 +1295,7 @@ mod tests {
                 url: None,
                 headers: HashMap::new(),
                 timeout: None,
+                source: None,
                 extra: HashMap::new(),
             },
         );
@@ -1338,6 +1343,7 @@ mod tests {
                 url: Some("http://localhost:8080".to_owned()),
                 headers: HashMap::new(),
                 timeout: Some(30),
+                source: None,
                 extra: HashMap::new(),
             },
         );

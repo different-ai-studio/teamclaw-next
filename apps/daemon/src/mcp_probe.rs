@@ -425,6 +425,7 @@ mod tests {
                 url: None,
                 headers: HashMap::new(),
                 timeout: None,
+                source: None,
                 extra: HashMap::new(),
             },
         );
@@ -440,6 +441,7 @@ mod tests {
                 url: Some("https://example.com/mcp".to_string()),
                 headers: HashMap::new(),
                 timeout: None,
+                source: None,
                 extra: HashMap::new(),
             },
         );
