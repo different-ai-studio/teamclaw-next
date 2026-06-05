@@ -1,6 +1,39 @@
 import { describe, it, expect } from 'vitest'
 import { RuntimeLifecycle } from '@/lib/proto/amux_pb'
-import { resolveSessionAgentUiState } from '@/lib/session-agent-ui-state'
+import {
+  isDriftedLocalGhostBinding,
+  resolveSessionAgentUiState,
+} from '@/lib/session-agent-ui-state'
+
+describe('isDriftedLocalGhostBinding', () => {
+  it('detects ghost online retain for a superseded local actor', () => {
+    expect(
+      isDriftedLocalGhostBinding({
+        agentId: 'old-macpro',
+        localDaemonActorId: 'new-local',
+        presenceOnline: true,
+        agentRuntimeInfo: undefined,
+        agentAvailableModelCount: 0,
+        localRuntimeInfo: { state: RuntimeLifecycle.ACTIVE } as never,
+        localAvailableModelCount: 2,
+      }),
+    ).toBe(true)
+  })
+
+  it('ignores remote offline agents', () => {
+    expect(
+      isDriftedLocalGhostBinding({
+        agentId: 'remote-agent',
+        localDaemonActorId: 'local-agent',
+        presenceOnline: false,
+        agentRuntimeInfo: undefined,
+        agentAvailableModelCount: 0,
+        localRuntimeInfo: { state: RuntimeLifecycle.ACTIVE } as never,
+        localAvailableModelCount: 2,
+      }),
+    ).toBe(false)
+  })
+})
 
 describe('resolveSessionAgentUiState', () => {
   it('returns stale when binding superseded', () => {
@@ -43,6 +76,31 @@ describe('resolveSessionAgentUiState', () => {
     expect(
       resolveSessionAgentUiState({
         presenceOnline: undefined,
+        runtimeInfo: undefined,
+        availableModelCount: 0,
+        isStaleBinding: false,
+        connectingTimedOut: true,
+      }),
+    ).toBe('offline')
+  })
+
+  it('returns offline when reachability probe fails', () => {
+    expect(
+      resolveSessionAgentUiState({
+        presenceOnline: true,
+        runtimeInfo: undefined,
+        availableModelCount: 0,
+        isStaleBinding: false,
+        connectingTimedOut: false,
+        reachabilityFailed: true,
+      }),
+    ).toBe('offline')
+  })
+
+  it('returns offline when online presence ghost times out without runtime', () => {
+    expect(
+      resolveSessionAgentUiState({
+        presenceOnline: true,
         runtimeInfo: undefined,
         availableModelCount: 0,
         isStaleBinding: false,

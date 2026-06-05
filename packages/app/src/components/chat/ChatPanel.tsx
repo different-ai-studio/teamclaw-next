@@ -546,7 +546,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     };
   }, [activeSessionId, engagedAgents.length]);
 
-  const lastBootedAgentsRef = React.useRef<string>("");
   const sessionRow = useSessionListStore(s => s.rows.find(r => r.id === activeSessionId));
   // Team is workspace-scoped: every session in `rows` shares the same team_id.
   // When activeSessionId is null (brand-new chat), fall back to any row's
@@ -572,21 +571,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     };
   }, [sheetTeamId]);
 
-  // Boot daemon runtimes whenever engaged agents change (e.g. @-mention pill).
-  React.useEffect(() => {
-    if (!activeSessionId || !sheetTeamId || engagedAgents.length === 0) return;
-    const signature = engagedAgents.map((a) => a.id).sort().join(",");
-    if (signature === lastBootedAgentsRef.current) return;
-    lastBootedAgentsRef.current = signature;
-    void import("@/lib/teamclaw/ensure-agent-runtime").then(({ ensureAgentRuntimesForSession }) => {
-      void ensureAgentRuntimesForSession({
-        sessionId: activeSessionId,
-        teamId: sheetTeamId,
-        agentActorIds: engagedAgents.map((a) => a.id),
-        reason: "engaged_agents_effect",
-      });
-    });
-  }, [activeSessionId, sheetTeamId, engagedAgents]);
   const [imageFiles, setImageFiles] = React.useState<File[]>([]);
   const [isRestoringArchived, setIsRestoringArchived] = React.useState(false);
   const isRestoringArchivedRef = React.useRef(false);
@@ -718,7 +702,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       // engagedAgent is per-session now; no need to clear here — the
       // selector returns null for null sessionId automatically.
     }
-    lastBootedAgentsRef.current = "";
   }, [activeSessionId]);
 
   React.useEffect(() => {
@@ -1647,7 +1630,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       // Fire-and-forget runtime spawn — UI has already moved into the
       // session; status dots update via RuntimeInfo subscriptions.
       if (picks.agents.length > 0) {
-        lastBootedAgentsRef.current = agentIds.slice().sort().join(",");
         sessionFlowLog("session_create.runtime_start.begin", {
           teamId: teamIdForSend,
           sessionId,

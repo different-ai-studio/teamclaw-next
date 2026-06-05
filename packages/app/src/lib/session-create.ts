@@ -292,9 +292,9 @@ export async function createSessionWithFirstMessage(
     messageId,
   })
 
-  // Fire-and-forget runtime spawn is handled by ChatPanel's engaged_agents_effect
-  // (and outbox ensure on send). Seeding engaged agents before navigation avoids
-  // duplicate runtimeStart from both createSessionWithFirstMessage and the effect.
+  // Fire-and-forget runtime spawn is handled by ChatPanel session_create (and
+  // outbox ensure on send). Seeding engaged agents before navigation avoids
+  // duplicate runtimeStart from both createSessionWithFirstMessage and send.
 
   sessionFlowLog('session_with_first_message.ok', {
     sessionId,
