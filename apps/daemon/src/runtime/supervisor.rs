@@ -18,7 +18,12 @@ const TEAM_SKILLS_PATH: &str = "teamclaw-team/skills";
 use crate::config::workspace_control::{ApplyOutcome, RuntimeStatus, WorkspaceControlError};
 use crate::proto::amux;
 use crate::runtime::{
-    acp_catalog_probe, refresh::RuntimeRefreshCoordinator, AgentLaunchConfig, RuntimeManager,
+    acp_catalog_probe,
+    refresh::{
+        self, refresh_watch, RuntimeRefreshCoordinator, APPLY_REFRESH_SUPPRESS,
+        INTERNAL_PREPARE_KINDS, INTERNAL_WRITE_SUPPRESS,
+    },
+    AgentLaunchConfig, RuntimeManager,
 };
 
 struct InherentSkill {
@@ -218,7 +223,12 @@ fn resolve_introspect_binary() -> Option<String> {
     }
 
     if let Ok(cwd) = std::env::current_dir() {
-        for root in [cwd.clone(), cwd.join(".."), cwd.join("../.."), cwd.join("../../..")] {
+        for root in [
+            cwd.clone(),
+            cwd.join(".."),
+            cwd.join("../.."),
+            cwd.join("../../.."),
+        ] {
             let candidate = root
                 .join("apps/desktop/binaries")
                 .join(format!("teamclaw-introspect-{}", runtime_target_triple()));
@@ -332,10 +342,7 @@ fn ensure_extended_inherent_config(
         let paths = paths_val
             .as_array_mut()
             .ok_or_else(|| WorkspaceControlError::Parse("skills.paths is not an array".into()))?;
-        if !paths
-            .iter()
-            .any(|v| v.as_str() == Some(TEAM_SKILLS_PATH))
-        {
+        if !paths.iter().any(|v| v.as_str() == Some(TEAM_SKILLS_PATH)) {
             paths.push(serde_json::json!(TEAM_SKILLS_PATH));
             *changed = true;
         }
@@ -520,6 +527,11 @@ impl RuntimeSupervisor {
         workspace_id: &str,
         workspace_path: &Path,
     ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        self.refresh.suppress_workspace_watch(
+            workspace_id,
+            &INTERNAL_PREPARE_KINDS,
+            INTERNAL_WRITE_SUPPRESS,
+        );
         prepare_workspace(workspace_path)?;
 
         let workspace_path_str = workspace_path.to_string_lossy();
@@ -549,6 +561,11 @@ impl RuntimeSupervisor {
         workspace_id: &str,
         workspace_path: &Path,
     ) -> Result<ApplyOutcome, WorkspaceControlError> {
+        self.refresh.suppress_workspace_watch(
+            workspace_id,
+            &INTERNAL_PREPARE_KINDS,
+            APPLY_REFRESH_SUPPRESS,
+        );
         let attempt = self
             .refresh
             .mark_applying(workspace_id, workspace_path)
@@ -571,6 +588,38 @@ impl RuntimeSupervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn apply_refresh_clears_pending_despite_internal_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace_id = refresh_watch::workspace_runtime_id(dir.path());
+        let supervisor = RuntimeSupervisor::new(Arc::new(AsyncMutex::new(RuntimeManager::new(
+            RuntimeManager::default_launch_configs(),
+            None,
+        ))));
+
+        supervisor
+            .refresh_coordinator()
+            .record_change(
+                &workspace_id,
+                dir.path(),
+                refresh::RefreshChangeKind::OpencodeJson,
+                refresh::RefreshSource::FilesystemWatch,
+            )
+            .await
+            .unwrap();
+
+        supervisor
+            .apply_refresh(&workspace_id, dir.path())
+            .await
+            .expect("apply_refresh");
+
+        let dto = supervisor
+            .refresh_coordinator()
+            .runtime_refresh_dto(&workspace_id)
+            .await;
+        assert_eq!(dto.status, "clean", "pending should clear after apply");
+    }
 
     #[test]
     fn prepare_workspace_creates_defaults() {

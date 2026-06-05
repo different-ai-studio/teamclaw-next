@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,13 @@ pub enum RefreshChangeKind {
     Permissions,
     OpencodeJson,
 }
+
+pub const INTERNAL_WRITE_SUPPRESS: Duration = Duration::from_secs(3);
+pub const APPLY_REFRESH_SUPPRESS: Duration = Duration::from_secs(5);
+
+pub const INTERNAL_OPENCODE_KINDS: [RefreshChangeKind; 1] = [RefreshChangeKind::OpencodeJson];
+pub const INTERNAL_PREPARE_KINDS: [RefreshChangeKind; 2] =
+    [RefreshChangeKind::OpencodeJson, RefreshChangeKind::Skills];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -90,9 +98,21 @@ impl WorkspaceRefreshState {
     }
 }
 
+#[derive(Debug, Clone)]
+struct WatchSuppression {
+    until: Instant,
+    kinds: BTreeSet<RefreshChangeKind>,
+}
+
+#[derive(Debug, Default)]
+struct WatchSuppressState {
+    by_workspace: HashMap<String, Vec<WatchSuppression>>,
+}
+
 #[derive(Debug)]
 pub struct RuntimeRefreshCoordinator {
     inner: RwLock<CoordinatorState>,
+    watch_suppress: Mutex<WatchSuppressState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,7 +134,46 @@ impl RuntimeRefreshCoordinator {
                 workspaces: HashMap::new(),
                 next_attempt_id: 1,
             }),
+            watch_suppress: Mutex::new(WatchSuppressState::default()),
         })
+    }
+
+    /// Ignore filesystem watcher `record_change` for `kinds` until `duration` elapses.
+    /// Re-calling extends the deadline when the new window ends later.
+    pub fn suppress_workspace_watch(
+        &self,
+        workspace_id: &str,
+        kinds: &[RefreshChangeKind],
+        duration: Duration,
+    ) {
+        let until = Instant::now() + duration;
+        let kinds: BTreeSet<_> = kinds.iter().copied().collect();
+        let mut guard = self.watch_suppress.lock().expect("watch_suppress poisoned");
+        let entries = guard
+            .by_workspace
+            .entry(workspace_id.to_owned())
+            .or_default();
+        if let Some(existing) = entries.iter_mut().find(|e| e.kinds == kinds) {
+            if existing.until < until {
+                existing.until = until;
+            }
+        } else {
+            entries.push(WatchSuppression { until, kinds });
+        }
+    }
+
+    pub fn is_watch_suppressed(&self, workspace_id: &str, kind: RefreshChangeKind) -> bool {
+        let mut guard = self.watch_suppress.lock().expect("watch_suppress poisoned");
+        let now = Instant::now();
+        let Some(entries) = guard.by_workspace.get_mut(workspace_id) else {
+            return false;
+        };
+        entries.retain(|e| e.until > now);
+        if entries.is_empty() {
+            guard.by_workspace.remove(workspace_id);
+            return false;
+        }
+        entries.iter().any(|e| e.kinds.contains(&kind))
     }
 
     pub async fn record_change(
@@ -214,10 +273,23 @@ impl RuntimeRefreshCoordinator {
 
     pub async fn clear_applied(&self, workspace_id: &str, attempt: RefreshApplyAttempt) {
         let mut guard = self.inner.write().await;
-        let should_clear = guard.workspaces.get(workspace_id).is_some_and(|state| {
-            state.apply_attempt_id == Some(attempt.attempt_id)
-                && state.revision == attempt.workspace_revision
-        });
+        let Some(state) = guard.workspaces.get(workspace_id) else {
+            return;
+        };
+        if state.apply_attempt_id != Some(attempt.attempt_id) {
+            return;
+        }
+
+        let should_clear = state.revision == attempt.workspace_revision
+            || (state.sources.len() == 1
+                && state.sources.contains(&RefreshSource::FilesystemWatch)
+                && state.change_kinds.iter().all(|kind| {
+                    matches!(
+                        kind,
+                        RefreshChangeKind::OpencodeJson | RefreshChangeKind::Skills
+                    )
+                }));
+
         if should_clear {
             guard.workspaces.remove(workspace_id);
         }
@@ -474,6 +546,78 @@ mod tests {
         assert_eq!(dto.status, "pending");
         assert!(dto.change_kinds.contains(&"skills".to_string()));
         assert!(dto.change_kinds.contains(&"mcp".to_string()));
+    }
+
+    #[tokio::test]
+    async fn suppress_blocks_matching_kind_until_expiry() {
+        let coordinator = RuntimeRefreshCoordinator::new();
+        let workspace_id = "ws-suppress";
+
+        coordinator.suppress_workspace_watch(
+            workspace_id,
+            &INTERNAL_OPENCODE_KINDS,
+            Duration::from_millis(50),
+        );
+
+        assert!(coordinator.is_watch_suppressed(workspace_id, RefreshChangeKind::OpencodeJson));
+        assert!(!coordinator.is_watch_suppressed(workspace_id, RefreshChangeKind::Skills));
+
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        assert!(!coordinator.is_watch_suppressed(workspace_id, RefreshChangeKind::OpencodeJson));
+    }
+
+    #[tokio::test]
+    async fn suppress_extends_window_when_called_again() {
+        let coordinator = RuntimeRefreshCoordinator::new();
+        let workspace_id = "ws-extend";
+
+        coordinator.suppress_workspace_watch(
+            workspace_id,
+            &INTERNAL_OPENCODE_KINDS,
+            Duration::from_millis(80),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        coordinator.suppress_workspace_watch(
+            workspace_id,
+            &INTERNAL_OPENCODE_KINDS,
+            Duration::from_millis(80),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(coordinator.is_watch_suppressed(workspace_id, RefreshChangeKind::OpencodeJson));
+    }
+
+    #[tokio::test]
+    async fn clear_applied_clears_when_only_filesystem_watch_during_apply() {
+        let coordinator = RuntimeRefreshCoordinator::new();
+        let workspace = ws_path("ws-apply-noise");
+        let workspace_id = "ws-apply-noise";
+
+        coordinator
+            .record_change(
+                workspace_id,
+                &workspace,
+                RefreshChangeKind::OpencodeJson,
+                RefreshSource::FilesystemWatch,
+            )
+            .await
+            .unwrap();
+
+        let attempt = coordinator.mark_applying(workspace_id, &workspace).await;
+
+        coordinator
+            .record_change(
+                workspace_id,
+                &workspace,
+                RefreshChangeKind::OpencodeJson,
+                RefreshSource::FilesystemWatch,
+            )
+            .await
+            .unwrap();
+
+        coordinator.clear_applied(workspace_id, attempt).await;
+
+        let dto = coordinator.runtime_refresh_dto(workspace_id).await;
+        assert_eq!(dto.status, "clean");
     }
 
     #[tokio::test]

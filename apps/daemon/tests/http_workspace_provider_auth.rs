@@ -4,24 +4,24 @@
 mod backend;
 #[path = "../src/config/mod.rs"]
 mod config;
-#[path = "../src/provider_config.rs"]
-mod provider_config;
 #[path = "../src/error.rs"]
 mod error;
-#[path = "../src/opencode_settings/mod.rs"]
-mod opencode_settings;
 #[path = "../src/http/mod.rs"]
 mod http;
+#[path = "../src/opencode_settings/mod.rs"]
+mod opencode_settings;
 #[path = "../src/proto.rs"]
 mod proto;
+#[path = "../src/provider_config.rs"]
+mod provider_config;
 #[path = "../src/runtime/mod.rs"]
 mod runtime;
 #[path = "../src/team_link.rs"]
 mod team_link;
-#[path = "../src/team_shared_git.rs"]
-mod team_shared_git;
 #[path = "../src/team_shared_env.rs"]
 mod team_shared_env;
+#[path = "../src/team_shared_git.rs"]
+mod team_shared_git;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -62,7 +62,7 @@ async fn test_app_with_workspace_store(
         std::collections::HashMap::new(),
         None,
     )));
-    let runtime = RuntimeManagerAdapter::new(manager, 256);
+    let runtime = RuntimeManagerAdapter::new(manager, 256, None);
     let workspace_control: Arc<dyn config::WorkspaceControlStore> =
         Arc::new(OpenCodeCompatStore::new());
     let handle = http::spawn(
@@ -214,7 +214,9 @@ async fn get_provider_auth_methods_merges_live_opencode_when_configured() {
 #[tokio::test]
 async fn get_provider_auth_methods_404_for_missing_workspace_dir() {
     let (app, _dir) = test_app_with_workspace_store(None).await;
-    let missing = ws_id(std::path::Path::new("/tmp/teamclaw-nonexistent-workspace-phase1-test"));
+    let missing = ws_id(std::path::Path::new(
+        "/tmp/teamclaw-nonexistent-workspace-phase1-test",
+    ));
 
     let resp = app
         .client

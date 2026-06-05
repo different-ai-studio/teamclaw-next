@@ -119,23 +119,13 @@ pub fn classify_change_path(
     for workspace in workspaces {
         let kind = if path == workspace.workspace_path.join("opencode.json") {
             Some(RefreshChangeKind::OpencodeJson)
-        } else if path.starts_with(
-            workspace
-                .workspace_path
-                .join(TEAM_LINK_NAME)
-                .join(".mcp"),
-        ) {
+        } else if path.starts_with(workspace.workspace_path.join(TEAM_LINK_NAME).join(".mcp")) {
             Some(RefreshChangeKind::Mcp)
         } else if path.starts_with(workspace.workspace_path.join(".teamclaw/skills"))
             || path.starts_with(workspace.workspace_path.join(".opencode/skills"))
             || path.starts_with(workspace.workspace_path.join(".claude/skills"))
             || path.starts_with(workspace.workspace_path.join(".agents/skills"))
-            || path.starts_with(
-                workspace
-                    .workspace_path
-                    .join(TEAM_LINK_NAME)
-                    .join("skills"),
-            )
+            || path.starts_with(workspace.workspace_path.join(TEAM_LINK_NAME).join("skills"))
             || is_global_skill_path
         {
             Some(RefreshChangeKind::Skills)
@@ -287,6 +277,9 @@ async fn record_classified_changes(
         if !debounce.recordable(&change.workspace_id, change.kind, now) {
             continue;
         }
+        if refresh.is_watch_suppressed(&change.workspace_id, change.kind) {
+            continue;
+        }
         if let Err(error) = refresh
             .record_change(
                 &change.workspace_id,
@@ -361,6 +354,16 @@ pub fn start_refresh_watchers(
 
 pub fn workspace_runtime_id(workspace_path: &Path) -> String {
     URL_SAFE_NO_PAD.encode(workspace_path.to_string_lossy().as_bytes())
+}
+
+pub fn suppress_for_workspace_path(
+    coordinator: &super::RuntimeRefreshCoordinator,
+    workspace_path: &Path,
+    kinds: &[super::RefreshChangeKind],
+    duration: std::time::Duration,
+) {
+    let workspace_id = workspace_runtime_id(workspace_path);
+    coordinator.suppress_workspace_watch(&workspace_id, kinds, duration);
 }
 
 #[cfg(test)]
@@ -500,6 +503,42 @@ mod tests {
             .unwrap();
         assert_eq!(status.refresh.status, "pending");
         assert_eq!(status.refresh.change_kinds, vec!["skills".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn watcher_skips_record_change_when_suppressed() {
+        let coordinator = RuntimeRefreshCoordinator::new();
+        let dir = tempfile::tempdir().unwrap();
+        let workspace_id = workspace_runtime_id(dir.path());
+        let workspaces = vec![WatchedWorkspace {
+            workspace_id: workspace_id.clone(),
+            workspace_path: dir.path().to_path_buf(),
+        }];
+        let mut debounce = RefreshDebounce::new(Duration::from_millis(250));
+
+        coordinator.suppress_workspace_watch(
+            &workspace_id,
+            &[RefreshChangeKind::OpencodeJson],
+            Duration::from_secs(5),
+        );
+
+        std::fs::write(
+            dir.path().join("opencode.json"),
+            r#"{"$schema":"https://opencode.ai/config.json"}"#,
+        )
+        .unwrap();
+
+        record_classified_changes(
+            &coordinator,
+            &mut debounce,
+            &workspaces,
+            None,
+            &dir.path().join("opencode.json"),
+            Instant::now(),
+        )
+        .await;
+
+        assert!(coordinator.workspace_state(&workspace_id).await.is_none());
     }
 
     #[tokio::test]

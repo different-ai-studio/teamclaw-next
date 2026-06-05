@@ -8,6 +8,7 @@ use uuid::Uuid;
 use super::acp_host::AcpHostPool;
 use super::adapter;
 use super::handle::RuntimeHandle;
+use super::refresh::{self, refresh_watch, RuntimeRefreshCoordinator};
 use std::sync::Arc;
 
 use crate::backend::{AgentRuntimeUpsert, Backend};
@@ -201,6 +202,7 @@ pub struct RuntimeManager {
     /// through the RPC handler which publishes directly, so they do NOT
     /// enter this buffer.
     evicted_pending_publish: Vec<String>,
+    refresh_coordinator: Option<Arc<RuntimeRefreshCoordinator>>,
     /// Test-only: records the last body sent per agent_id via send_prompt_raw.
     #[cfg(test)]
     last_sent: HashMap<String, String>,
@@ -211,6 +213,10 @@ pub struct RuntimeManager {
 }
 
 impl RuntimeManager {
+    pub fn attach_refresh_coordinator(&mut self, coordinator: Arc<RuntimeRefreshCoordinator>) {
+        self.refresh_coordinator = Some(coordinator);
+    }
+
     pub fn new(
         launch_configs: HashMap<amux::AgentType, AgentLaunchConfig>,
         backend: Option<Arc<dyn Backend>>,
@@ -224,6 +230,7 @@ impl RuntimeManager {
             current_model_per_agent: HashMap::new(),
             available_commands_per_agent: HashMap::new(),
             backend,
+            refresh_coordinator: None,
             evicted_pending_publish: Vec::new(),
             #[cfg(test)]
             last_sent: HashMap::new(),
@@ -272,9 +279,7 @@ impl RuntimeManager {
     /// Pre-warm shared ACP hosts so the first `runtimeStart` only pays for
     /// `session/new`, not process spawn + `initialize`.
     pub async fn prewarm_acp_hosts(&mut self) {
-        self.acp_host_pool
-            .prewarm(&self.launch_configs)
-            .await;
+        self.acp_host_pool.prewarm(&self.launch_configs).await;
     }
 
     /// Records the latest slash-command list for an agent. Callers feed
@@ -677,7 +682,18 @@ impl RuntimeManager {
         if entry.ref_count > 0 {
             return;
         }
-        let snapshot = self.opencode_snapshots.remove(worktree).expect("entry exists");
+        let snapshot = self
+            .opencode_snapshots
+            .remove(worktree)
+            .expect("entry exists");
+        if let Some(ref refresh) = self.refresh_coordinator {
+            refresh_watch::suppress_for_workspace_path(
+                refresh,
+                Path::new(worktree),
+                &refresh::INTERNAL_OPENCODE_KINDS,
+                refresh::INTERNAL_WRITE_SUPPRESS,
+            );
+        }
         if let Err(err) = teamclaw_runtime_env::mcp_resolve::restore_config(
             Path::new(worktree),
             &Some(snapshot.original),
@@ -720,10 +736,9 @@ impl RuntimeManager {
 
     /// Invalidate long-lived OpenCode/Codex ACP hosts after provider credentials change.
     pub fn evict_acp_hosts_after_provider_auth_change(&mut self) {
-        let removed = self.acp_host_pool.evict_agent_types(&[
-            amux::AgentType::Opencode,
-            amux::AgentType::Codex,
-        ]);
+        let removed = self
+            .acp_host_pool
+            .evict_agent_types(&[amux::AgentType::Opencode, amux::AgentType::Codex]);
         if removed > 0 {
             info!(
                 removed,
@@ -918,10 +933,7 @@ impl RuntimeManager {
         if desired.is_empty() {
             return false;
         }
-        let current = self
-            .current_model(runtime_id)
-            .cloned()
-            .unwrap_or_default();
+        let current = self.current_model(runtime_id).cloned().unwrap_or_default();
         if desired == current {
             return false;
         }
@@ -1025,9 +1037,7 @@ impl RuntimeManager {
         let acp_session_id = self
             .agents
             .get(agent_id)
-            .ok_or_else(|| {
-                crate::error::AmuxError::Agent(format!("agent {} not found", agent_id))
-            })?
+            .ok_or_else(|| crate::error::AmuxError::Agent(format!("agent {} not found", agent_id)))?
             .acp_session_id
             .clone();
         super::agent_trace::log_runtime_cancel(agent_id, &acp_session_id);
@@ -1069,8 +1079,7 @@ impl RuntimeManager {
                     agent_id
                 )));
             }
-            self.permission_log
-                .push((request_id.to_string(), granted));
+            self.permission_log.push((request_id.to_string(), granted));
             return Ok(());
         }
 
@@ -1242,10 +1251,7 @@ impl RuntimeManager {
         self.poll_events_inner(|agent_id| allow.contains(agent_id))
     }
 
-    fn poll_events_inner(
-        &mut self,
-        allow: impl Fn(&str) -> bool,
-    ) -> Vec<(String, amux::AcpEvent)> {
+    fn poll_events_inner(&mut self, allow: impl Fn(&str) -> bool) -> Vec<(String, amux::AcpEvent)> {
         let mut events = vec![];
         for (agent_id, handle) in &mut self.agents {
             if !allow(agent_id) {
@@ -1747,7 +1753,11 @@ mod tests {
         // A full claude id is not a known short name; it must pass through and
         // the provider segment must be ignored (the binary is anthropic-only).
         assert_eq!(
-            resolve_initial_model(amux::AgentType::ClaudeCode, "anthropic", "claude-sonnet-4-6"),
+            resolve_initial_model(
+                amux::AgentType::ClaudeCode,
+                "anthropic",
+                "claude-sonnet-4-6"
+            ),
             "claude-sonnet-4-6"
         );
     }
@@ -2313,7 +2323,11 @@ mod tests {
         let owned: std::collections::HashSet<String> =
             std::iter::once("rt-http".to_string()).collect();
         let http_drained = mgr.poll_events_for(&owned);
-        assert_eq!(http_drained.len(), 1, "HTTP pump drains only its own runtime");
+        assert_eq!(
+            http_drained.len(),
+            1,
+            "HTTP pump drains only its own runtime"
+        );
         assert!(
             http_drained.iter().all(|(id, _)| id == "rt-http"),
             "HTTP pump must not steal events from rt-mqtt"
