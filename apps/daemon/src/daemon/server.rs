@@ -194,6 +194,7 @@ pub struct DaemonServer {
     cron_sessions: std::collections::HashMap<String, String>,
     refresh_watch_registry:
         Option<std::sync::Arc<crate::runtime::refresh::refresh_watch::RefreshWatchRegistry>>,
+    refresh_coordinator: Option<Arc<crate::runtime::refresh::RuntimeRefreshCoordinator>>,
 }
 
 /// Single control command parsed off `amuxd.sock`. Variants correspond to the
@@ -469,7 +470,19 @@ impl DaemonServer {
             channel_mgr: None,
             cron_sessions: std::collections::HashMap::new(),
             refresh_watch_registry: None,
+            refresh_coordinator: None,
         })
+    }
+
+    fn suppress_internal_opencode_writes(&self, worktree: &str) {
+        if let Some(ref refresh) = self.refresh_coordinator {
+            crate::runtime::refresh::refresh_watch::suppress_for_workspace_path(
+                refresh,
+                Path::new(worktree),
+                &crate::runtime::refresh::INTERNAL_OPENCODE_KINDS,
+                crate::runtime::refresh::INTERNAL_WRITE_SUPPRESS,
+            );
+        }
     }
 
     /// Build a `ChannelManager` from the given config and call
@@ -1037,14 +1050,21 @@ impl DaemonServer {
             // group models per backend (opencode providers vs claude/codex
             // static tables).
             meta.configured_agent_types = supported_agent_type_names(&self.config);
+            // The HTTP workspace runtime endpoints share this supervisor's
+            // refresh coordinator for status + apply-intent semantics.
+            let runtime_supervisor = crate::runtime::RuntimeSupervisor::new(self.agents.clone());
+            let refresh_coordinator = runtime_supervisor.refresh_coordinator();
+            self.refresh_coordinator = Some(refresh_coordinator.clone());
+            {
+                let mut manager = self.agents.lock().await;
+                manager.attach_refresh_coordinator(refresh_coordinator.clone());
+            }
             let runtime: Arc<dyn crate::http::runtime_adapter::RuntimeAdapter> =
                 crate::http::runtime_adapter::RuntimeManagerAdapter::new(
                     self.agents.clone(),
                     http_cfg.max_event_backlog,
+                    Some(refresh_coordinator),
                 );
-            // The HTTP workspace runtime endpoints share this supervisor's
-            // refresh coordinator for status + apply-intent semantics.
-            let runtime_supervisor = crate::runtime::RuntimeSupervisor::new(self.agents.clone());
             let refresh_watch_registry =
                 crate::runtime::refresh::refresh_watch::start_refresh_watchers(
                     runtime_supervisor.refresh_coordinator(),
@@ -3442,6 +3462,7 @@ impl DaemonServer {
                                 (!w.remote_workspace_id.is_empty())
                                     .then_some(w.remote_workspace_id.clone())
                             });
+                        self.suppress_internal_opencode_writes(&worktree);
                         let runtime_env = match self
                             .assemble_spawn_runtime_env_for_worktree(&worktree, &ws_id)
                         {
@@ -3649,7 +3670,8 @@ impl DaemonServer {
             }
 
             amux::acp_command::Command::GrantPermission(grant) => {
-                let grant_option_id = (!grant.option_id.is_empty()).then(|| grant.option_id.clone());
+                let grant_option_id =
+                    (!grant.option_id.is_empty()).then(|| grant.option_id.clone());
                 if self.permissions.try_resolve_permission(&grant.request_id) {
                     // Resolve via ACP permission response
                     match self
@@ -4695,6 +4717,7 @@ impl DaemonServer {
             sync_team_shared_dir_for_workspace(Path::new(&resolved_worktree), &config);
         }
 
+        self.suppress_internal_opencode_writes(&resolved_worktree);
         let runtime_env = self
             .assemble_spawn_runtime_env_for_worktree(&resolved_worktree, &ws_id)
             .map_err(|e| StartRuntimeError {
@@ -5629,6 +5652,7 @@ mod tests {
                 channel_mgr: None,
                 cron_sessions: HashMap::new(),
                 refresh_watch_registry: None,
+                refresh_coordinator: None,
             },
             _tmp: tmp,
         }
@@ -5777,7 +5801,10 @@ mod tests {
         let logs = capture.text();
         assert!(logs.contains("LiveEventEnvelope decoded"), "{logs}");
         assert!(logs.contains("session_title=Launch Plan"), "{logs}");
-        assert!(logs.contains("daemon_config_actor_id=actor-config-test"), "{logs}");
+        assert!(
+            logs.contains("daemon_config_actor_id=actor-config-test"),
+            "{logs}"
+        );
         assert!(logs.contains("daemon_actor_id=agent-actor"), "{logs}");
         assert!(logs.contains("daemon_team_id=team-test"), "{logs}");
     }
@@ -6740,10 +6767,7 @@ mod tests {
             value["result"]["path"].as_str().unwrap(),
             workspace_dir.canonicalize().unwrap().to_str().unwrap()
         );
-        assert!(!value["result"]["workspace_id"]
-            .as_str()
-            .unwrap()
-            .is_empty());
+        assert!(!value["result"]["workspace_id"].as_str().unwrap().is_empty());
         assert_eq!(ts.server.workspaces.workspaces.len(), 1);
 
         // Re-registering the same path is idempotent: still ok, no duplicate.

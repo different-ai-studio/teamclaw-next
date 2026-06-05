@@ -4,10 +4,10 @@ mod backend;
 mod config;
 #[path = "../src/error.rs"]
 mod error;
-#[path = "../src/opencode_settings/mod.rs"]
-mod opencode_settings;
 #[path = "../src/http/mod.rs"]
 mod http;
+#[path = "../src/opencode_settings/mod.rs"]
+mod opencode_settings;
 #[path = "../src/proto.rs"]
 mod proto;
 #[path = "../src/provider_config.rs"]
@@ -16,10 +16,10 @@ mod provider_config;
 mod runtime;
 #[path = "../src/team_link.rs"]
 mod team_link;
-#[path = "../src/team_shared_git.rs"]
-mod team_shared_git;
 #[path = "../src/team_shared_env.rs"]
 mod team_shared_env;
+#[path = "../src/team_shared_git.rs"]
+mod team_shared_git;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -190,7 +190,7 @@ async fn test_app_with_runtime_adapter() -> TestApp {
         std::collections::HashMap::new(),
         None,
     )));
-    let runtime = RuntimeManagerAdapter::new(manager.clone(), 256);
+    let runtime = RuntimeManagerAdapter::new(manager.clone(), 256, None);
     let handle = http::spawn(
         cfg,
         http::server::metadata("actor".into(), "test"),
@@ -199,8 +199,8 @@ async fn test_app_with_runtime_adapter() -> TestApp {
         None,
         None,
     )
-        .await
-        .expect("spawn http server");
+    .await
+    .expect("spawn http server");
     let base = format!("http://{}", handle.local_addr);
     let root = std::fs::read_to_string(&token_path)
         .expect("read root token")
@@ -267,7 +267,8 @@ async fn permission_reply_endpoint_forwards_decision_to_runtime() {
     let app = test_app_with_runtime_adapter().await;
     let session = app.session_with_pending_permission().await;
 
-    app.reply_permission(session.session_id, "req-1", true).await;
+    app.reply_permission(session.session_id, "req-1", true)
+        .await;
 
     assert!(app
         .runtime_permission_log()

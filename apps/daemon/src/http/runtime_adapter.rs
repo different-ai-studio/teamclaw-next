@@ -535,6 +535,7 @@ pub struct RuntimeManagerAdapter {
     manager: Arc<tokio::sync::Mutex<RuntimeManager>>,
     sessions: Arc<RwLock<HashMap<Uuid, ManagedSession>>>,
     backlog_cap: usize,
+    refresh: Option<Arc<crate::runtime::refresh::RuntimeRefreshCoordinator>>,
 }
 
 struct ManagedSession {
@@ -550,11 +551,16 @@ struct ManagedSession {
 }
 
 impl RuntimeManagerAdapter {
-    pub fn new(manager: Arc<tokio::sync::Mutex<RuntimeManager>>, backlog_cap: usize) -> Arc<Self> {
+    pub fn new(
+        manager: Arc<tokio::sync::Mutex<RuntimeManager>>,
+        backlog_cap: usize,
+        refresh: Option<Arc<crate::runtime::refresh::RuntimeRefreshCoordinator>>,
+    ) -> Arc<Self> {
         let adapter = Arc::new(Self {
             manager,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             backlog_cap,
+            refresh,
         });
         Self::spawn_event_pump(&adapter);
         adapter
@@ -638,6 +644,14 @@ impl RuntimeManagerAdapter {
         #[cfg(not(test))]
         {
             let worktree = resolve_spawn_worktree(workspace_id.as_deref())?;
+            if let Some(ref refresh) = self.refresh {
+                crate::runtime::refresh::refresh_watch::suppress_for_workspace_path(
+                    refresh,
+                    std::path::Path::new(&worktree),
+                    &crate::runtime::refresh::INTERNAL_PREPARE_KINDS,
+                    crate::runtime::refresh::INTERNAL_WRITE_SUPPRESS,
+                );
+            }
             prepare_workspace(std::path::Path::new(&worktree)).map_err(|e| {
                 HttpError::internal(format!("prepare workspace for runtime spawn: {e}"))
             })?;
@@ -1221,7 +1235,9 @@ impl RuntimeAdapter for RuntimeManagerAdapter {
             let session = sessions
                 .get_mut(&session_id)
                 .ok_or_else(|| HttpError::session_not_found(&session_id.to_string()))?;
-            let resolved_turn_id = turn_id.or(session.active_turn_id).unwrap_or_else(Uuid::new_v4);
+            let resolved_turn_id = turn_id
+                .or(session.active_turn_id)
+                .unwrap_or_else(Uuid::new_v4);
             session.active_turn_id = None;
             session.buffered_output.clear();
             (session.runtime_id.clone(), resolved_turn_id)
@@ -1307,6 +1323,7 @@ mod tests {
             ))),
             sessions: Arc::new(RwLock::new(HashMap::new())),
             backlog_cap,
+            refresh: None,
         })
     }
 
@@ -1405,6 +1422,7 @@ mod tests {
                 None,
             ))),
             256,
+            None,
         );
         let token_id = Uuid::new_v4();
         let snap = adapter
@@ -1529,16 +1547,21 @@ mod tests {
             session.buffered_output = "partial".into();
         }
 
-        adapter.cancel(snap.session_id, Some(turn_id)).await.unwrap();
+        adapter
+            .cancel(snap.session_id, Some(turn_id))
+            .await
+            .unwrap();
         let _ = cmd_rx.recv().await;
 
         adapter.process_runtime_event(
             &snap.runtime_id,
             amux::AcpEvent {
-                event: Some(amux::acp_event::Event::StatusChange(amux::AcpStatusChange {
-                    old_status: amux::AgentStatus::Active as i32,
-                    new_status: amux::AgentStatus::Idle as i32,
-                })),
+                event: Some(amux::acp_event::Event::StatusChange(
+                    amux::AcpStatusChange {
+                        old_status: amux::AgentStatus::Active as i32,
+                        new_status: amux::AgentStatus::Idle as i32,
+                    },
+                )),
                 model: String::new(),
             },
         );
