@@ -25,6 +25,7 @@ pub mod skillssh;
 pub mod stt;
 pub mod system_appearance;
 pub mod team;
+pub mod team_git;
 pub mod team_litellm;
 pub mod team_secret_store;
 pub mod team_share;
