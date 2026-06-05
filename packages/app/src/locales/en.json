@@ -64,8 +64,6 @@
     "verify": "Verify",
     "verifying": "Verifying…",
     "useDifferentEmail": "Use a different email",
-    "settingUpWorkspace": "Setting up your workspace…",
-    "loading": "Loading…",
     "serverConfigRequired": "Supabase is not configured. Go back and choose self-hosted server before signing in.",
     "upgrade": {
       "title": "Upgrade account",
@@ -160,7 +158,6 @@
     "showMore": "Show more",
     "showLess": "Show less",
     "streamingBar": {
-      "streaming": "Streaming…",
       "streamingActive": "Replying",
       "waitingApproval": "Waiting for your approval…"
     },
@@ -176,20 +173,12 @@
       "waitingExternalPathApproval": "Confirmation is required before accessing a path outside the workspace",
       "childSessionWaitingApproval": "A child session is waiting for your approval",
       "toolInvocationWaitingApproval": "A tool call is waiting for your approval",
-      "pendingCount": "{{count}} pending",
-      "waitingBadge": "Waiting for approval",
       "queuePosition": "{{current}} / {{total}}",
       "approvalSectionAria": "Permission approval",
       "approve": "Allow"
     },
     "todo": {
-      "summary": "{{count}} tasks, {{completed}} completed",
-      "stackSummary": "{{count}} tasks · {{completed}} done",
-      "moreItems": "{{count}} more · expand to view",
-      "collapseAria": "Collapse todo panel",
-      "expandAria": "Expand todo panel",
-      "queueCollapseAria": "Collapse queued messages",
-      "queueExpandAria": "Expand queued messages"
+      "stackSummary": "{{count}} tasks · {{completed}} done"
     },
     "toolCall": {
       "status": {
@@ -430,7 +419,10 @@
       "scopeAll": "All",
       "copy": "Copy",
       "clear": "Clear",
-      "waiting": "Waiting for {{token}} …"
+      "waiting": "Waiting for {{token}} …",
+      "logFileSession": "{{dir}}/{{sessionId}}.log + _all.log",
+      "logFileAll": "{{dir}}/_all.log",
+      "openLog": "Open log in Finder"
     },
     "toast": {
       "emptyMessageTitle": "Enter a message",

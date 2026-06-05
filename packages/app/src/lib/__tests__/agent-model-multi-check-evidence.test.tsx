@@ -283,6 +283,11 @@ describe("agent model multi-check UI evidence", () => {
       <AgentSelectorDock
         activeSessionId="session-1"
         engagedAgents={[{ id: "agent-mac", displayName: "MACPRO" }]}
+        engagedUiEntries={[
+          { agent: { id: "agent-mac", displayName: "MACPRO" }, uiState: "ready" },
+        ]}
+        agentToRuntimeId={new Map([["agent-mac", "rt-1"]])}
+        agentToBackendType={new Map([["agent-mac", "opencode"]])}
         onRemoveAgent={vi.fn()}
       />,
     );

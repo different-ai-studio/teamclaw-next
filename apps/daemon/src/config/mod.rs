@@ -19,7 +19,8 @@ pub use member_store::{MemberStore, PendingInvite, StoredMember};
 pub use session_store::{SessionStore, StoredSession};
 pub use workspace_store::{AddWorkspaceOutcome, StoredWorkspace, WorkspaceStore};
 pub use roles_skills::{
-    ManagedSkillDto, RoleRecordDto, RoleSkillLinkDto, RolesSkillsMetricsDto, RolesSkillsStateDto,
+    scan_roles_skills_state, ManagedSkillDto, RoleRecordDto, RoleSkillLinkDto,
+    RolesSkillsMetricsDto, RolesSkillsStateDto,
 };
 pub use provider_auth::{
     builtin_provider_auth_methods, merge_live_provider_auth_methods, ProviderAuthMethod,

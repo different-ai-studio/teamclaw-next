@@ -70,7 +70,7 @@ function MentionDeliveryMetaLine({
   return (
     <div className="mt-1 text-[11px] text-faint text-right" data-testid="mention-delivery-meta">
       {flagged.map((id) => (
-        <MentionDeliveryMetaItem key={id} actorId={id} state={snapshot[id]!} t={t} />
+        <MentionDeliveryMetaItem key={id} actorId={id} state={snapshot[id] as "offline" | "stale"} t={t} />
       ))}
     </div>
   );

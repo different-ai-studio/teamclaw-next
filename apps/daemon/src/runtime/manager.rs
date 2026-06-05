@@ -289,6 +289,14 @@ impl RuntimeManager {
             .insert(agent_id.to_string(), commands);
     }
 
+    /// Return the slash commands last reported by `agent_id`, or an empty vec.
+    pub fn get_available_commands(&self, agent_id: &str) -> Vec<amux::AcpAvailableCommand> {
+        self.available_commands_per_agent
+            .get(agent_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// Records that an agent's session is now running on `model_id`.
     /// Caller is responsible for actually invoking ACP set_model on the
     /// adapter; this only updates the tracking map.
@@ -1405,6 +1413,17 @@ impl RuntimeManager {
             .iter()
             .find(|(_, h)| h.acp_session_id == acp_session_id)
             .map(|(id, _)| id.clone())
+    }
+
+    /// Return the agent type for the runtime with the given ACP session id.
+    pub fn agent_type_for_acp_session(&self, acp_session_id: &str) -> Option<amux::AgentType> {
+        if acp_session_id.is_empty() {
+            return None;
+        }
+        self.agents
+            .iter()
+            .find(|(_, h)| h.acp_session_id == acp_session_id)
+            .map(|(_, h)| h.agent_type)
     }
 
     /// Spawn an ACP-backed agent for a freshly-bound gateway conversation.

@@ -59,7 +59,7 @@ describe('PendingPermissionInline', () => {
 
     render(<PendingPermissionInline />);
 
-    expect(screen.queryByTestId('pending-permission-inline')).toBeNull();
+    expect(screen.queryByTestId('streaming-agents-dock')).toBeNull();
   });
 
   it('renders permission request details', async () => {
@@ -88,11 +88,11 @@ describe('PendingPermissionInline', () => {
 
     render(<PendingPermissionInline />);
 
-    expect(screen.getByTestId('pending-permission-inline')).toBeTruthy();
-    expect(screen.getByTestId('pending-permission-shell')).toBeTruthy();
+    expect(screen.getByTestId('streaming-agents-dock')).toBeTruthy();
+    expect(screen.getByTestId('streaming-agent-shell')).toBeTruthy();
 
     const card = screen.getByTestId('pending-permission-card');
-    expect(card.className).toContain('border-t');
+    expect(card.className).toContain('border-b');
 
     const actions = screen.getByTestId('pending-permission-actions');
     expect(actions.className).toContain('flex-col');
@@ -296,7 +296,7 @@ describe('PendingPermissionInline', () => {
 
     render(<PendingPermissionInline />);
 
-    expect(screen.queryByTestId('pending-permission-inline')).toBeNull();
+    expect(screen.queryByTestId('streaming-agents-dock')).toBeNull();
     expect(screen.queryByText('belongs-to-session-1')).toBeNull();
   });
 

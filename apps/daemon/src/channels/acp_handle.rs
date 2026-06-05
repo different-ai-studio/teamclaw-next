@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use teamclaw_gateway::{AcpError, AcpHandle, AcpTurnOutcome, AmuxSessionId, ModelInfo};
+use teamclaw_gateway::{AcpAvailableCommand, AgentInfo, AcpError, AcpHandle, AcpTurnOutcome, AmuxSessionId, ModelInfo, WorkspaceInfo};
 
 use crate::backend::Backend;
 use crate::proto::amux;
@@ -70,6 +70,14 @@ pub struct AmuxdAcpHandle {
     /// working directory instead of a throwaway `/tmp` scratch dir. `None` →
     /// fall back to a scratch dir (the workspace is unset or not synced locally).
     pub default_workspace_dir: Option<String>,
+    /// Per-session agent type override: logical_session_id → AgentType.
+    /// Set by `set_agent`; consulted at lazy-spawn time. In-memory only.
+    pub agent_type_override: Arc<Mutex<HashMap<String, amux::AgentType>>>,
+    /// Path to workspaces.toml — read by `list_workspaces` on demand.
+    pub workspaces_path: std::path::PathBuf,
+    /// Per-session workspace override: logical_session_id → workspace_id.
+    /// In-memory only — cleared across daemon restarts.
+    pub workspace_override: Arc<Mutex<HashMap<String, String>>>,
 }
 
 /// Returned by `resolve_or_spawn`. `spawned` is true iff this call was
@@ -441,6 +449,216 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
 
         Ok(())
     }
+
+    async fn available_commands(
+        &self,
+        session: &AmuxSessionId,
+    ) -> Result<Vec<AcpAvailableCommand>, AcpError> {
+        // ── 1. Agent-reported commands (only if session is already spawned) ────
+        // Built-ins (step 2) and workspace skills (step 3) are always returned
+        // regardless of whether a runtime has been spawned for this session.
+        let mut result: Vec<AcpAvailableCommand> = {
+            let map = self.logical_to_acp.lock().await;
+            let real = map.get(session).map(|s| s.real_acp_sid.clone());
+            drop(map);
+            if let Some(real) = real {
+                let mgr = self.manager.lock().await;
+                if let Some(agent_id) = mgr.agent_id_by_acp_session(&real) {
+                    mgr.get_available_commands(&agent_id)
+                        .into_iter()
+                        .map(|c| AcpAvailableCommand {
+                            name: c.name,
+                            description: c.description,
+                            input_hint: if c.input_hint.is_empty() { None } else { Some(c.input_hint) },
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            }
+        };
+
+        // Resolve agent type: per-session override → default → ClaudeCode fallback.
+        let agent_type = {
+            let overrides = self.agent_type_override.lock().await;
+            overrides.get(session.as_str()).copied().or(self.default_agent_type)
+        };
+
+        // ── 2. Agent built-in commands (ClaudeCode doesn't report via AcpAvailableCommands) ──
+        let known = match agent_type {
+            Some(t) if t == amux::AgentType::ClaudeCode => &[
+                ("compact", "Compact the conversation history", ""),
+                ("cost", "Show token cost for this session", ""),
+            ][..],
+            _ => &[][..],
+        };
+        for (name, description, hint) in known {
+            if !result.iter().any(|c| c.name == *name) {
+                result.push(AcpAvailableCommand {
+                    name: name.to_string(),
+                    description: description.to_string(),
+                    input_hint: if hint.is_empty() { None } else { Some(hint.to_string()) },
+                });
+            }
+        }
+
+        Ok(result)
+    }
+
+    async fn list_skills(
+        &self,
+        _session: &AmuxSessionId,
+    ) -> Result<Vec<(String, String)>, AcpError> {
+        use crate::config::scan_roles_skills_state;
+        let Some(ws_dir) = &self.default_workspace_dir else {
+            return Ok(vec![]);
+        };
+        let state = scan_roles_skills_state(std::path::Path::new(ws_dir))
+            .map_err(|e| AcpError::Internal(format!("skill scan: {e}")))?;
+        let mut skills: Vec<(String, String)> = state
+            .skills
+            .into_iter()
+            .map(|s| {
+                let name = s
+                    .invocation_name
+                    .unwrap_or_else(|| s.filename.trim_end_matches(".md").to_string());
+                (name, s.description)
+            })
+            .collect();
+        skills.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(skills)
+    }
+
+    async fn send_slash_command(
+        &self,
+        session: &AmuxSessionId,
+        name: &str,
+        input: Option<&str>,
+    ) -> Result<AcpTurnOutcome, AcpError> {
+        let text = match input {
+            Some(inp) if !inp.is_empty() => format!("/{name} {inp}"),
+            _ => format!("/{name}"),
+        };
+        self.send_prompt(session, "user", &text).await
+    }
+
+    async fn list_sessions(
+        &self,
+        active_session: &AmuxSessionId,
+    ) -> Result<Vec<(AmuxSessionId, bool)>, AcpError> {
+        let map = self.logical_to_acp.lock().await;
+        Ok(map.keys().map(|k| (k.clone(), k == active_session)).collect())
+    }
+
+    async fn list_agents(
+        &self,
+        session: &AmuxSessionId,
+    ) -> Result<Vec<AgentInfo>, AcpError> {
+        let current = {
+            let overrides = self.agent_type_override.lock().await;
+            overrides
+                .get(session.as_str())
+                .copied()
+                .or(self.default_agent_type)
+                .unwrap_or(amux::AgentType::ClaudeCode)
+        };
+        Ok(vec![
+            AgentInfo { agent_type: "claude-code".to_string(), is_current: current == amux::AgentType::ClaudeCode },
+            AgentInfo { agent_type: "opencode".to_string(), is_current: current == amux::AgentType::Opencode },
+            AgentInfo { agent_type: "codex".to_string(), is_current: current == amux::AgentType::Codex },
+        ])
+    }
+
+    async fn set_agent(
+        &self,
+        session: &AmuxSessionId,
+        agent_type: &str,
+    ) -> Result<(), AcpError> {
+        let t = match agent_type {
+            "claude-code" => amux::AgentType::ClaudeCode,
+            "opencode" => amux::AgentType::Opencode,
+            "codex" => amux::AgentType::Codex,
+            other => return Err(AcpError::NotFound(format!(
+                "unknown agent type '{other}'; valid: claude-code, opencode, codex"
+            ))),
+        };
+        {
+            let mut overrides = self.agent_type_override.lock().await;
+            overrides.insert(session.to_string(), t);
+        }
+        // Acquire the map, extract + remove the entry atomically, then cancel
+        // via the manager. This prevents a concurrent send_prompt from
+        // re-inserting between the cancel and remove (TOCTOU).
+        let real_sid = {
+            let mut map = self.logical_to_acp.lock().await;
+            let sid = map.get(session).map(|s| s.real_acp_sid.clone());
+            map.remove(session);
+            sid
+        };
+        if let Some(real) = real_sid {
+            let mut mgr = self.manager.lock().await;
+            let _ = mgr.cancel_by_acp_session(&real).await;
+        }
+        Ok(())
+    }
+
+    async fn list_workspaces(
+        &self,
+        session: &AmuxSessionId,
+    ) -> Result<Vec<WorkspaceInfo>, AcpError> {
+        use crate::config::WorkspaceStore;
+        let store = WorkspaceStore::load(&self.workspaces_path)
+            .map_err(|e| AcpError::Internal(format!("workspace load: {e}")))?;
+        let current_id = {
+            let overrides = self.workspace_override.lock().await;
+            overrides
+                .get(session.as_str())
+                .cloned()
+                .or_else(|| store.default_workspace_id.clone())
+        };
+        Ok(store
+            .workspaces
+            .iter()
+            .map(|w| WorkspaceInfo {
+                workspace_id: w.workspace_id.clone(),
+                display_name: w.display_name.clone(),
+                is_current: current_id.as_deref() == Some(w.workspace_id.as_str()),
+            })
+            .collect())
+    }
+
+    async fn set_workspace(
+        &self,
+        session: &AmuxSessionId,
+        workspace_id: &str,
+    ) -> Result<(), AcpError> {
+        use crate::config::WorkspaceStore;
+        let store = WorkspaceStore::load(&self.workspaces_path)
+            .map_err(|e| AcpError::Internal(format!("workspace load: {e}")))?;
+        if !store.workspaces.iter().any(|w| w.workspace_id == workspace_id) {
+            return Err(AcpError::NotFound(format!(
+                "workspace '{workspace_id}' not found"
+            )));
+        }
+        {
+            let mut overrides = self.workspace_override.lock().await;
+            overrides.insert(session.to_string(), workspace_id.to_string());
+        }
+        // Atomically remove entry then cancel to avoid TOCTOU race.
+        let real_sid = {
+            let mut map = self.logical_to_acp.lock().await;
+            let sid = map.get(session).map(|s| s.real_acp_sid.clone());
+            map.remove(session);
+            sid
+        };
+        if let Some(real) = real_sid {
+            let mut mgr = self.manager.lock().await;
+            let _ = mgr.cancel_by_acp_session(&real).await;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -461,6 +679,9 @@ mod tests {
             backend: Arc::new(MockBackend::default()),
             default_agent_type: None,
             default_workspace_dir: None,
+            agent_type_override: Arc::new(Mutex::new(HashMap::new())),
+            workspaces_path: std::path::PathBuf::from("/tmp/test-workspaces.toml"),
+            workspace_override: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 

@@ -73,13 +73,15 @@ pub fn acp_debug_log_directory(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 pub fn acp_debug_reveal_log(app: AppHandle, session_id: Option<String>) -> Result<(), String> {
     let dir = acp_stream_log_dir(&app)?;
-    let session_id = session_id.as_deref().map(str::trim).filter(|id| !id.is_empty());
+    let session_id = session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
     match session_id {
         Some(id) => {
             let file = dir.join(safe_session_filename(id));
             if !file.exists() {
-                std::fs::write(&file, "")
-                    .map_err(|e| format!("create {}: {e}", file.display()))?;
+                std::fs::write(&file, "").map_err(|e| format!("create {}: {e}", file.display()))?;
             }
             crate::commands::show_in_folder(file.to_string_lossy().into_owned())
         }
