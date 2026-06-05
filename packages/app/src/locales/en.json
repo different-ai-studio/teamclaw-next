@@ -161,6 +161,7 @@
     "showLess": "Show less",
     "streamingBar": {
       "streaming": "Streaming…",
+      "streamingActive": "Replying",
       "waitingApproval": "Waiting for your approval…"
     },
     "permissionCard": {
@@ -183,6 +184,8 @@
     },
     "todo": {
       "summary": "{{count}} tasks, {{completed}} completed",
+      "stackSummary": "{{count}} tasks · {{completed}} done",
+      "moreItems": "{{count}} more · expand to view",
       "collapseAria": "Collapse todo panel",
       "expandAria": "Expand todo panel",
       "queueCollapseAria": "Collapse queued messages",

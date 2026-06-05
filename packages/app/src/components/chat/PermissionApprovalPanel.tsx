@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { composerGlassChildClass } from "./composer-glass";
 import { useSessionStore } from "@/stores/session";
 import type { PendingPermissionEntry } from "@/stores/session-types";
 import {
@@ -14,6 +15,7 @@ export function PermissionApprovalPanel({
   queueTotal,
   onReplyStart,
   onReplyRollback,
+  appearance = "card",
   className,
 }: {
   entry: PendingPermissionEntry;
@@ -21,6 +23,8 @@ export function PermissionApprovalPanel({
   queueTotal: number;
   onReplyStart?: (permissionId: string) => void;
   onReplyRollback?: (permissionId: string) => void;
+  /** `glass`: transparent row inside a shared composer glass shell. */
+  appearance?: "card" | "glass";
   className?: string;
 }) {
   const { t: i18nT } = useTranslation();
@@ -52,7 +56,10 @@ export function PermissionApprovalPanel({
       data-testid="pending-permission-card"
       aria-label={t("chat.permissionCard.approvalSectionAria", "Permission approval")}
       className={cn(
-        "border-t border-border-soft bg-gradient-to-b from-[#fffdfb] to-paper px-3.5 py-3 dark:from-card dark:to-card",
+        "border-t border-border-soft px-3.5 py-3",
+        appearance === "glass"
+          ? cn(composerGlassChildClass, "border-border-soft")
+          : "bg-gradient-to-b from-[#fffdfb] to-paper dark:from-card dark:to-card",
         className,
       )}
     >
