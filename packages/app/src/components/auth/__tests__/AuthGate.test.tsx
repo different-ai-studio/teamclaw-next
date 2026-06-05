@@ -1,6 +1,10 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const { setLocalCacheTeamGateMock } = vi.hoisted(() => ({
+  setLocalCacheTeamGateMock: vi.fn().mockResolvedValue(undefined),
+}));
+
 const { authState, currentTeamMock, backendMock } = vi.hoisted(() => ({
   authState: {
     session: { user: { id: "user-1" } },
@@ -12,6 +16,7 @@ const { authState, currentTeamMock, backendMock } = vi.hoisted(() => ({
     reloadAndSwitchTo: vi.fn(),
     setActiveTeam: vi.fn(),
     team: null as null | { id: string },
+    teamUserId: null as null | string,
   },
   backendMock: {
     teams: {
@@ -35,6 +40,7 @@ vi.mock("@/stores/current-team", () => ({
   useCurrentTeamStore: {
     getState: () => currentTeamMock,
   },
+  setLocalCacheTeamGate: setLocalCacheTeamGateMock,
 }));
 
 vi.mock("@/lib/backend", () => ({
@@ -94,6 +100,8 @@ beforeEach(() => {
   currentTeamMock.reloadAndSwitchTo.mockReset();
   currentTeamMock.setActiveTeam.mockReset();
   currentTeamMock.team = null;
+  currentTeamMock.teamUserId = null;
+  setLocalCacheTeamGateMock.mockClear();
 });
 
 describe("AuthGate", () => {
@@ -150,6 +158,79 @@ describe("AuthGate", () => {
     await waitFor(() => expect(screen.getByText("Desktop onboarding")).toBeInTheDocument());
     expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
     expect(screen.queryByText("App shell")).not.toBeInTheDocument();
+  });
+
+  it("renders the shell optimistically from a cached team for the same user, without a network probe", async () => {
+    // current-team was hydrated from the persisted cache for THIS user.
+    currentTeamMock.team = { id: "team-cached" };
+    currentTeamMock.teamUserId = "user-1";
+    // Make the list probe hang — first paint must not wait on it.
+    backendMock.teams.listCurrentUserTeams.mockReturnValue(new Promise(() => {}));
+
+    render(
+      <AuthGate>
+        <div>App shell</div>
+      </AuthGate>,
+    );
+
+    await waitFor(() => expect(screen.getByText("App shell")).toBeInTheDocument());
+    // The optimistic gate must not block on (or even fire) the bootstrap probe;
+    // App's mount-time load() revalidates in the background instead.
+    expect(backendMock.teams.listCurrentUserTeams).not.toHaveBeenCalled();
+    // …but it must prime the local-cache team gate so the backend accepts the
+    // team-scoped session-cache reads App fires on mount (no blank-list flash).
+    expect(setLocalCacheTeamGateMock).toHaveBeenCalledWith("team-cached");
+  });
+
+  it("does not adopt a cached team that belongs to a different user", async () => {
+    // A previous user's team is still in the store (persisted cache), but the
+    // session is a different user — must re-resolve, not reuse the foreign team.
+    currentTeamMock.team = { id: "team-foreign" };
+    currentTeamMock.teamUserId = "other-user";
+    backendMock.teams.listCurrentUserTeams.mockResolvedValueOnce([
+      { id: "team-mine", name: "Mine", slug: "mine" },
+    ]);
+    currentTeamMock.setActiveTeam.mockResolvedValueOnce(undefined);
+
+    render(
+      <AuthGate>
+        <div>App shell</div>
+      </AuthGate>,
+    );
+
+    await waitFor(() => expect(backendMock.teams.listCurrentUserTeams).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(currentTeamMock.setActiveTeam).toHaveBeenCalledWith({
+        id: "team-mine",
+        name: "Mine",
+        slug: "mine",
+      }),
+    );
+  });
+
+  it("switches to an existing team using the listed row, without a redundant getTeam fetch", async () => {
+    backendMock.teams.listCurrentUserTeams.mockResolvedValueOnce([
+      { id: "team-existing", name: "Acme", slug: "acme" },
+    ]);
+    currentTeamMock.setActiveTeam.mockResolvedValueOnce(undefined);
+
+    render(
+      <AuthGate>
+        <div>App shell</div>
+      </AuthGate>,
+    );
+
+    await waitFor(() =>
+      expect(currentTeamMock.setActiveTeam).toHaveBeenCalledWith({
+        id: "team-existing",
+        name: "Acme",
+        slug: "acme",
+      }),
+    );
+    // The list row already carries {id,name,slug}; bootstrap must not re-fetch
+    // the same team via reloadAndSwitchTo (which does an extra GET /v1/teams/:id).
+    expect(currentTeamMock.reloadAndSwitchTo).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText("App shell")).toBeInTheDocument());
   });
 
   it("creates a first team and switches to it before rendering the shell", async () => {

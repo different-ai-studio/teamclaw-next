@@ -33,7 +33,8 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue(undefined),
 }));
 
-const { useCurrentTeamStore } = await import("./current-team");
+const { useCurrentTeamStore, readCachedCurrentTeam, writeCachedCurrentTeam, initialCurrentTeamState } =
+  await import("./current-team");
 
 const ACTIVE_TEAM = { id: "team-1", name: "Brave Otter", slug: "brave-otter" };
 const ACTIVE_MEMBER = {
@@ -47,6 +48,7 @@ beforeEach(() => {
   teamsMock.listCurrentUserTeams.mockReset();
   directoryMock.getCurrentTeamMember.mockReset();
   authState.session = { user: { id: "anon-1" } };
+  localStorage.clear();
   useCurrentTeamStore.setState({
     team: null,
     currentMember: null,
@@ -54,6 +56,46 @@ beforeEach(() => {
     loading: false,
     saving: false,
     error: null,
+  });
+});
+
+describe("current-team persistence cache", () => {
+  it("persists the resolved team so a later launch can hydrate it synchronously", async () => {
+    teamsMock.listCurrentUserTeams.mockResolvedValueOnce([ACTIVE_TEAM]);
+    directoryMock.getCurrentTeamMember.mockResolvedValueOnce(ACTIVE_MEMBER);
+
+    await useCurrentTeamStore.getState().load();
+
+    expect(readCachedCurrentTeam()).toEqual({
+      team: ACTIVE_TEAM,
+      currentMember: ACTIVE_MEMBER,
+      teamUserId: "anon-1",
+    });
+  });
+
+  it("clears the persisted team when the session resolves team-less", async () => {
+    writeCachedCurrentTeam({ team: ACTIVE_TEAM, currentMember: ACTIVE_MEMBER, teamUserId: "anon-1" });
+    teamsMock.listCurrentUserTeams.mockResolvedValueOnce([]);
+
+    await useCurrentTeamStore.getState().load();
+
+    expect(readCachedCurrentTeam()).toBeNull();
+  });
+
+  it("hydrates initial store state from a persisted cache", () => {
+    writeCachedCurrentTeam({ team: ACTIVE_TEAM, currentMember: ACTIVE_MEMBER, teamUserId: "anon-1" });
+
+    expect(initialCurrentTeamState()).toEqual({
+      team: ACTIVE_TEAM,
+      currentMember: ACTIVE_MEMBER,
+      teamUserId: "anon-1",
+    });
+  });
+
+  it("ignores a malformed cache entry", () => {
+    localStorage.setItem("teamclaw:current-team", "not json{");
+    expect(readCachedCurrentTeam()).toBeNull();
+    expect(initialCurrentTeamState()).toEqual({ team: null, currentMember: null, teamUserId: null });
   });
 });
 
