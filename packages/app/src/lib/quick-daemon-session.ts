@@ -1,4 +1,4 @@
-import { getCurrentDaemonAgent } from '@/lib/daemon-agent-admin'
+import { getLocalDaemonAgent } from '@/lib/daemon-agent-admin'
 import { resolveCurrentMemberActorId } from '@/lib/current-actor'
 import { createSessionShell } from '@/lib/session-create'
 import { ensureSessionLiveSubscribed } from '@/lib/session-live-subscriptions'
@@ -31,7 +31,7 @@ export async function createQuickDaemonSession(): Promise<QuickDaemonSessionResu
   const authUserId = useAuthStore.getState().session?.user?.id ?? null
   if (!teamId || !authUserId) return null
 
-  const agent = await getCurrentDaemonAgent(teamId)
+  const agent = await getLocalDaemonAgent(teamId)
   if (!agent?.id) return null
 
   const creatorActorId = await resolveCurrentMemberActorId(teamId, authUserId, {

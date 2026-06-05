@@ -4,10 +4,8 @@ import { Inbox, AtSign, Keyboard, Pin } from 'lucide-react'
 import { useUIStore } from '@/stores/ui'
 import { useSessionStore } from '@/stores/session'
 import { useCronStore } from '@/stores/cron'
-import { useWorkspaceStore } from '@/stores/workspace'
-import { useCurrentTeamStore } from '@/stores/current-team'
-import { getCurrentDaemonAgent } from '@/lib/daemon-agent-admin'
 import { createQuickDaemonSession } from '@/lib/quick-daemon-session'
+import { useQuickChatReadiness } from '@/hooks/use-quick-chat-readiness'
 import { IdeasSection } from '@/components/sidebar/IdeasSection'
 import { ActorsSection } from '@/components/sidebar/ActorsSection'
 import { NewChatSplitButton } from '@/components/sidebar/NewChatSplitButton'
@@ -53,24 +51,11 @@ export function NavRail() {
   const { t } = useTranslation()
   const filter = useUIStore((s) => s.sidebarFilter)
   const setFilter = useUIStore((s) => s.setSidebarFilter)
+  const openDaemonAgentSettings = useUIStore((s) => s.openDaemonAgentSettings)
   const sessions = useSessionStore((s) => s.sessions)
   const cronSessionIds = useCronStore((s) => s.cronSessionIds)
-  const workspacePath = useWorkspaceStore((s) => s.workspacePath)
-  const hasWorkspace = !!workspacePath
-  const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
-  const [localAgentReady, setLocalAgentReady] = React.useState(false)
-
-  React.useEffect(() => {
-    if (!teamId || !hasWorkspace) {
-      setLocalAgentReady(false)
-      return
-    }
-    let cancelled = false
-    void getCurrentDaemonAgent(teamId).then((agent) => {
-      if (!cancelled) setLocalAgentReady(!!agent?.id)
-    })
-    return () => { cancelled = true }
-  }, [teamId, hasWorkspace])
+  const quickChatState = useQuickChatReadiness()
+  const [creating, setCreating] = React.useState(false)
 
   const sessionsCount = React.useMemo(
     () => sessions.filter((s) => !s.parentID && !cronSessionIds.has(s.id)).length,
@@ -82,9 +67,29 @@ export function NavRail() {
   }
 
   const handleQuickNewChat = React.useCallback(() => {
-    if (!hasWorkspace || !localAgentReady) return
+    if (quickChatState.kind === 'agent_not_bound') {
+      openDaemonAgentSettings('quick_chat')
+      return
+    }
+    if (quickChatState.kind !== 'ready' || creating) return
+
+    setCreating(true)
     void createQuickDaemonSession()
-  }, [hasWorkspace, localAgentReady])
+      .then((result) => {
+        if (!result) {
+          return import('sonner').then(({ toast }) => {
+            toast.error(t('chat.quickSessionCreateError', 'Could not start a session with your local agent'))
+          })
+        }
+      })
+      .catch((e) => {
+        console.error('[NavRail] quick create failed', e)
+        void import('sonner').then(({ toast }) => {
+          toast.error(t('chat.quickSessionCreateError', 'Could not start a session with your local agent'))
+        })
+      })
+      .finally(() => setCreating(false))
+  }, [quickChatState, creating, openDaemonAgentSettings, t])
 
   // ⌘N — quick path with local amuxd agent (same as primary split button).
   React.useEffect(() => {
@@ -101,9 +106,9 @@ export function NavRail() {
   return (
     <div className="flex h-full w-full min-w-0 flex-col gap-2 overflow-y-auto px-3 pt-0 pb-3">
       <NewChatSplitButton
-        hasWorkspace={hasWorkspace}
-        localAgentReady={localAgentReady}
-        onOpenAgentSettings={() => useUIStore.getState().openSettings('daemonGeneral')}
+        quickChatState={quickChatState}
+        creating={creating}
+        onPrimaryClick={handleQuickNewChat}
       />
 
       <div className="flex flex-col">

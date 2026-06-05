@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  getCurrentDaemonAgent: vi.fn(),
+  getLocalDaemonAgent: vi.fn(),
   resolveCurrentMemberActorId: vi.fn(),
   createSessionShell: vi.fn(),
   ensureSessionLiveSubscribed: vi.fn(),
@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/daemon-agent-admin', () => ({
-  getCurrentDaemonAgent: (...a: unknown[]) => mocks.getCurrentDaemonAgent(...a),
+  getLocalDaemonAgent: (...a: unknown[]) => mocks.getLocalDaemonAgent(...a),
 }))
 vi.mock('@/lib/current-actor', () => ({
   resolveCurrentMemberActorId: (...a: unknown[]) => mocks.resolveCurrentMemberActorId(...a),
@@ -61,7 +61,7 @@ describe('createQuickDaemonSession', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.draftIdeaId = null
-    mocks.getCurrentDaemonAgent.mockResolvedValue({
+    mocks.getLocalDaemonAgent.mockResolvedValue({
       id: 'agent-mac',
       displayName: 'MACPRO AI',
     })
@@ -73,7 +73,7 @@ describe('createQuickDaemonSession', () => {
   })
 
   it('returns null when no local daemon agent', async () => {
-    mocks.getCurrentDaemonAgent.mockResolvedValue(null)
+    mocks.getLocalDaemonAgent.mockResolvedValue(null)
     const { createQuickDaemonSession } = await import('../quick-daemon-session')
     const result = await createQuickDaemonSession()
     expect(result).toBeNull()

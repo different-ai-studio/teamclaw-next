@@ -65,32 +65,23 @@ export async function getLocalDaemonActorId(): Promise<string | null> {
   }
 }
 
-export async function getCurrentDaemonAgent(teamId: string): Promise<CurrentDaemonAgent | null> {
-  const localActorId = await getLocalDaemonActorId()
+type ConnectedAgentListRow = {
+  id?: string
+  agent_id: string
+  display_name: string | null
+  agent_types: unknown
+  default_agent_type: string | null
+  permission_level: AgentPermissionLevel | null
+  visibility: AgentVisibility
+  is_owner: boolean
+  last_active_at: string | null
+}
+
+async function mapConnectedAgentRow(
+  teamId: string,
+  row: ConnectedAgentListRow,
+): Promise<CurrentDaemonAgent> {
   const backend = getBackend()
-  const rows = await backend.actors.listConnectedAgents(teamId) as Array<{
-    id?: string
-    agent_id: string
-    display_name: string | null
-    agent_types: unknown
-    default_agent_type: string | null
-    permission_level: AgentPermissionLevel | null
-    visibility: AgentVisibility
-    is_owner: boolean
-    last_active_at: string | null
-  }>
-
-  // Prefer the row that matches this machine's daemon actor_id. Fall back to
-  // the owner row (the daemon owns its own agent), then the first connected
-  // agent. device_id matching was removed — device_id == actor_id and FC no
-  // longer returns it.
-  const row =
-    rows.find((item) => localActorId && item.agent_id === localActorId) ??
-    rows.find((item) => item.is_owner) ??
-    rows[0]
-
-  if (!row) return null
-
   const directoryRow = await backend.actors.getDaemonAgentDirectoryEntry(teamId, row.agent_id)
 
   return {
@@ -105,6 +96,38 @@ export async function getCurrentDaemonAgent(teamId: string): Promise<CurrentDaem
     defaultWorkspaceId: directoryRow?.default_workspace_id ?? null,
     lastActiveAt: directoryRow?.last_active_at ?? row.last_active_at ?? null,
   }
+}
+
+/**
+ * Strict: only the agent whose id matches this machine's daemon actor_id.
+ * Use for quick new chat, LocalDaemonRow, and daemon settings.
+ */
+export async function getLocalDaemonAgent(teamId: string): Promise<CurrentDaemonAgent | null> {
+  const localActorId = await getLocalDaemonActorId()
+  if (!localActorId) return null
+
+  const rows = await getBackend().actors.listConnectedAgents(teamId) as ConnectedAgentListRow[]
+  const row = rows.find((item) => item.agent_id === localActorId)
+  if (!row) return null
+
+  return mapConnectedAgentRow(teamId, row)
+}
+
+/**
+ * Lenient: prefer the local daemon agent, else owner, else first connected row.
+ * Use only where a best-effort agent pick is acceptable (e.g. session sheets).
+ */
+export async function getCurrentDaemonAgent(teamId: string): Promise<CurrentDaemonAgent | null> {
+  const localActorId = await getLocalDaemonActorId()
+  const rows = await getBackend().actors.listConnectedAgents(teamId) as ConnectedAgentListRow[]
+
+  const row =
+    rows.find((item) => localActorId && item.agent_id === localActorId) ??
+    rows.find((item) => item.is_owner) ??
+    rows[0]
+
+  if (!row) return null
+  return mapConnectedAgentRow(teamId, row)
 }
 
 export async function updateCurrentDaemonAgent(input: {

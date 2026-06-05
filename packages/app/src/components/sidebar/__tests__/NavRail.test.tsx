@@ -13,8 +13,8 @@ vi.mock('@/components/sidebar/ActorsSection', () => ({
 vi.mock('@/components/sidebar/NewChatSplitButton', () => ({
   NewChatSplitButton: () => <div data-testid="new-chat-split" />,
 }))
-vi.mock('@/lib/daemon-agent-admin', () => ({
-  getCurrentDaemonAgent: vi.fn().mockResolvedValue({ id: 'a1', displayName: 'Agent' }),
+vi.mock('@/hooks/use-quick-chat-readiness', () => ({
+  useQuickChatReadiness: () => ({ kind: 'ready' }),
 }))
 vi.mock('sonner', () => ({
   toast: vi.fn(),
