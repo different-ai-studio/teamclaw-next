@@ -1,6 +1,6 @@
 import * as React from "react"
 import { useTranslation } from "react-i18next"
-import { Search, SquarePen, MessageSquare, Loader2, Archive, PanelLeftIcon, Pencil, Ellipsis, Settings, Pin, SquarePlus, UserPlus, Lightbulb, ChevronUp, Mail, CalendarDays, LogOut, Users, Trophy, Sparkles } from "lucide-react"
+import { Search, SquarePen, MessageSquare, Loader2, Archive, PanelLeftIcon, Pencil, Ellipsis, Settings, Pin, SquarePlus, UserPlus, Lightbulb, ChevronUp, Mail, CalendarDays, LogOut, Users, Trophy, Sparkles, Info } from "lucide-react"
 import { useTeamModeStore } from "@/stores/team-mode"
 import { UpgradeAccountDialog } from "@/components/auth/UpgradeAccountDialog"
 import { isWorkspaceUIVariant } from "@/lib/ui-variant"
@@ -40,6 +40,7 @@ import {
 import { TrafficLights } from "@/components/ui/traffic-lights"
 import { buildSessionListActivityMap, type SessionListActivity } from "@/lib/session-list-activity"
 import { SessionSearchDialog } from "@/components/sidebar/session-search-dialog"
+import { SessionDetailDialog, type SessionDetailListHints } from "@/components/sidebar/SessionDetailDialog"
 import { NavRail } from "@/components/sidebar/NavRail"
 import { MqttDisconnectedNotice } from "@/components/sidebar/MqttDisconnectedNotice"
 import { useSessionWorkspaceLabels } from "@/hooks/use-session-workspace-labels"
@@ -539,6 +540,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   // Rename state
   const [renamingSessionId, setRenamingSessionId] = React.useState<string | null>(null)
+  const [detailSessionId, setDetailSessionId] = React.useState<string | null>(null)
+  const [detailHints, setDetailHints] = React.useState<SessionDetailListHints | null>(null)
 
   // UI-level pagination: filter by cron toggle, then slice to visible count
   const sessions = React.useMemo(
@@ -608,6 +611,17 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const handleStartRename = (e: React.MouseEvent, id: string) => {
     e.stopPropagation()
     setRenamingSessionId(id)
+  }
+
+  const handleViewDetail = (e: React.MouseEvent, session: { id: string; title: string; ideaId?: string | null; updatedAt: Date }) => {
+    e.stopPropagation()
+    setDetailHints({
+      title: session.title,
+      ideaId: session.ideaId ?? null,
+      isPinned: pinnedSessionIds.includes(session.id),
+      lastMessageAt: session.updatedAt.toISOString(),
+    })
+    setDetailSessionId(session.id)
   }
 
   const handleRenameConfirm = async (id: string, newTitle: string) => {
@@ -736,6 +750,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             </DropdownMenuItem>
             <DropdownMenuItem
               className="text-[13px]"
+              onClick={(e) => handleViewDetail(e, session)}
+            >
+              <Info className="h-3.5 w-3.5 mr-2" />
+              {t('sidebar.viewDetail', 'View detail')}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-[13px]"
               onClick={(e) => handleArchiveSession(e as unknown as React.MouseEvent, session.id)}
             >
               <Archive className="h-3.5 w-3.5 mr-2" />
@@ -749,6 +770,20 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   return (
     <Sidebar variant="sidebar" {...props}>
+      <SessionDetailDialog
+        sessionId={detailSessionId}
+        teamId={teamId}
+        hints={detailHints}
+        activity={detailSessionId ? sessionActivityMap.get(detailSessionId) : undefined}
+        activeSessionId={activeSessionId}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDetailSessionId(null)
+            setDetailHints(null)
+          }
+        }}
+        onOpenSession={handleSelectSession}
+      />
       <div className="flex h-full flex-col">
         {/* Header: custom traffic lights (Tauri) or spacer + icon group */}
         <SidebarHeader

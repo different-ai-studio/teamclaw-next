@@ -1,5 +1,6 @@
 import type {
   SessionCreateInput,
+  SessionDetailRow,
   SessionDisplayRow,
   SessionListCursor,
   SessionListPage,
@@ -21,6 +22,33 @@ type CloudSession = {
   createdAt: string | null;
   updatedAt: string | null;
 };
+
+type CloudSessionDetail = CloudSession & {
+  primaryAgentId?: string | null;
+  createdByActorId?: string | null;
+  summary?: string | null;
+  acpSessionId?: string | null;
+  binding?: string | null;
+};
+
+function mapSessionDetail(row: CloudSessionDetail): SessionDetailRow {
+  return {
+    id: row.id,
+    team_id: row.teamId,
+    title: row.title,
+    mode: row.mode,
+    idea_id: row.ideaId,
+    primary_agent_id: row.primaryAgentId ?? null,
+    created_by_actor_id: row.createdByActorId ?? null,
+    summary: row.summary ?? null,
+    last_message_at: row.lastMessageAt,
+    last_message_preview: row.lastMessagePreview,
+    acp_session_id: row.acpSessionId ?? null,
+    binding: row.binding ?? null,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+  };
+}
 
 type Page<T> = { items: T[]; nextCursor: string | null };
 
@@ -96,6 +124,15 @@ export function createSessionsModule(client: CloudApiClient): SessionsBackend {
         actor_id: row.actorId,
         role: row.role ?? null,
       }));
+    },
+    async getSession(sessionId) {
+      try {
+        const out = await client.get<CloudSessionDetail>(`/v1/sessions/${encodeURIComponent(sessionId)}`);
+        return mapSessionDetail(out);
+      } catch (e) {
+        if (e instanceof CloudApiError && e.status === 404) return null;
+        throw e;
+      }
     },
     async getSessionTeamId(sessionId) {
       try {

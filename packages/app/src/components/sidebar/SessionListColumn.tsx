@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Search, Loader2, MessageSquare, Pin, Archive, Pencil, Ellipsis } from 'lucide-react'
+import { Search, Loader2, MessageSquare, Pin, Archive, Pencil, Ellipsis, Info } from 'lucide-react'
 import { useSessionStore } from '@/stores/session'
 import { useStreamingStore } from '@/stores/streaming'
 import { useUIStore } from '@/stores/ui'
@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { SessionSearchDialog } from '@/components/sidebar/session-search-dialog'
+import { SessionDetailDialog, type SessionDetailListHints } from '@/components/sidebar/SessionDetailDialog'
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/date-format'
@@ -140,6 +141,8 @@ export function SessionListColumn() {
 
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [renamingSessionId, setRenamingSessionId] = React.useState<string | null>(null)
+  const [detailSessionId, setDetailSessionId] = React.useState<string | null>(null)
+  const [detailHints, setDetailHints] = React.useState<SessionDetailListHints | null>(null)
   const [actorSessionIds, setActorSessionIds] = React.useState<Set<string> | null>(null)
   const [actorLoading, setActorLoading] = React.useState(false)
   const participantsBySession = useSessionParticipantStore((s) => s.participantsBySession)
@@ -325,6 +328,17 @@ export function SessionListColumn() {
     e.stopPropagation()
     toggleSessionPinned(id, workspacePath)
   }
+  const handleViewDetail = (e: React.SyntheticEvent, row: ListRow) => {
+    e.stopPropagation()
+    setDetailHints({
+      title: row.title,
+      ideaId: row.ideaId,
+      isPinned: row.isPinned,
+      lastMessageAt: row.lastMessageAt?.toISOString() ?? null,
+      lastMessagePreview: row.lastMessagePreview,
+    })
+    setDetailSessionId(row.id)
+  }
 
   const renderSessionItem = (row: ListRow) => {
     const isHighlighted = highlightedSessionIds.includes(row.id)
@@ -476,6 +490,13 @@ export function SessionListColumn() {
             </DropdownMenuItem>
             <DropdownMenuItem
               className="text-[13px]"
+              onClick={(e) => handleViewDetail(e, row)}
+            >
+              <Info className="h-3.5 w-3.5 mr-2" />
+              {t('sidebar.viewDetail', 'View detail')}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-[13px]"
               onClick={(e) => handleArchive(e as React.SyntheticEvent, row.id)}
             >
               <Archive className="h-3.5 w-3.5 mr-2" />
@@ -490,6 +511,21 @@ export function SessionListColumn() {
   return (
     <div className="flex h-full flex-col min-w-0 border-r border-border bg-background" data-testid="v2-session-list-column">
       <SessionSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+      <SessionDetailDialog
+        sessionId={detailSessionId}
+        teamId={teamIdFromList || null}
+        hints={detailHints}
+        participants={detailSessionId ? participantsBySession[detailSessionId] ?? [] : []}
+        activity={detailSessionId ? sessionActivityMap.get(detailSessionId) : undefined}
+        activeSessionId={activeSessionId}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDetailSessionId(null)
+            setDetailHints(null)
+          }
+        }}
+        onOpenSession={handleSelectSession}
+      />
 
       <div
         className="flex items-center justify-between gap-2 px-4 py-3 border-b border-border"
