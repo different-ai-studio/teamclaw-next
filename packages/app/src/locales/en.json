@@ -1723,6 +1723,7 @@
       "disconnectSuccessHint": "Cloud binding cleared. You can choose OSS, managed Git, or self-hosted Git again.",
       "disconnectMigrationRequired": "Cloud database is missing the disable_team_share migration. Apply services/supabase/migrations/20260604120000_disable_team_share.sql and redeploy FC.",
       "disconnectSchemaDrift": "Cloud API schema is out of date (disable_team_share). Deploy the latest FC and Supabase migration, then retry.",
+      "daemonTeamMismatch": "Local daemon is bound to team {{daemonTeamId}}, but you are signed in as {{currentTeamId}}. Re-bind the daemon to the current team in settings, then sync again.",
       "desktopOnly": "Team shared directory actions require the desktop app",
       "disconnectDesc": "This will delete local team data ({{teamclawDir}} and {{teamRepoDir}} directories). This action cannot be undone.",
       "repoGuide": {
@@ -2555,6 +2556,7 @@
       "lastActiveLabel": "Last active",
       "never": "Never",
       "actorId": "Actor ID",
+      "teamId": "Team ID",
       "startSession": "Start session",
       "copyId": "Copy ID"
     },

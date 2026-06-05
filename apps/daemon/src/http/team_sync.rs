@@ -34,11 +34,30 @@ pub async fn sync_now(
     Json(body): Json<SyncRequest>,
 ) -> Result<Json<SyncResponse>, HttpError> {
     require_scope(&principal, "workspace:write")?;
-    let team_id = team_id_for_workspace(&body.workspace_path)?;
+    let workspace_path = body.workspace_path.trim();
+    if workspace_path.is_empty() {
+        return Err(HttpError::validation("workspacePath must not be empty"));
+    }
+    let team_id = team_id_for_workspace(workspace_path)?;
+    crate::team_link::ensure_team_link(&team_id, workspace_path);
     let status = state
         .sync_dispatcher
-        .sync_team(&team_id, &body.workspace_path)
+        .sync_team(&team_id, workspace_path)
         .await;
+    if let Some(err) = status.last_error.as_deref().filter(|e| !e.trim().is_empty()) {
+        return Err(HttpError::internal(err.to_string()));
+    }
+    if status
+        .mode
+        .as_deref()
+        .filter(|m| !m.trim().is_empty())
+        .is_none()
+    {
+        return Err(HttpError::validation(format!(
+            "team share is not enabled for daemon team {team_id} (share_mode is unset). \
+             If you switched teams in the app, re-bind the local daemon (amuxd init) to the current team, then enable Git share again."
+        )));
+    }
     Ok(Json(SyncResponse { status }))
 }
 

@@ -115,8 +115,21 @@ export function TeamGitConfig() {
     setSyncing(true)
     setErrorMessage(null)
     try {
-      // Materialize workspace symlink → global copy before sync (best-effort).
-      await linkDaemonTeamWorkspace(workspacePath)
+      const { invoke } = await import('@tauri-apps/api/core')
+      const daemonTeamId = await invoke<string | null>('get_daemon_team_id')
+      if (daemonTeamId && teamId && daemonTeamId !== teamId) {
+        setErrorMessage(
+          t('settings.team.daemonTeamMismatch', {
+            daemonTeamId,
+            currentTeamId: teamId,
+            defaultValue:
+              `Local daemon is bound to team ${daemonTeamId}, but you are signed in as ${teamId}. Re-bind the daemon to the current team in settings, then sync again.`,
+          }),
+        )
+        return
+      }
+      // Materialize workspace symlink → global copy before sync.
+      await linkDaemonTeamWorkspace(workspacePath, { strict: true })
       const result = await tauriInvoke<TeamGitResult>('team_shared_git_sync', {
         config: { workspacePath },
         force: false,

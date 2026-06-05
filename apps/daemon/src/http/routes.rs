@@ -108,6 +108,7 @@ pub fn build(state: HttpState) -> Router {
         // Team-share: materialize the global dir + workspace symlink on demand
         // (called by the app right after enabling/joining team-share).
         .route("/v1/team/link", post(team::link_team_workspace))
+        .route("/v1/team/unlink", post(team::unlink_team_workspace))
         // Daemon-owned team sync: desktop triggers sync + reads status over loopback.
         .route("/v1/team/sync", post(team_sync::sync_now))
         .route("/v1/team/sync/status", get(team_sync::sync_status))

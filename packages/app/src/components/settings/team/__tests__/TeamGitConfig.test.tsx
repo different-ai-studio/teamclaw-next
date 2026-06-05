@@ -125,6 +125,7 @@ describe('TeamGitConfig status panel', () => {
       configurable: true,
     })
     mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_daemon_team_id') return 'team-1'
       if (cmd === 'team_shared_git_sync') return { success: true, message: 'Synced' }
       return null
     })
@@ -169,7 +170,7 @@ describe('TeamGitConfig status panel', () => {
     syncButton.click()
 
     await waitFor(() => {
-      expect(linkDaemonTeamWorkspace).toHaveBeenCalledWith('/workspace-a')
+      expect(linkDaemonTeamWorkspace).toHaveBeenCalledWith('/workspace-a', { strict: true })
       expect(mockInvoke).toHaveBeenCalledWith('team_shared_git_sync', {
         config: { workspacePath: '/workspace-a' },
         force: false,

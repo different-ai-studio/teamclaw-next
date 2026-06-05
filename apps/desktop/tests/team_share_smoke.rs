@@ -219,8 +219,8 @@ async fn enable_oss_uses_provided_team_secret() {
     .await
     .expect("enable_oss with provided secret should succeed");
 
-    let loaded = team_secret_store::load_team_secret(&workspace, "t1")
-        .expect("secret should be readable");
+    let loaded =
+        team_secret_store::load_team_secret(&workspace, "t1").expect("secret should be readable");
     assert_eq!(loaded, provided);
 }
 
