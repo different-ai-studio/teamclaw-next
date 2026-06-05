@@ -1083,6 +1083,11 @@
       "inherentCannotDelete": "Built-in server cannot be deleted",
       "inherentMCP": "Built-in MCP",
       "managedByTeamClaw": "Managed by TeamClaw",
+      "teamMCP": "Team Shared MCP",
+      "teamManagedHint": "Managed in team repo .mcp/",
+      "team": "Team",
+      "teamCannotEdit": "Edit this server in the team shared .mcp/ directory",
+      "teamCannotDelete": "Remove this server from the team shared .mcp/ directory",
       "customMCP": "Custom MCP",
       "inherentEnvHint": "Fill them in Settings → Environment Variables, then restart OpenCode to apply.",
       "inherentEnvNotice": "This server's environment variables are managed in Environment Variables. Configure the following variables there:"

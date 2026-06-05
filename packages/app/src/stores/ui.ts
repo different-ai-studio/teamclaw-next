@@ -217,11 +217,18 @@ export const useUIStore = create<UIState>((set, get) => ({
     const { useSessionSelectionStore } = await import('@/stores/session-selection-store')
     const { useWorkspaceStore } = await import('@/stores/workspace')
     const { useTabsStore } = await import('@/stores/tabs')
+    const { useCurrentTeamStore } = await import('@/stores/current-team')
+    const { switchToSessionWorkspaceIfNeeded } = await import('@/lib/session-by-workspace')
     
     // Skip if already on this session (avoid unnecessary reloads)
     const currentActiveId = useSessionSelectionStore.getState().activeSessionId
     if (sessionId === currentActiveId) {
       return
+    }
+
+    const teamId = useCurrentTeamStore.getState().team?.id
+    if (teamId) {
+      await switchToSessionWorkspaceIfNeeded(teamId, sessionId)
     }
     
     // Close any open UI elements and return to chat view

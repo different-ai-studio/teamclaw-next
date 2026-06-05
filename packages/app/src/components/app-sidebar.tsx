@@ -43,6 +43,7 @@ import { SessionSearchDialog } from "@/components/sidebar/session-search-dialog"
 import { SessionDetailDialog, type SessionDetailListHints } from "@/components/sidebar/SessionDetailDialog"
 import { NavRail } from "@/components/sidebar/NavRail"
 import { MqttDisconnectedNotice } from "@/components/sidebar/MqttDisconnectedNotice"
+import { useSessionWorkspaceLabels } from "@/hooks/use-session-workspace-labels"
 
 function SessionActivityBadge({ activity }: { activity?: SessionListActivity }) {
   const { t } = useTranslation()
@@ -534,7 +535,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const loadMoreSessions = useSessionStore(s => s.loadMoreSessions)
   const cronSessionIds = useCronStore(s => s.cronSessionIds)
   const showCronSessions = useCronStore(s => s.showCronSessions)
-  const teamId = useCurrentTeamStore(s => s.team?.id ?? null)
+  const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
+  const sessionWorkspaceLabels = useSessionWorkspaceLabels(teamId)
 
   // Rename state
   const [renamingSessionId, setRenamingSessionId] = React.useState<string | null>(null)
@@ -651,6 +653,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     const isRenaming = renamingSessionId === session.id
     const isPinned = pinnedSessionIds.includes(session.id)
     const activity = sessionActivityMap.get(session.id)
+    const workspaceLabel = sessionWorkspaceLabels.get(session.id)
 
     return (
       <SidebarMenuItem key={session.id}>
@@ -699,6 +702,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 </>
               )}
             </div>
+            {!isRenaming && workspaceLabel && (
+              <span className="w-full truncate font-mono text-[11px] text-faint">
+                {workspaceLabel}
+              </span>
+            )}
             {!isRenaming && (
               <div className="flex min-w-0 items-center gap-2 w-full">
                 <span className="shrink-0 text-[10px] text-muted-foreground">

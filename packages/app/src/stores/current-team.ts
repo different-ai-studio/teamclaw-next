@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { getBackend } from "@/lib/backend";
 import { useAuthStore } from "./auth-store";
 
-async function setLocalCacheTeamGate(teamId: string | null): Promise<void> {
+export async function setLocalCacheTeamGate(teamId: string | null): Promise<void> {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("local_cache_set_current_team", { teamId });
@@ -26,6 +26,62 @@ export interface CurrentTeamMember {
   joinedAt: string | null;
 }
 
+/**
+ * Persisted snapshot of the resolved current team. Cached to localStorage so a
+ * returning user can render the shell optimistically on cold start instead of
+ * blocking first paint behind the ~1.4–1.8s team-bootstrap network round-trips
+ * (listCurrentUserTeams + member). The live `load()` still runs in the
+ * background (App mounts and calls it) to revalidate and reconcile.
+ */
+export interface CachedCurrentTeam {
+  team: CurrentTeam | null;
+  currentMember: CurrentTeamMember | null;
+  /** Auth user id the cache belongs to — guards against cross-user reuse. */
+  teamUserId: string | null;
+}
+
+const CACHE_KEY = "teamclaw:current-team";
+
+export function readCachedCurrentTeam(): CachedCurrentTeam | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedCurrentTeam;
+    // Only honor a cache that actually identifies a team and its owning user.
+    if (!parsed?.team?.id || !parsed.teamUserId) return null;
+    return {
+      team: parsed.team,
+      currentMember: parsed.currentMember ?? null,
+      teamUserId: parsed.teamUserId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function writeCachedCurrentTeam(snapshot: CachedCurrentTeam): void {
+  try {
+    if (!snapshot.team || !snapshot.teamUserId) {
+      localStorage.removeItem(CACHE_KEY);
+      return;
+    }
+    localStorage.setItem(CACHE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Private mode / quota / no localStorage — the cache is a best-effort
+    // optimization, never a correctness requirement.
+  }
+}
+
+/** Initial store slice, hydrated synchronously from the persisted cache. */
+export function initialCurrentTeamState(): Pick<State, "team" | "currentMember" | "teamUserId"> {
+  const cached = readCachedCurrentTeam();
+  return {
+    team: cached?.team ?? null,
+    currentMember: cached?.currentMember ?? null,
+    teamUserId: cached?.teamUserId ?? null,
+  };
+}
+
 interface State {
   team: CurrentTeam | null;
   currentMember: CurrentTeamMember | null;
@@ -44,9 +100,7 @@ interface State {
 }
 
 export const useCurrentTeamStore = create<State>((set, get) => ({
-  team: null,
-  currentMember: null,
-  teamUserId: null,
+  ...initialCurrentTeamState(),
   loading: false,
   saving: false,
   error: null,
@@ -213,6 +267,18 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
     }
   },
 }));
+
+// Persist the resolved team identity on every change so the next cold start can
+// hydrate it synchronously (see initialCurrentTeamState). Writing on every
+// state change is cheap and keeps the cache authoritative without threading a
+// save call through each resolution site.
+useCurrentTeamStore.subscribe((state) => {
+  writeCachedCurrentTeam({
+    team: state.team,
+    currentMember: state.currentMember,
+    teamUserId: state.teamUserId,
+  });
+});
 
 async function loadCurrentMember(teamId: string, userId: string): Promise<CurrentTeamMember | null> {
   try {

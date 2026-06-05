@@ -82,7 +82,7 @@ describe('MCPSection', () => {
     h.state = {
       ...h.state,
       servers: {
-        playwright: { type: 'local', enabled: true, command: ['npx', '-y', '@playwright/mcp'] },
+        playwright: { type: 'local', enabled: true, command: ['npx', '-y', '@playwright/mcp'], source: 'inherent' },
       },
       serverTools: {
         playwright: ['browser_click', 'browser_navigate'],
@@ -93,5 +93,22 @@ describe('MCPSection', () => {
     }
     render(<MCPSection />)
     expect(screen.getByText('settings.mcp.toolsEnabled')).toBeTruthy()
+  })
+
+  it('renders team shared MCP section from source', () => {
+    h.state = {
+      ...h.state,
+      servers: {
+        'team-db': {
+          type: 'local',
+          enabled: true,
+          command: ['npx', '-y', 'team-db-mcp'],
+          source: 'team',
+        },
+      },
+    }
+    render(<MCPSection />)
+    expect(screen.getByText('settings.mcp.teamMCP')).toBeTruthy()
+    expect(screen.getByText('team-db')).toBeTruthy()
   })
 })

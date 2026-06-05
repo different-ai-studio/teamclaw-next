@@ -66,6 +66,7 @@ export function LocalDaemonRow({
   const setFilter = useUIStore((s) => s.setSidebarFilter)
   const openSettings = useUIStore((s) => s.openSettings)
   const currentWorkspacePath = useWorkspaceStore((s) => s.workspacePath)
+  const currentWorkspaceName = useWorkspaceStore((s) => s.workspaceName)
 
   const agentId = actor?.id ?? null
   const defaultWorkspaceId = actor?.default_workspace_id ?? null
@@ -172,13 +173,21 @@ export function LocalDaemonRow({
           <button
             type="button"
             onClick={toggle}
-            className="flex min-w-0 flex-1 items-center gap-[9px] rounded-md px-[9px] py-[5px] text-left text-[12.5px]"
+            className="flex min-w-0 flex-1 items-center gap-[9px] rounded-md px-[9px] py-[5px] text-left"
           >
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-coral/15 text-coral">
               <MonitorSmartphone className="h-3 w-3" />
             </span>
-            <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-              {actor.display_name}
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="truncate text-[12.5px] font-medium text-foreground">
+                {actor.display_name}
+              </span>
+              <span
+                className="truncate font-mono text-[11px] text-faint"
+                title={currentWorkspacePath ?? undefined}
+              >
+                {currentWorkspaceName || t('workspace.selectWorkspace', 'Select Workspace')}
+              </span>
             </span>
           </button>
           <button
