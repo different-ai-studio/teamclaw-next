@@ -91,20 +91,7 @@ fn load_team_shared_config_for_workspace(workspace_root: &Path) -> Option<TeamSh
     crate::team_shared_git::read_git_team_config(workspace_root)
 }
 
-/// Reject workspace paths that must never receive a `teamclaw-team` link: the
-/// filesystem root, or anything inside the daemon's own config dir
-/// (`~/.amuxd`). The critical case is a team's global store dir
-/// `~/.amuxd/teams/<id>`: linking it would point `teamclaw-team` at itself
-/// (ELOOP) and destroy the synced content. Such bogus entries have appeared in
-/// workspaces.toml (synced from the cloud), so filter them out of the link
-/// sweep defensively in addition to the guard in `ensure_workspace_link`.
-pub(crate) fn is_linkable_workspace_path(path: &str) -> bool {
-    let p = std::path::Path::new(path);
-    if p == std::path::Path::new("/") {
-        return false;
-    }
-    !p.starts_with(crate::config::DaemonConfig::config_dir())
-}
+pub(crate) use crate::config::workspace_path::is_linkable_workspace_path;
 
 /// Group registered workspaces by their `team_id`. Workspaces without a
 /// team_id, or with a non-linkable path (root / inside `~/.amuxd`), are

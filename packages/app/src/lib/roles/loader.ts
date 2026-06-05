@@ -331,6 +331,23 @@ async function loadRolesSkillsWorkspaceStateFromFs(
 
   const linkedSkillsCount = Object.values(roleUsageBySkill).filter((owners) => owners.length > 0).length
 
+  return buildRolesSkillsWorkspaceState(roles, skills, roleUsageBySkill, skillNamesByRole)
+}
+
+function skillRecordKey(skill: Pick<ManagedSkillRecord, "dirPath" | "filename">): string {
+  return `${skill.dirPath}:${skill.filename}`
+}
+
+function buildRolesSkillsWorkspaceState(
+  roles: RoleRecord[],
+  skills: ManagedSkillRecord[],
+  roleUsageBySkill: Record<string, string[]>,
+  skillNamesByRole: Record<string, string[]>,
+): RolesSkillsWorkspaceState {
+  const linkedSkillsCount = Object.entries(roleUsageBySkill).filter(([filename, owners]) =>
+    owners.length > 0 && skills.some((skill) => skill.filename === filename),
+  ).length
+
   return {
     roles,
     skills,
@@ -345,35 +362,72 @@ async function loadRolesSkillsWorkspaceStateFromFs(
   }
 }
 
+function normalizeDaemonRolesSkillsState(
+  daemonState: NonNullable<Awaited<ReturnType<typeof getDaemonRolesSkillsState>>>,
+): RolesSkillsWorkspaceState {
+  const skills = daemonState.skills.map((skill) => ({
+    ...skill,
+    source: skill.source as SkillSource | undefined,
+  }))
+  return buildRolesSkillsWorkspaceState(
+    daemonState.roles as RoleRecord[],
+    skills,
+    daemonState.roleUsageBySkill,
+    daemonState.skillNamesByRole,
+  )
+}
+
+/**
+ * Merge daemon scan with a local FS scan. Daemon rows win on key collision so
+ * live inventory stays canonical; FS-only rows (e.g. teamclaw-team via Tauri FS
+ * when daemon missed a symlinked tree) are retained.
+ */
+function mergeRolesSkillsStates(
+  primary: RolesSkillsWorkspaceState,
+  supplement: RolesSkillsWorkspaceState,
+): RolesSkillsWorkspaceState {
+  const skillsByKey = new Map<string, ManagedSkillRecord>()
+  for (const skill of primary.skills) {
+    skillsByKey.set(skillRecordKey(skill), skill)
+  }
+  for (const skill of supplement.skills) {
+    const key = skillRecordKey(skill)
+    if (!skillsByKey.has(key)) {
+      skillsByKey.set(key, skill)
+    }
+  }
+
+  const skills = Array.from(skillsByKey.values()).sort((a, b) => {
+    if (a.isRoleSkill !== b.isRoleSkill) return a.isRoleSkill ? 1 : -1
+    return a.filename.localeCompare(b.filename)
+  })
+
+  const roleUsageBySkill = { ...supplement.roleUsageBySkill, ...primary.roleUsageBySkill }
+  const skillNamesByRole =
+    Object.keys(primary.skillNamesByRole).length > 0
+      ? primary.skillNamesByRole
+      : supplement.skillNamesByRole
+  const roles = primary.roles.length > 0 ? primary.roles : supplement.roles
+
+  return buildRolesSkillsWorkspaceState(roles, skills, roleUsageBySkill, skillNamesByRole)
+}
+
 export async function loadRolesSkillsWorkspaceState(workspacePath: string | null): Promise<RolesSkillsWorkspaceState> {
   if (!workspacePath) {
-    return {
-      roles: [],
-      skills: [],
-      roleUsageBySkill: {},
-      skillNamesByRole: {},
-      metrics: {
-        rolesCount: 0,
-        skillsCount: 0,
-        linkedSkillsCount: 0,
-        unlinkedSkillsCount: 0,
-      },
-    }
+    return buildRolesSkillsWorkspaceState([], [], {}, {})
   }
 
   if (isTauri()) {
     try {
       const daemonState = await getDaemonRolesSkillsState(encodeWorkspaceId(workspacePath))
       if (daemonState) {
-        return {
-          roles: daemonState.roles as RoleRecord[],
-          skills: daemonState.skills.map((skill) => ({
-            ...skill,
-            source: skill.source as SkillSource | undefined,
-          })),
-          roleUsageBySkill: daemonState.roleUsageBySkill,
-          skillNamesByRole: daemonState.skillNamesByRole,
-          metrics: daemonState.metrics,
+        const daemonNormalized = normalizeDaemonRolesSkillsState(daemonState)
+        try {
+          const fsState = await loadRolesSkillsWorkspaceStateFromFs(workspacePath)
+          return mergeRolesSkillsStates(daemonNormalized, fsState)
+        } catch (fsErr) {
+          console.warn("[roles/loader] FS supplement after daemon scan failed:", fsErr)
+          return daemonNormalized
         }
       }
     } catch (err) {

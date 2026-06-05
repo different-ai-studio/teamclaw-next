@@ -191,6 +191,29 @@ fn build_invocation_name(parent_dir: &Path, filename: &str) -> String {
         .unwrap_or_else(|| filename.to_owned())
 }
 
+fn try_load_skill_from_root(
+    skill_root: &Path,
+    filename: &str,
+    parent_dir: &Path,
+    source: &str,
+) -> Result<Option<RawSkill>, WorkspaceControlError> {
+    let skill_md = skill_root.join("SKILL.md");
+    if !skill_md.is_file() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(&skill_md).map_err(io_err)?;
+    let name = extract_skill_name(&content, filename);
+    Ok(Some(RawSkill {
+        filename: filename.to_owned(),
+        name: name.clone(),
+        invocation_name: build_invocation_name(parent_dir, filename),
+        content,
+        source: source.to_owned(),
+        dir_path: parent_dir.to_string_lossy().into_owned(),
+        is_role_skill: false,
+    }))
+}
+
 fn load_skills_from_dir(dir: &Path, source: &str) -> Result<Vec<RawSkill>, WorkspaceControlError> {
     if !dir.is_dir() {
         return Ok(vec![]);
@@ -205,21 +228,27 @@ fn load_skills_from_dir(dir: &Path, source: &str) -> Result<Vec<RawSkill>, Works
         let Some(filename) = path.file_name().and_then(|s| s.to_str()) else {
             continue;
         };
-        let skill_md = path.join("SKILL.md");
-        if !skill_md.is_file() {
+        if let Some(skill) = try_load_skill_from_root(&path, filename, dir, source)? {
+            skills.push(skill);
             continue;
         }
-        let content = std::fs::read_to_string(&skill_md).map_err(io_err)?;
-        let name = extract_skill_name(&content, filename);
-        skills.push(RawSkill {
-            filename: filename.to_owned(),
-            name: name.clone(),
-            invocation_name: build_invocation_name(dir, filename),
-            content,
-            source: source.to_owned(),
-            dir_path: dir.to_string_lossy().into_owned(),
-            is_role_skill: false,
-        });
+
+        // Bundle layout: `<dir>/<bundle>/<skill>/SKILL.md` (matches desktop skill-loader).
+        for nested in std::fs::read_dir(&path).map_err(io_err)? {
+            let nested = nested.map_err(io_err)?;
+            let nested_path = nested.path();
+            if !nested_path.is_dir() {
+                continue;
+            }
+            let Some(nested_name) = nested_path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if let Some(skill) =
+                try_load_skill_from_root(&nested_path, nested_name, &path, source)?
+            {
+                skills.push(skill);
+            }
+        }
     }
     Ok(skills)
 }
@@ -252,13 +281,44 @@ fn classify_teamclaw_skill(filename: &str, clawhub_slugs: &HashSet<String>) -> &
     }
 }
 
+fn onboarded_team_id() -> Option<String> {
+    super::DaemonConfig::load(&super::DaemonConfig::default_path())
+        .ok()
+        .and_then(|cfg| {
+            cfg.team_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
+        })
+}
+
+fn remap_team_skill_path(workspace_path: &Path, path: PathBuf, team_id: &str) -> PathBuf {
+    let link_root = workspace_path.join(TEAM_LINK_NAME);
+    if path.is_dir() {
+        return path;
+    }
+    if path.starts_with(&link_root) {
+        let rel = path
+            .strip_prefix(&link_root)
+            .unwrap_or(path.as_path());
+        return super::global_team_store::resolve_team_dir(workspace_path, team_id).join(rel);
+    }
+    path
+}
+
 fn collect_team_skill_paths(workspace_path: &Path) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = Vec::new();
     let mut seen = HashSet::new();
+    let team_id = onboarded_team_id();
 
     let mut push = |path: PathBuf| {
-        if seen.insert(path.clone()) {
-            paths.push(path);
+        let resolved = team_id
+            .as_deref()
+            .map(|id| remap_team_skill_path(workspace_path, path.clone(), id))
+            .unwrap_or(path);
+        if resolved.is_dir() && seen.insert(resolved.clone()) {
+            paths.push(resolved);
         }
     };
 
@@ -269,8 +329,12 @@ fn collect_team_skill_paths(workspace_path: &Path) -> Vec<PathBuf> {
         push(extra);
     }
 
-    let default_team_skills = workspace_path.join(TEAM_LINK_NAME).join("skills");
-    if default_team_skills.is_dir() {
+    if let Some(team_id) = team_id.as_deref() {
+        let default_team_skills =
+            super::global_team_store::resolve_team_dir(workspace_path, team_id).join("skills");
+        push(default_team_skills);
+    } else {
+        let default_team_skills = workspace_path.join(TEAM_LINK_NAME).join("skills");
         push(default_team_skills);
     }
 
@@ -898,6 +962,29 @@ mod tests {
     }
 
     #[test]
+    fn scan_finds_nested_team_share_bundle_skills() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+
+        let bundle_dir = ws.join(TEAM_LINK_NAME).join("skills/superpowers/brainstorming");
+        std::fs::create_dir_all(&bundle_dir).unwrap();
+        std::fs::write(
+            bundle_dir.join("SKILL.md"),
+            "---\nname: brainstorming\ndescription: Brainstorm first\n---\n\n# Brainstorming",
+        )
+        .unwrap();
+
+        let state = scan_roles_skills_state(ws).unwrap();
+        let team_skill = state
+            .skills
+            .iter()
+            .find(|skill| skill.filename == "brainstorming")
+            .expect("nested team bundle skill");
+        assert_eq!(team_skill.invocation_name.as_deref(), Some("superpowers/brainstorming"));
+        assert_eq!(team_skill.source.as_deref(), Some("team"));
+    }
+
+    #[test]
     fn scan_finds_team_share_skills_without_config_paths() {
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
@@ -911,9 +998,12 @@ mod tests {
         .unwrap();
 
         let state = scan_roles_skills_state(ws).unwrap();
-        assert_eq!(state.skills.len(), 1);
-        assert_eq!(state.skills[0].filename, "shared-skill");
-        assert_eq!(state.skills[0].source.as_deref(), Some("team"));
+        let team_skill = state
+            .skills
+            .iter()
+            .find(|skill| skill.filename == "shared-skill")
+            .expect("team share skill");
+        assert_eq!(team_skill.source.as_deref(), Some("team"));
     }
 
     #[test]

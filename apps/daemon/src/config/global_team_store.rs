@@ -49,7 +49,9 @@ pub fn global_sync_state_path(team_id: &str) -> PathBuf {
 /// no-link fallback) read the global dir directly.
 pub fn resolve_team_dir(workspace_root: &Path, team_id: &str) -> PathBuf {
     let link = workspace_root.join(TEAM_LINK_NAME);
-    if std::fs::symlink_metadata(&link).is_ok() {
+    // `is_dir` follows symlinks; dangling links return false so we fall back to
+    // the global copy instead of treating a broken workspace link as canonical.
+    if link.is_dir() {
         link
     } else {
         global_team_dir(team_id)
@@ -125,6 +127,18 @@ mod tests {
             let link = ws.path().join(TEAM_LINK_NAME);
             std::os::unix::fs::symlink(tmp.path(), &link).unwrap();
             assert_eq!(resolve_team_dir(ws.path(), "team-r"), link);
+        }
+
+        // Dangling symlink → fall back to the global copy.
+        #[cfg(unix)]
+        {
+            let global = ensure_initialized("team-dangle").unwrap();
+            let link = ws.path().join(TEAM_LINK_NAME);
+            if link.exists() {
+                std::fs::remove_file(&link).unwrap();
+            }
+            std::os::unix::fs::symlink("/nonexistent/teamclaw-team", &link).unwrap();
+            assert_eq!(resolve_team_dir(ws.path(), "team-dangle"), global);
         }
     }
 

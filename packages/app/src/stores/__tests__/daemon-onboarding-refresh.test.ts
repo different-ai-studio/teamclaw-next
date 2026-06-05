@@ -22,6 +22,11 @@ vi.mock('@/lib/backend', () => ({ getBackend: () => ({}) }))
 vi.mock('@/stores/current-team', () => ({
   useCurrentTeamStore: { getState: () => ({ team: h.currentTeam }) },
 }))
+vi.mock('@/stores/workspace', () => ({
+  useWorkspaceStore: {
+    getState: () => ({ workspacePath: '/home/u/projects/app' }),
+  },
+}))
 vi.mock('@/lib/daemon-local-client', () => ({
   invalidateDaemonConnection: vi.fn(),
   probeDaemonHttp: vi.fn(async () =>
@@ -116,7 +121,7 @@ describe('daemon-onboarding refresh() orchestration', () => {
     expect(h.invokeCalls).not.toContain('daemon_install_service')
   })
 
-  it('ready registers the default team workspace (local + cloud) for the daemon team dir', async () => {
+  it('ready registers the active workspace when it is a real project dir', async () => {
     h.currentTeam = { id: 't1' }
     h.daemonTeam = 't1'
     h.probeQueue = [{ ok: true, baseUrl: 'http://127.0.0.1:1' }]
@@ -124,7 +129,7 @@ describe('daemon-onboarding refresh() orchestration', () => {
     expect(useDaemonOnboardingStore.getState().status).toBe('ready')
     // Registration is fire-and-forget — wait for the background promise.
     await vi.waitFor(() => expect(h.invokeCalls).toContain('register_daemon_workspace'))
-    expect(h.registerArgs?.workspacePath).toBe('/home/u/.amuxd/teams/t1')
+    expect(h.registerArgs?.workspacePath).toBe('/home/u/projects/app')
   })
 
   it('does not register a workspace on a team mismatch', async () => {

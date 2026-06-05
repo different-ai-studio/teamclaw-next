@@ -7,6 +7,8 @@ const mockReadTextFile = vi.fn()
 const mockMkdir = vi.fn()
 const mockWriteTextFile = vi.fn()
 const mockLoadAllSkills = vi.fn(async () => ({ skills: [] }))
+const mockGetDaemonRolesSkillsState = vi.fn()
+const mockIsTauri = vi.fn(() => false)
 
 vi.mock("@tauri-apps/api/path", () => ({
   homeDir: vi.fn(async () => "/Users/tester"),
@@ -28,9 +30,23 @@ vi.mock("@/lib/git/skill-loader", () => ({
   loadAllSkills: (...args: unknown[]) => mockLoadAllSkills(...args),
 }))
 
+vi.mock("@/lib/utils", () => ({
+  isTauri: () => mockIsTauri(),
+}))
+
+vi.mock("@/lib/daemon-local-client", () => ({
+  encodeWorkspaceId: (path: string) => `wid:${path}`,
+  getDaemonRolesSkillsState: (...args: unknown[]) => mockGetDaemonRolesSkillsState(...args),
+  putDaemonRole: vi.fn(),
+  deleteDaemonRole: vi.fn(),
+}))
+
 describe("role markdown helpers", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockIsTauri.mockReturnValue(false)
+    mockGetDaemonRolesSkillsState.mockResolvedValue(null)
+    mockLoadAllSkills.mockResolvedValue({ skills: [] })
   })
 
   it("parses structured role sections and role skill links", () => {
@@ -202,6 +218,68 @@ Body
     expect(state.skills[0].isRoleSkill).toBe(true)
     expect(state.skills[0].linkedRoles).toEqual(["default-role"])
     expect(state.metrics.linkedSkillsCount).toBe(1)
+  })
+
+  it("supplements daemon inventory with team skills discovered via FS scan", async () => {
+    const workspace = "/workspace"
+    mockIsTauri.mockReturnValue(true)
+    mockGetDaemonRolesSkillsState.mockResolvedValue({
+      roles: [],
+      skills: [
+        {
+          filename: "create-role",
+          name: "Create Role",
+          invocationName: "create-role",
+          content: "---\nname: Create Role\n---\n",
+          description: "Create Role",
+          source: "local",
+          dirPath: `${workspace}/.teamclaw/skills`,
+          linkedRoles: [],
+          isRoleSkill: false,
+        },
+      ],
+      roleUsageBySkill: {},
+      skillNamesByRole: {},
+      metrics: {
+        rolesCount: 0,
+        skillsCount: 1,
+        linkedSkillsCount: 0,
+        unlinkedSkillsCount: 1,
+      },
+    })
+    mockLoadAllSkills.mockResolvedValue({
+      skills: [
+        {
+          filename: "create-role",
+          name: "Create Role",
+          invocationName: "create-role",
+          content: "---\nname: Create Role\n---\n",
+          source: "local",
+          dirPath: `${workspace}/.teamclaw/skills`,
+        },
+        {
+          filename: "biz-code-delete",
+          name: "Biz Code Delete",
+          invocationName: "biz-code-delete",
+          content: "---\nname: Biz Code Delete\n---\n",
+          source: "team",
+          dirPath: `${workspace}/teamclaw-team/skills`,
+        },
+      ],
+      overrides: [],
+    })
+    mockExists.mockResolvedValue(false)
+    mockReadDir.mockResolvedValue([])
+
+    const state = await loadRolesSkillsWorkspaceState(workspace)
+
+    expect(mockGetDaemonRolesSkillsState).toHaveBeenCalledWith(`wid:${workspace}`)
+    expect(state.skills.map((skill) => skill.filename).sort()).toEqual([
+      "biz-code-delete",
+      "create-role",
+    ])
+    expect(state.skills.find((skill) => skill.filename === "biz-code-delete")?.source).toBe("team")
+    expect(state.metrics.skillsCount).toBe(2)
   })
 
   it("ignores non-role directories under the roles root", async () => {

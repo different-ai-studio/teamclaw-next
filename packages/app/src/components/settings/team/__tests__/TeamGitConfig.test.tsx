@@ -126,6 +126,14 @@ describe('TeamGitConfig status panel', () => {
     })
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'get_daemon_team_id') return 'team-1'
+      if (cmd === 'oss_sync_status') {
+        return {
+          mode: 'git',
+          lastSyncAt: '2026-06-05T04:01:54.917Z',
+          syncing: false,
+          lastError: null,
+        }
+      }
       if (cmd === 'team_shared_git_sync') return { success: true, message: 'Synced' }
       return null
     })
@@ -137,6 +145,7 @@ describe('TeamGitConfig status panel', () => {
     // Repo URL + managed-git mode label come from the FC share-mode status.
     expect(await screen.findByText('Managed Git')).toBeTruthy()
     expect(screen.getByText('https://example.com/repo.git')).toBeTruthy()
+    expect(screen.getByText(/Last synced/i)).toBeTruthy()
     expect(screen.getByText('Sync Now')).toBeTruthy()
     expect(screen.getByText('Disconnect')).toBeTruthy()
     expect(screen.getByText('How to set up a team repository')).toBeTruthy()

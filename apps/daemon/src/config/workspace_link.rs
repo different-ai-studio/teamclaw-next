@@ -62,11 +62,13 @@ pub fn ensure_workspace_link(workspace_root: &Path, team_id: &str) -> LinkStatus
         return LinkStatus::Fallback;
     }
 
-    // Already a symlink: repoint if stale, else done.
+    // Already a symlink: repoint if stale or dangling, else done.
     if let Ok(meta) = std::fs::symlink_metadata(&link) {
         if meta.file_type().is_symlink() {
             match std::fs::read_link(&link) {
-                Ok(dest) if dest == target => return LinkStatus::Linked(LinkKind::Symlink),
+                Ok(dest) if dest == target && link.is_dir() => {
+                    return LinkStatus::Linked(LinkKind::Symlink);
+                }
                 _ => {
                     let _ = std::fs::remove_file(&link);
                 }

@@ -10,7 +10,6 @@ use tracing::{debug, info, warn};
 use crate::backend::Backend;
 use crate::config::global_team_store::{self, TEAM_LINK_NAME};
 use crate::config::workspace_link::LinkStatus;
-use crate::team_shared_git;
 
 /// Result of consulting the cloud share-mode endpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,12 +111,6 @@ pub fn materialize_or_teardown(gate: TeamShareGate, team_id: &str, ws_path: &str
 pub fn ensure_team_link(team_id: &str, ws_path: &str) -> LinkStatus {
     if team_id.trim().is_empty() || ws_path.trim().is_empty() {
         return LinkStatus::Fallback;
-    }
-    let global_dir = crate::config::global_team_store::global_team_dir(team_id);
-    if let Some(config) = team_shared_git::read_git_team_config(Path::new(ws_path)) {
-        if let Err(e) = team_shared_git::sync_git_dir(&global_dir, &config) {
-            warn!(team_id, "global git sync failed: {e}");
-        }
     }
     if let Err(e) = crate::config::global_team_store::ensure_initialized(team_id) {
         warn!(team_id, "global team dir init failed: {e}");

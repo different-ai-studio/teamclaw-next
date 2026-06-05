@@ -47,9 +47,15 @@ impl WorkspaceStore {
         let content = std::fs::read_to_string(path).map_err(|e| {
             crate::error::AmuxError::Config(format!("read {}: {}", path.display(), e))
         })?;
-        toml::from_str(&content).map_err(|e| {
+        let mut store: Self = toml::from_str(&content).map_err(|e| {
             crate::error::AmuxError::Config(format!("parse {}: {}", path.display(), e))
-        })
+        })?;
+        let before = store.workspaces.len();
+        store.retain_linkable_workspaces();
+        if store.workspaces.len() != before {
+            let _ = store.save(path);
+        }
+        Ok(store)
     }
 
     pub fn save(&self, path: &Path) -> crate::error::Result<()> {
@@ -63,6 +69,11 @@ impl WorkspaceStore {
     }
 
     pub fn add(&mut self, dir_path: &str) -> crate::error::Result<AddWorkspaceOutcome> {
+        if !super::workspace_path::is_linkable_workspace_path(dir_path) {
+            return Err(crate::error::AmuxError::Config(format!(
+                "workspace path must not be inside the daemon config directory (~/.amuxd): {dir_path}"
+            )));
+        }
         let p = Path::new(dir_path);
         if !p.is_dir() {
             return Err(crate::error::AmuxError::Config(format!(
@@ -113,6 +124,18 @@ impl WorkspaceStore {
         let len = self.workspaces.len();
         self.workspaces.retain(|w| w.workspace_id != workspace_id);
         self.workspaces.len() < len
+    }
+
+    /// Drop registry rows whose path lives inside `~/.amuxd`. Such entries have
+    /// been synced from the cloud and cause the team-link sweep to treat the
+    /// global copy as a legacy workspace dir.
+    pub fn retain_linkable_workspaces(&mut self) {
+        self.workspaces.retain(|w| super::workspace_path::is_linkable_workspace_path(&w.path));
+        if let Some(default_id) = self.default_workspace_id.clone() {
+            if self.find_by_id(&default_id).is_none() {
+                self.default_workspace_id = None;
+            }
+        }
     }
 
     pub fn find_by_id(&self, workspace_id: &str) -> Option<&StoredWorkspace> {
@@ -220,6 +243,47 @@ mod tests {
         assert!(!second.inserted);
         assert_eq!(first.workspace.path, second.workspace.path);
         assert_eq!(store.workspaces.len(), 1);
+    }
+
+    #[test]
+    fn add_rejects_daemon_config_paths() {
+        let _lock = crate::global_team_store::TEST_HOME_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", home.path());
+        let amuxd_team = super::super::DaemonConfig::config_dir()
+            .join("teams/t1");
+        std::fs::create_dir_all(&amuxd_team).unwrap();
+        let mut store = WorkspaceStore {
+            workspaces: vec![],
+            default_workspace_id: None,
+        };
+        assert!(store.add(amuxd_team.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn load_drops_bogus_daemon_config_workspaces() {
+        let _lock = crate::global_team_store::TEST_HOME_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", home.path());
+        let amuxd_team = super::super::DaemonConfig::config_dir()
+            .join("teams/t1");
+        std::fs::create_dir_all(&amuxd_team).unwrap();
+        let toml_path = home.path().join("workspaces.toml");
+        std::fs::write(
+            &toml_path,
+            format!(
+                "[[workspaces]]\nworkspace_id = \"bad\"\npath = \"{}\"\ndisplay_name = \"bad\"\n\n[[workspaces]]\nworkspace_id = \"good\"\npath = \"/tmp/good\"\ndisplay_name = \"good\"\n",
+                amuxd_team.display()
+            ),
+        )
+        .unwrap();
+        let store = WorkspaceStore::load(&toml_path).unwrap();
+        assert_eq!(store.workspaces.len(), 1);
+        assert_eq!(store.workspaces[0].workspace_id, "good");
     }
 
     #[test]
