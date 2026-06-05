@@ -8,6 +8,7 @@ mod daemon;
 mod error;
 mod history;
 mod http;
+mod mcp_probe;
 mod mqtt;
 mod nats;
 mod onboarding;

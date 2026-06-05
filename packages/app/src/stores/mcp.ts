@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   encodeWorkspaceId,
   getDaemonMcp,
+  getDaemonMcpTools,
   putDaemonMcp,
   type DaemonMcpServerConfig,
 } from '@/lib/daemon-local-client'
@@ -27,12 +28,15 @@ export interface MCPServer {
   config: MCPServerConfig
 }
 
+export type McpProbeStatus = 'skipped' | 'ready' | 'failed'
+
 interface MCPState {
   servers: Record<string, MCPServerConfig>
   /** Legacy runtime status — not populated until daemon exposes MCP health. */
   runtimeStatus: Record<string, { status: string; error?: string }>
-  /** Legacy per-server tool names — not populated until daemon exposes tool list. */
   serverTools: Record<string, string[]>
+  serverProbe: Record<string, { status: McpProbeStatus; error?: string }>
+  toolsLoading: boolean
   isLoading: boolean
   error: string | null
   testingServers: Record<string, boolean>
@@ -40,7 +44,7 @@ interface MCPState {
 
   loadConfig: () => Promise<void>
   loadRuntimeStatus: () => Promise<void>
-  loadTools: () => Promise<void>
+  loadTools: (options?: { refresh?: boolean }) => Promise<void>
   addServer: (name: string, config: MCPServerConfig) => Promise<void>
   updateServer: (name: string, config: MCPServerConfig) => Promise<void>
   removeServer: (name: string) => Promise<void>
@@ -55,6 +59,8 @@ export const useMCPStore = create<MCPState>((set, get) => ({
   servers: {},
   runtimeStatus: {},
   serverTools: {},
+  serverProbe: {},
+  toolsLoading: false,
   isLoading: false,
   error: null,
   testingServers: {},
@@ -65,7 +71,8 @@ export const useMCPStore = create<MCPState>((set, get) => ({
       const wid = getWorkspaceId()
       if (!wid) return
       const servers = await getDaemonMcp(wid)
-      if (servers !== null) set({ servers })
+      set({ servers })
+      await get().loadTools()
     })
   },
 
@@ -73,8 +80,26 @@ export const useMCPStore = create<MCPState>((set, get) => ({
     // Runtime MCP status will come from daemon in a follow-up; config CRUD is live.
   },
 
-  loadTools: async () => {
-    // Per-server tool discovery will come from daemon in a follow-up.
+  loadTools: async (options) => {
+    await withAsync(
+      set,
+      async () => {
+        const wid = getWorkspaceId()
+        if (!wid) return
+        const servers = await getDaemonMcpTools(wid, options)
+        const serverTools: Record<string, string[]> = {}
+        const serverProbe: Record<string, { status: McpProbeStatus; error?: string }> = {}
+        for (const [name, probe] of Object.entries(servers)) {
+          serverTools[name] = probe.tools
+          serverProbe[name] = {
+            status: probe.probe_status,
+            error: probe.error ?? undefined,
+          }
+        }
+        set({ serverTools, serverProbe })
+      },
+      { loadingKey: 'toolsLoading' },
+    )
   },
 
   addServer: async (name: string, config: MCPServerConfig) => {
@@ -84,7 +109,7 @@ export const useMCPStore = create<MCPState>((set, get) => ({
       const current = get().servers
       const updated = { ...current, [name]: config }
       await putDaemonMcp(wid, updated)
-      set({ servers: updated })
+      set({ servers: await getDaemonMcp(wid) })
     }, { rethrow: true })
   },
 
@@ -95,7 +120,7 @@ export const useMCPStore = create<MCPState>((set, get) => ({
       const current = get().servers
       const updated = { ...current, [name]: config }
       await putDaemonMcp(wid, updated)
-      set({ servers: updated })
+      set({ servers: await getDaemonMcp(wid) })
     }, { rethrow: true })
   },
 
@@ -106,7 +131,7 @@ export const useMCPStore = create<MCPState>((set, get) => ({
       const current = { ...get().servers }
       delete current[name]
       await putDaemonMcp(wid, current)
-      set({ servers: current })
+      set({ servers: await getDaemonMcp(wid) })
     }, { rethrow: true })
   },
 
@@ -118,7 +143,7 @@ export const useMCPStore = create<MCPState>((set, get) => ({
       if (!(name in current)) return
       const updated = { ...current, [name]: { ...current[name], enabled } }
       await putDaemonMcp(wid, updated)
-      set({ servers: updated })
+      set({ servers: await getDaemonMcp(wid) })
     }, { rethrow: true })
   },
 
@@ -136,8 +161,7 @@ export const useMCPStore = create<MCPState>((set, get) => ({
     const wid = getWorkspaceId()
     if (!wid) return
     try {
-      const servers = await getDaemonMcp(wid)
-      if (servers !== null) set({ servers })
+      set({ servers: await getDaemonMcp(wid) })
     } catch (error) {
       console.error('[MCP] syncFromFile failed:', error)
     }
