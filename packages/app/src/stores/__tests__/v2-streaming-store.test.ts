@@ -242,7 +242,7 @@ describe("v2-streaming-store", () => {
     expect(stream.parts[3].text).toContain("Memory Top 3");
   });
 
-  it("finalize collapses multiple post-tool preview text parts into one", () => {
+  it("finalize does not rewrite multi-segment transcript from cumulative daemon text", () => {
     const store = useV2StreamingStore.getState();
     store.appendOutput("s1", "a1", "Before tool.");
     store.pushToolUse("s1", "a1", {
@@ -255,14 +255,19 @@ describe("v2-streaming-store", () => {
     store.ingestReplyPreview("s1", "a1", "CPU Top 3:\n1. foo");
     store.ingestReplyPreview("s1", "a1", "Memory Top 3:\n1. bar");
 
-    store.finalize("s1", "a1", "CPU Top 3:\n1. foo\n\nMemory Top 3:\n1. bar");
+    store.finalize("s1", "a1", "Before tool.\n\nCPU Top 3:\n1. foo\n\nMemory Top 3:\n1. bar");
 
     const [finalized] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
     expect(finalized.active).toBe(false);
-    expect(finalized.parts.map((p) => p.type)).toEqual(["text", "tool-call", "text"]);
-    expect(finalized.parts[2].text).toBe(
-      "CPU Top 3:\n1. foo\n\nMemory Top 3:\n1. bar",
-    );
+    expect(finalized.parts.map((p) => p.type)).toEqual([
+      "text",
+      "tool-call",
+      "text",
+      "text",
+    ]);
+    expect(finalized.parts[0].text).toBe("Before tool.");
+    expect(finalized.parts[2].text).toContain("CPU Top 3");
+    expect(finalized.parts[3].text).toContain("Memory Top 3");
   });
 
   it("releaseActorAfterPersist skipArchive only drops archived rows for the current streamId", () => {

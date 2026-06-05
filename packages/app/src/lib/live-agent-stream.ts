@@ -1,10 +1,13 @@
 import { AgentStatus } from "@/lib/proto/amux_pb";
 import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
-import { resolveWireToolName } from "@/components/chat/tool-calls/tool-call-utils";
+import { deriveAgentReplyContent } from "@/lib/agent-reply-transcript";
+import { agentReplyTextsEquivalent } from "@/lib/agent-reply-text";
 
-export const PENDING_AGENT_REPLY_FALLBACK_MS = 1_200;
-export const PENDING_AGENT_REPLY_TOOL_GRACE_MS = 3_000;
-export const PENDING_AGENT_REPLY_HARD_TIMEOUT_MS = 8_000;
+export {
+  deriveAgentReplyContent,
+  joinTextPartsFromParts,
+} from "@/lib/agent-reply-transcript";
+import { resolveWireToolName } from "@/components/chat/tool-calls/tool-call-utils";
 
 export function agentStreamKey(sessionId: string, actorId: string): string {
   return `${sessionId}::${actorId}`;
@@ -44,16 +47,8 @@ export function rememberLiveEventId(
   return true;
 }
 
-/** Collapse multiple parked AGENT_REPLY rows into one session message. */
-export function mergePendingAgentReplies(
-  pending: TeamclawMessage[],
-  streamEntry?: { outputText?: string },
-): TeamclawMessage | null {
-  if (pending.length === 0) return null;
-  const last = pending[pending.length - 1];
-  const streamText = streamEntry?.outputText?.trim();
-  if (streamText) return { ...last, content: streamText };
-
+/** Join mid-turn daemon AgentReply slices without duplicating overlapping text. */
+export function joinDistinctPendingReplyChunks(pending: TeamclawMessage[]): string {
   const chunks: string[] = [];
   for (const message of pending) {
     const text = message.content?.trim();
@@ -63,15 +58,30 @@ export function mergePendingAgentReplies(
       chunks.push(text);
       continue;
     }
-    if (text === previous || previous.includes(text)) continue;
+    if (text === previous || agentReplyTextsEquivalent(text, previous)) continue;
+    if (previous.includes(text) || agentReplyTextsEquivalent(previous, text)) continue;
     if (text.includes(previous)) {
       chunks[chunks.length - 1] = text;
       continue;
     }
     chunks.push(text);
   }
-  if (chunks.length === 0) return null;
-  return { ...last, content: chunks.join("\n\n") };
+  return chunks.join("\n\n");
+}
+
+/**
+ * Pick the persisted AGENT_REPLY row from parked daemon slices.
+ * Body text comes from the live transcript (parts[]), not from merge heuristics.
+ */
+export function mergePendingAgentReplies(
+  pending: TeamclawMessage[],
+  streamEntry?: StreamVisibilityEntry,
+): TeamclawMessage | null {
+  if (pending.length === 0) return null;
+  const last = pending[pending.length - 1];
+  const content = deriveAgentReplyContent(streamEntry?.parts ?? [], pending);
+  if (!content.trim()) return null;
+  return { ...last, content };
 }
 
 type StreamVisibilityEntry = {
@@ -188,68 +198,4 @@ export function isTerminalAgentStatus(status: AgentStatus | number | undefined):
 /** Daemon emits `statusChange` with `newStatus=ACTIVE` when a prompt turn starts. */
 export function isAgentActiveStatus(status: AgentStatus | number | undefined): boolean {
   return status === AgentStatus.ACTIVE;
-}
-
-type PendingReplyStreamLike = {
-  toolCalls?: Array<{ id?: string; status?: string }>;
-  parts?: Array<{
-    type?: string;
-    text?: string;
-    content?: string;
-    toolCallId?: string;
-    toolCall?: { id?: string; status?: string };
-  }>;
-};
-
-function isActiveToolStatus(status: string | undefined): boolean {
-  return status === "calling" || status === "waiting";
-}
-
-function hasTextAfterActiveTool(entry: PendingReplyStreamLike): boolean {
-  const activeToolIds = new Set(
-    (entry.toolCalls ?? [])
-      .filter((toolCall) => isActiveToolStatus(toolCall.status))
-      .map((toolCall) => toolCall.id)
-      .filter(Boolean),
-  );
-  if (activeToolIds.size === 0) return false;
-
-  let sawActiveTool = false;
-  for (const part of entry.parts ?? []) {
-    if (part.type === "tool-call") {
-      const partToolId = part.toolCallId || part.toolCall?.id;
-      const partToolActive =
-        (partToolId && activeToolIds.has(partToolId)) ||
-        isActiveToolStatus(part.toolCall?.status);
-      if (partToolActive) sawActiveTool = true;
-      continue;
-    }
-    if (
-      sawActiveTool &&
-      part.type === "text" &&
-      Boolean(part.text || part.content)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-export function shouldFlushPendingAgentReplyFallback(
-  entry: PendingReplyStreamLike | undefined,
-  now: number,
-  pendingSince: number,
-  graceMs = PENDING_AGENT_REPLY_FALLBACK_MS,
-  toolGraceMs = PENDING_AGENT_REPLY_TOOL_GRACE_MS,
-  hardTimeoutMs = PENDING_AGENT_REPLY_HARD_TIMEOUT_MS,
-): boolean {
-  const elapsed = now - pendingSince;
-  if (elapsed < graceMs) return false;
-  if (elapsed >= hardTimeoutMs) return true;
-  if (!entry) return true;
-  const hasActiveTool = (entry.toolCalls ?? []).some((toolCall) =>
-    isActiveToolStatus(toolCall.status),
-  );
-  if (!hasActiveTool) return true;
-  return elapsed >= toolGraceMs && hasTextAfterActiveTool(entry);
 }

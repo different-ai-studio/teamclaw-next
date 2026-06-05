@@ -349,6 +349,67 @@ describe("adaptTeamclawMessages", () => {
     expect(result[0].toolCalls?.[0].startTime).toEqual(new Date("2026-05-25T00:00:00.000Z"));
   });
 
+  it("merges disjoint per-reply parts_json from the same turn (8644132b)", () => {
+    const firstParts = [
+      {
+        id: "p1",
+        type: "text",
+        text: "使用 brainstorming 技能。",
+        content: "使用 brainstorming 技能。",
+      },
+      {
+        id: "tool-1",
+        type: "tool-call",
+        toolCallId: "todowrite",
+        toolCall: {
+          id: "todowrite",
+          name: "todowrite",
+          status: "completed",
+          arguments: {},
+          startTime: "2026-05-25T00:00:00.000Z",
+          result: "ok",
+        },
+      },
+    ];
+    const secondParts = [
+      {
+        id: "p2",
+        type: "text",
+        text: "Want to try canvas?",
+        content: "Want to try canvas?",
+      },
+    ];
+    const msgs = [
+      tmsg({
+        id: "reply-1",
+        kind: MessageKind.AGENT_REPLY,
+        content: "使用 brainstorming 技能。",
+        turnId: "turn-split",
+        t: 10,
+        partsJson: JSON.stringify(firstParts),
+      }),
+      tmsg({
+        id: "reply-2",
+        kind: MessageKind.AGENT_REPLY,
+        content: "Want to try canvas?",
+        turnId: "turn-split",
+        t: 12,
+        partsJson: JSON.stringify(secondParts),
+      }),
+    ];
+
+    const result = adaptTeamclawMessages(msgs)!;
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("reply-2");
+    expect(result[0].content).toBe(
+      "使用 brainstorming 技能。\n\nWant to try canvas?",
+    );
+    expect(result[0].parts.map((p) => p.type)).toEqual(["text", "tool-call", "text"]);
+    expect(result[0].parts[0].text).toBe("使用 brainstorming 技能。");
+    expect(result[0].parts[2].text).toBe("Want to try canvas?");
+  });
+
   it("prefers a duplicate reply that carries persisted parts_json", () => {
     const toolId = "tool-with-output";
     const parts = [

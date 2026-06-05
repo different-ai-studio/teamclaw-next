@@ -114,6 +114,8 @@ docs/superpowers/
 # Internal planning documents
 docs/superpowers/*
 docs/SDLC.md
+docs/prototypes/
+docs/design/
 
 # Scripts
 scripts/sync-task-to-preview.sh
@@ -133,3 +135,6 @@ sre/
 .codex/
 
 build.config.json
+
+.opencode/
+opencode.json

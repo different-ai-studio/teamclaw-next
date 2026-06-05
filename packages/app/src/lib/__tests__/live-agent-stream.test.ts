@@ -2,17 +2,14 @@ import { describe, expect, it } from "vitest";
 import { AgentStatus } from "@/lib/proto/amux_pb";
 import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
 import {
-  PENDING_AGENT_REPLY_FALLBACK_MS,
-  PENDING_AGENT_REPLY_HARD_TIMEOUT_MS,
-  PENDING_AGENT_REPLY_TOOL_GRACE_MS,
   isAgentActiveStatus,
   isTerminalAgentStatus,
+  joinDistinctPendingReplyChunks,
   mergePendingAgentReplies,
   normalizeToolResultEvent,
   normalizeToolUseEvent,
   rememberLiveEventId,
   streamEntryHasVisibleContent,
-  shouldFlushPendingAgentReplyFallback,
 } from "@/lib/live-agent-stream";
 
 describe("live agent stream event helpers", () => {
@@ -95,101 +92,6 @@ describe("live agent stream event helpers", () => {
     expect(isAgentActiveStatus(2)).toBe(true);
   });
 
-  it("does not flush a parked reply before the fallback grace window", () => {
-    expect(
-      shouldFlushPendingAgentReplyFallback(
-        { toolCalls: [] },
-        1_000 + PENDING_AGENT_REPLY_FALLBACK_MS - 1,
-        1_000,
-      ),
-    ).toBe(false);
-  });
-
-  it("keeps parked replies hidden while a tool is still running", () => {
-    expect(
-      shouldFlushPendingAgentReplyFallback(
-        { toolCalls: [{ status: "calling" }] },
-        1_000 + PENDING_AGENT_REPLY_FALLBACK_MS,
-        1_000,
-      ),
-    ).toBe(false);
-    expect(
-      shouldFlushPendingAgentReplyFallback(
-        { toolCalls: [{ status: "waiting" }] },
-        1_000 + PENDING_AGENT_REPLY_FALLBACK_MS,
-        1_000,
-      ),
-    ).toBe(false);
-    expect(
-      shouldFlushPendingAgentReplyFallback(
-        { toolCalls: [{ id: "tool-1", status: "calling" }] },
-        1_000 + PENDING_AGENT_REPLY_TOOL_GRACE_MS + 1,
-        1_000,
-      ),
-    ).toBe(false);
-  });
-
-  it("flushes a parked reply after a hard timeout even if a tool result was missed", () => {
-    expect(
-      shouldFlushPendingAgentReplyFallback(
-        { toolCalls: [{ id: "tool-1", status: "calling" }] },
-        1_000 + PENDING_AGENT_REPLY_HARD_TIMEOUT_MS,
-        1_000,
-      ),
-    ).toBe(true);
-  });
-
-  it("flushes a parked reply when final text appears after an active tool", () => {
-    const entry = {
-      toolCalls: [{ id: "tool-1", status: "calling" }],
-      parts: [
-        { type: "text", text: "Before tool." },
-        { type: "tool-call", toolCallId: "tool-1" },
-        { type: "text", text: "Final answer." },
-      ],
-    };
-
-    expect(
-      shouldFlushPendingAgentReplyFallback(
-        entry,
-        1_000 + PENDING_AGENT_REPLY_FALLBACK_MS,
-        1_000,
-      ),
-    ).toBe(false);
-
-    expect(
-      shouldFlushPendingAgentReplyFallback(
-        entry,
-        1_000 + PENDING_AGENT_REPLY_TOOL_GRACE_MS,
-        1_000,
-      ),
-    ).toBe(true);
-  });
-
-  it("flushes a parked reply after grace when no tool is still active", () => {
-    expect(
-      shouldFlushPendingAgentReplyFallback(
-        { toolCalls: [] },
-        1_000 + PENDING_AGENT_REPLY_FALLBACK_MS,
-        1_000,
-      ),
-    ).toBe(true);
-    expect(
-      shouldFlushPendingAgentReplyFallback(
-        { toolCalls: [{ status: "completed" }, { status: "failed" }] },
-        1_000 + PENDING_AGENT_REPLY_FALLBACK_MS,
-        1_000,
-      ),
-    ).toBe(true);
-    expect(
-      shouldFlushPendingAgentReplyFallback(
-        undefined,
-        1_000 + PENDING_AGENT_REPLY_FALLBACK_MS,
-        1_000,
-      ),
-    ).toBe(true);
-  });
-
   it("dedupes repeated live event ids per session", () => {
     const seen = new Set<string>();
     expect(rememberLiveEventId(seen, "s1", "evt-1")).toBe(true);
@@ -197,25 +99,51 @@ describe("live agent stream event helpers", () => {
     expect(rememberLiveEventId(seen, "s2", "evt-1")).toBe(true);
   });
 
-  it("merges parked agent replies using stream outputText", () => {
+  it("derives merged content from transcript parts when present", () => {
     const pending = [
       { messageId: "m1", content: "CPU Top 3" },
       { messageId: "m2", content: "Memory Top 3" },
     ] as TeamclawMessage[];
     expect(
       mergePendingAgentReplies(pending, {
-        outputText: "CPU Top 3\n\nMemory Top 3",
+        parts: [
+          { type: "text", text: "CPU Top 3" },
+          { type: "tool-call", toolCall: { id: "t1" } },
+          { type: "text", text: "Memory Top 3" },
+        ],
       })?.content,
     ).toBe("CPU Top 3\n\nMemory Top 3");
   });
 
-  it("joins distinct parked chunks when stream outputText is empty", () => {
+  it("falls back to joined pending when transcript has no text parts", () => {
     const pending = [
       { messageId: "m1", content: "CPU Top 3" },
       { messageId: "m2", content: "Memory Top 3" },
     ] as TeamclawMessage[];
     expect(mergePendingAgentReplies(pending)?.content).toBe(
       "CPU Top 3\n\nMemory Top 3",
+    );
+  });
+
+  it("reconciles single-segment typo drift from daemon final slice", () => {
+    const stream =
+      "好的，我整理了两种方案：\n\n**方案 A** 单文件。\n\n**方案 B** React。\n\n**我推荐方案 A**——够用。适合之后想再改、加点功能。你觉得呢？";
+    const daemon = stream.replace("再改、", "再改改、");
+    const pending = [{ messageId: "m1", content: daemon }] as TeamclawMessage[];
+    const merged = mergePendingAgentReplies(pending, {
+      parts: [{ type: "text", text: stream }],
+    });
+    expect(merged?.content).toBe(daemon);
+    expect(merged?.content).not.toContain(`${daemon}\n\n${stream}`);
+  });
+
+  it("joinDistinctPendingReplyChunks merges non-overlapping slices", () => {
+    const pending = [
+      { messageId: "m1", content: "First part." },
+      { messageId: "m2", content: "Second part." },
+    ] as TeamclawMessage[];
+    expect(joinDistinctPendingReplyChunks(pending)).toBe(
+      "First part.\n\nSecond part.",
     );
   });
 
@@ -247,10 +175,10 @@ describe("live agent stream event helpers", () => {
     ).toBe(true);
     expect(
       streamEntryHasVisibleContent({
-        outputText: "answer",
+        outputText: "",
         thinkingText: "",
         toolCalls: [],
-        parts: [],
+        parts: [{ type: "text", text: "hello" }],
       }),
     ).toBe(true);
   });

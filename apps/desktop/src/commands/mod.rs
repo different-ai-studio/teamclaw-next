@@ -1,3 +1,4 @@
+pub mod acp_debug_log;
 pub mod clawhub;
 pub mod cron;
 pub mod daemon_http;

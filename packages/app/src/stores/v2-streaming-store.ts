@@ -1,5 +1,13 @@
 import { create } from "zustand";
 import {
+  daemonFinalDuplicatesTranscript,
+  joinTextPartsFromParts,
+  reconcileSingleSegmentDrift,
+  replaceLastPostToolTextPart,
+  stripPriorTranscriptTextPrefix,
+} from "@/lib/agent-reply-transcript";
+import {
+  agentReplyBodiesCollapsible,
   agentReplyTextsEquivalent,
   pickCanonicalAgentReplyText,
 } from "@/lib/agent-reply-text";
@@ -85,7 +93,7 @@ interface State {
   clearPermissionRequest: (sessionId: string, actorId: string) => void;
   replaceParts: (sessionId: string, actorId: string, parts: MessagePart[]) => void;
   ingestReplyPreview: (sessionId: string, actorId: string, text: string) => void;
-  finalize: (sessionId: string, actorId: string, finalText: string) => void;
+  finalize: (sessionId: string, actorId: string, finalText?: string) => void;
   finishSessionActor: (
     sessionId: string,
     actorId: string,
@@ -222,6 +230,12 @@ function appendTextPart(parts: MessagePart[], delta: string): MessagePart[] {
       content: delta,
     },
   ];
+}
+
+function appendOutputToParts(parts: MessagePart[], delta: string): MessagePart[] {
+  const segmentDelta = stripPriorTranscriptTextPrefix(parts, delta);
+  if (!segmentDelta) return parts;
+  return appendTextPart(parts, segmentDelta);
 }
 
 function appendReasoningPart(parts: MessagePart[], delta: string): MessagePart[] {
@@ -502,7 +516,8 @@ function previewTextUpdate(
   if (
     text === current ||
     current.includes(text) ||
-    agentReplyTextsEquivalent(current, text)
+    agentReplyTextsEquivalent(current, text) ||
+    agentReplyBodiesCollapsible(current, text)
   ) {
     const outputText = pickCanonicalAgentReplyText(current, text);
     if (outputText === current) return { outputText: current, parts };
@@ -591,7 +606,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         [k(sessionId, actorId)]: {
           ...entry,
           outputText: appendOverlappingChunk(entry.outputText, delta),
-          parts: appendTextPart(entryParts(entry), delta),
+          parts: appendOutputToParts(entryParts(entry), delta),
           lastUpdate: Date.now(),
           active: true,
         },
@@ -875,24 +890,19 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     });
   },
 
-  /** Finalize a streaming turn: replace outputText with the canonical final
-   * content from the daemon's published Message and mark inactive. Keep
-   * thinking + tool_calls + plan visible — the next turn's first acp.event
-   * will move this entry into `archived` (see prepareMutation) so prior-turn
-   * thinking + tool_calls stay visible alongside the new turn. */
+  /** Mark a streaming turn inactive. Live parts[] are owned by acp.event only;
+   * daemon finalText may reconcile single-segment drift but must not rewrite a
+   * multi-segment transcript from cumulative message.created bodies. */
   finalize: (sessionId, actorId, finalText) => {
     const key = k(sessionId, actorId);
     const existing = get().byKey[key];
     if (!existing) {
-      // No prior streaming for this actor — create a finalized stub so the
-      // bubble still renders the reply text consistently. (Rare; usually
-      // the daemon emits acp.event before message.created.)
       set({
         byKey: {
           ...get().byKey,
           [key]: {
             ...emptyEntry(sessionId, actorId),
-            outputText: finalText,
+            outputText: finalText ?? "",
             parts: finalText ? appendTextPart([], finalText) : [],
             active: false,
           },
@@ -900,18 +910,51 @@ export const useV2StreamingStore = create<State>((set, get) => ({
       });
       return;
     }
-    const parts = entryParts(existing);
+
+    let parts = entryParts(existing);
+    const trimmedFinal = finalText?.trim() ?? "";
+    const hasTools = parts.some((part) => part.type === "tool-call");
+    const textPartCount = parts.filter(
+      (part) => part.type === "text" && Boolean(part.text || part.content),
+    ).length;
+
+    if (!trimmedFinal) {
+      set({
+        byKey: {
+          ...get().byKey,
+          [key]: {
+            ...existing,
+            outputText: joinTextPartsFromParts(parts) || existing.outputText,
+            parts,
+            lastUpdate: Date.now(),
+            active: false,
+          },
+        },
+      });
+      return;
+    }
+
+    if (trimmedFinal) {
+      if (!hasTools && textPartCount <= 1) {
+        const preview = previewTextUpdate(existing, trimmedFinal);
+        parts = preview.parts;
+      } else if (daemonFinalDuplicatesTranscript(parts, trimmedFinal)) {
+        parts = parts;
+      } else if (hasTools) {
+        parts = replaceLastPostToolTextPart(parts, trimmedFinal);
+      } else {
+        parts = reconcileSingleSegmentDrift(parts, trimmedFinal);
+      }
+    }
+
+    const outputText = joinTextPartsFromParts(parts) || trimmedFinal || existing.outputText;
     set({
       byKey: {
         ...get().byKey,
         [key]: {
           ...existing,
-          outputText: finalText || existing.outputText,
-          parts: finalText
-            ? parts.some((part) => part.type === "tool-call")
-              ? replacePostToolTextPart(parts, finalText)
-              : previewTextUpdate(existing, finalText).parts
-            : parts,
+          outputText,
+          parts,
           lastUpdate: Date.now(),
           active: false,
         },
