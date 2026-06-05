@@ -375,7 +375,7 @@ impl DiscordHandler {
             Ok(reply) => {
                 if let Err(e) = self
                     .store
-                    .record_message(
+                    .record_agent_reply(
                         &outcome.session_id,
                         &self.primary_agent_actor_id,
                         &reply.reply_text,
@@ -383,7 +383,7 @@ impl DiscordHandler {
                     )
                     .await
                 {
-                    eprintln!("[Discord] record_message (reply) failed: {}", e);
+                    eprintln!("[Discord] record_agent_reply failed: {}", e);
                 }
 
                 let chunks = split_message(&reply.reply_text, 2000);

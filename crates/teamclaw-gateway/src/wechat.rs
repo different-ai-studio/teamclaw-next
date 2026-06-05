@@ -787,7 +787,7 @@ impl WeChatGateway {
 
         if let Err(e) = self
             .store
-            .record_message(
+            .record_agent_reply(
                 &outcome.session_id,
                 &self.primary_agent_actor_id,
                 &reply.reply_text,
@@ -795,7 +795,7 @@ impl WeChatGateway {
             )
             .await
         {
-            eprintln!("[WeChat] record_message (reply) failed: {}", e);
+            eprintln!("[WeChat] record_agent_reply failed: {}", e);
         }
 
         let reply_text = if reply.reply_text.trim().is_empty() {

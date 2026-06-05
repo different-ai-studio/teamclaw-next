@@ -1550,7 +1550,7 @@ impl WeComGateway {
 
         if let Err(e) = self
             .store
-            .record_message(
+            .record_agent_reply(
                 &outcome.session_id,
                 &self.primary_agent_actor_id,
                 &reply.reply_text,
@@ -1558,7 +1558,7 @@ impl WeComGateway {
             )
             .await
         {
-            eprintln!("[WeCom] record_message (reply) failed: {}", e);
+            eprintln!("[WeCom] record_agent_reply failed: {}", e);
         }
 
         // Group chats prepend a plain `@userid` so the final stream chunk

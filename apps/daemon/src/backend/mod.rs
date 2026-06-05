@@ -262,6 +262,21 @@ pub trait Backend: Send + Sync {
         external_message_id: Option<&str>,
     ) -> BackendResult<String>;
 
+    /// Same as `insert_gateway_message` but stored with the `agent_reply`
+    /// message kind so clients render it as an assistant turn rather than a
+    /// user message. The default delegates to `insert_gateway_message` (which
+    /// stores `text`); real backends override to set the correct kind.
+    async fn insert_gateway_agent_reply(
+        &self,
+        session_id: &str,
+        sender_actor_id: &str,
+        content: &str,
+        external_message_id: Option<&str>,
+    ) -> BackendResult<String> {
+        self.insert_gateway_message(session_id, sender_actor_id, content, external_message_id)
+            .await
+    }
+
     /// Same as `insert_gateway_message`, with an `attachments` JSON array.
     async fn insert_gateway_message_with_attachments(
         &self,

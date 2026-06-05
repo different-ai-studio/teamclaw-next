@@ -1086,7 +1086,7 @@ impl KookGateway {
             Ok(reply) => {
                 if let Err(e) = self
                     .store
-                    .record_message(
+                    .record_agent_reply(
                         &outcome.session_id,
                         &self.primary_agent_actor_id,
                         &reply.reply_text,
@@ -1094,7 +1094,7 @@ impl KookGateway {
                     )
                     .await
                 {
-                    eprintln!("[KOOK] record_message (reply) failed: {}", e);
+                    eprintln!("[KOOK] record_agent_reply failed: {}", e);
                 }
 
                 if let Some(ref proc_id) = thinking_msg_id {
