@@ -1,8 +1,19 @@
 import * as React from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronUp, Copy, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, FolderOpen, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { isAcpDebugPanelVisible, useAcpDebugStore } from "@/stores/acp-debug-store";
+import {
+  formatAcpDebugFileBlock,
+  formatAcpDebugLine,
+  getAcpDebugLogDirectory,
+  revealAcpDebugLog,
+} from "@/lib/acp-debug-file-log";
+import { isTauri } from "@/lib/utils";
+import {
+  ACP_DEBUG_PANEL_LINES,
+  isAcpDebugPanelVisible,
+  useAcpDebugStore,
+} from "@/stores/acp-debug-store";
 
 export function AcpStreamDebugPanel({ sessionId }: { sessionId: string | null }) {
   const { t } = useTranslation();
@@ -10,12 +21,23 @@ export function AcpStreamDebugPanel({ sessionId }: { sessionId: string | null })
   const allLines = useAcpDebugStore((s) => s.lines);
   const clear = useAcpDebugStore((s) => s.clear);
   const [collapsed, setCollapsed] = React.useState(false);
+  const [logDir, setLogDir] = React.useState<string | null>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
-  const lines = React.useMemo(() => {
-    if (!sessionId) return allLines.slice(-80);
-    return allLines.filter((l) => l.sessionId === sessionId).slice(-80);
+  const sessionLines = React.useMemo(() => {
+    if (!sessionId) return allLines;
+    return allLines.filter((l) => l.sessionId === sessionId);
   }, [allLines, sessionId]);
+
+  const lines = React.useMemo(
+    () => sessionLines.slice(-ACP_DEBUG_PANEL_LINES),
+    [sessionLines],
+  );
+
+  React.useEffect(() => {
+    if (!isTauri()) return;
+    void getAcpDebugLogDirectory().then(setLogDir);
+  }, []);
 
   React.useEffect(() => {
     if (collapsed || !scrollRef.current) return;
@@ -25,18 +47,20 @@ export function AcpStreamDebugPanel({ sessionId }: { sessionId: string | null })
   if (!isAcpDebugPanelVisible() || !enabled) return null;
 
   const copyAll = async () => {
-    const text = lines
-      .map((l) => {
-        const ts = new Date(l.ts).toISOString();
-        return `[${ts}] ${l.topic} actor=${l.actorId} case=${l.eventCase}\n${JSON.stringify(l.payload, null, 2)}`;
-      })
-      .join("\n\n---\n\n");
+    const text = sessionLines.map((l) => formatAcpDebugFileBlock(l).trimEnd()).join("\n\n---\n\n");
     try {
       await navigator.clipboard.writeText(text);
     } catch (e) {
       console.warn("[acp-debug] copy failed", e);
     }
   };
+
+  const logFileHint = sessionId
+    ? t("chat.acpDebug.logFileSession", "{{dir}}/{{sessionId}}.log + _all.log", {
+        dir: logDir ?? "…",
+        sessionId: sessionId.slice(0, 8),
+      })
+    : t("chat.acpDebug.logFileAll", "{{dir}}/_all.log", { dir: logDir ?? "…" });
 
   return (
     <div
@@ -48,12 +72,25 @@ export function AcpStreamDebugPanel({ sessionId }: { sessionId: string | null })
           {t("chat.acpDebug.title", "ACP 流调试")}
         </span>
         <span className="font-mono text-[10px] text-muted-foreground">
-          {t("chat.acpDebug.lineCount", "{{count}} 条", { count: lines.length })}
+          {t("chat.acpDebug.lineCount", "{{shown}} / {{total}} 条", {
+            shown: lines.length,
+            total: sessionLines.length,
+          })}
           {sessionId
             ? ` · ${t("chat.acpDebug.scopeCurrentSession", "当前会话")}`
             : ` · ${t("chat.acpDebug.scopeAll", "全部")}`}
         </span>
         <div className="ml-auto flex items-center gap-1">
+          {isTauri() ? (
+            <button
+              type="button"
+              onClick={() => void revealAcpDebugLog(sessionId)}
+              className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-selected hover:text-foreground"
+              title={t("chat.acpDebug.openLog", "在 Finder 中打开日志")}
+            >
+              <FolderOpen className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => void copyAll()}
@@ -66,7 +103,7 @@ export function AcpStreamDebugPanel({ sessionId }: { sessionId: string | null })
             type="button"
             onClick={clear}
             className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-selected hover:text-foreground"
-            title={t("chat.acpDebug.clear", "清空")}
+            title={t("chat.acpDebug.clear", "清空面板（不影响日志文件）")}
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -79,6 +116,14 @@ export function AcpStreamDebugPanel({ sessionId }: { sessionId: string | null })
           </button>
         </div>
       </div>
+      {isTauri() && logDir ? (
+        <p
+          className="truncate px-3 pb-1 font-mono text-[10px] text-faint"
+          title={logDir}
+        >
+          {logFileHint}
+        </p>
+      ) : null}
       {!collapsed ? (
         <div
           ref={scrollRef}
@@ -97,7 +142,7 @@ export function AcpStreamDebugPanel({ sessionId }: { sessionId: string | null })
                 key={line.id}
                 className="mb-2 whitespace-pre-wrap break-all rounded border border-border-soft bg-paper/80 p-2 last:mb-0"
               >
-                {`${new Date(line.ts).toISOString()}  ${line.eventCase}\n${line.topic}\n${JSON.stringify(line.payload, null, 2)}`}
+                {formatAcpDebugLine(line)}
               </pre>
             ))
           )}

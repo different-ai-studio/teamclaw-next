@@ -1,7 +1,11 @@
 import { create } from "zustand";
+import { appendAcpDebugLineToFile } from "@/lib/acp-debug-file-log";
 import type { AcpEvent } from "@/lib/proto/amux_pb";
 
-const MAX_LINES = 400;
+/** In-memory ring buffer for the debug panel (disk log keeps full history). */
+export const ACP_DEBUG_MAX_LINES = 2000;
+/** Max lines rendered in the panel scroll area. */
+export const ACP_DEBUG_PANEL_LINES = 200;
 
 export type AcpDebugLine = {
   id: string;
@@ -68,9 +72,12 @@ export const useAcpDebugStore = create<State>((set, get) => ({
     };
     set((state) => {
       const next = [...state.lines, line];
-      if (next.length > MAX_LINES) next.splice(0, next.length - MAX_LINES);
+      if (next.length > ACP_DEBUG_MAX_LINES) {
+        next.splice(0, next.length - ACP_DEBUG_MAX_LINES);
+      }
       return { lines: next };
     });
+    void appendAcpDebugLineToFile(line);
   },
   clear: () => set({ lines: [] }),
   setEnabled: (enabled) => set({ enabled }),
