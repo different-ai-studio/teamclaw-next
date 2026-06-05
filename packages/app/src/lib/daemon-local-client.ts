@@ -45,39 +45,57 @@ interface DaemonConnection {
 let _connection: DaemonConnection | null = null
 let _inflight: Promise<DaemonConnection | null> | null = null
 
+async function readDaemonHttpInfo(): Promise<DaemonHttpInfo | null> {
+  try {
+    return await invoke<DaemonHttpInfo | null>('get_daemon_http_info')
+  } catch {
+    return null
+  }
+}
+
+function formatFetchNetworkError(baseUrl: string, raw: string): string {
+  if (/load failed|failed to fetch|networkerror|econnrefused|connection refused/i.test(raw)) {
+    return `Cannot reach amuxd daemon at ${baseUrl}. The daemon may have restarted on a new port — restart TeamClaw or wait a moment and retry.`
+  }
+  return raw
+}
+
 /** Cached connection; null if daemon HTTP is unavailable. */
 async function getConnection(): Promise<DaemonConnection | null> {
   if (!isTauri()) return null
 
-  // Return cached connection if still valid (5 min buffer before expiry).
+  const info = await readDaemonHttpInfo()
+  if (!info) return null
+
+  // amuxd binds a new loopback port on every restart; drop stale cache entries.
+  if (_connection && _connection.baseUrl !== info.base_url) {
+    invalidateDaemonConnection()
+  }
+
+  // Return cached session when still valid (5 min buffer before expiry).
   if (_connection && Date.now() < _connection.expiresAt - 5 * 60 * 1000) {
     return _connection
   }
 
   // Coalesce concurrent callers.
   if (_inflight) return _inflight
-  _inflight = _fetchConnection().finally(() => {
+  _inflight = _fetchConnection(info).finally(() => {
     _inflight = null
   })
   return _inflight
 }
 
-async function _fetchConnection(): Promise<DaemonConnection | null> {
-  let info: DaemonHttpInfo | null
-  try {
-    info = await invoke<DaemonHttpInfo | null>('get_daemon_http_info')
-  } catch {
-    return null
-  }
-  if (!info) return null
+async function _fetchConnection(info?: DaemonHttpInfo | null): Promise<DaemonConnection | null> {
+  const resolved = info ?? (await readDaemonHttpInfo())
+  if (!resolved) return null
 
   // Exchange root token for a scoped session token.
   try {
-    const resp = await fetch(`${info.base_url}/v1/auth/exchange`, {
+    const resp = await fetch(`${resolved.base_url}/v1/auth/exchange`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${info.root_token}`,
+        Authorization: `Bearer ${resolved.root_token}`,
       },
       body: JSON.stringify({
         scopes: ['workspace:read', 'workspace:write', 'sessions:read', 'sessions:write', 'events:read'],
@@ -91,7 +109,7 @@ async function _fetchConnection(): Promise<DaemonConnection | null> {
     const data: { token?: string; expires_in?: number } = await resp.json()
     if (!data.token) return null
     _connection = {
-      baseUrl: info.base_url,
+      baseUrl: resolved.base_url,
       sessionToken: data.token,
       expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000,
     }
@@ -165,26 +183,46 @@ export async function isDaemonHttpAvailable(): Promise<boolean> {
 async function daemonFetch<T>(
   path: string,
   init?: RequestInit,
-  // Internal: set false to disable the single re-auth retry (prevents loops).
-  allowReauth = true,
+  // Internal: set false to disable the single reconnect retry (prevents loops).
+  allowRetry = true,
 ): Promise<{ ok: true; data: T } | { ok: false; status: number; error: string }> {
   const conn = await getConnection()
-  if (!conn) return { ok: false, status: 0, error: 'daemon HTTP not available' }
+  if (!conn) {
+    return {
+      ok: false,
+      status: 0,
+      error: 'amuxd daemon is not connected. Restart TeamClaw or confirm amuxd is running.',
+    }
+  }
 
-  const resp = await fetch(`${conn.baseUrl}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${conn.sessionToken}`,
-      ...(init?.headers ?? {}),
-    },
-  })
+  let resp: Response
+  try {
+    resp = await fetch(`${conn.baseUrl}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${conn.sessionToken}`,
+        ...(init?.headers ?? {}),
+      },
+    })
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : String(err)
+    if (allowRetry) {
+      invalidateDaemonConnection()
+      return daemonFetch<T>(path, init, false)
+    }
+    return {
+      ok: false,
+      status: 0,
+      error: formatFetchNetworkError(conn.baseUrl, raw),
+    }
+  }
 
   if (!resp.ok) {
     // A 401 means our cached session token was rejected — most commonly because
     // the daemon restarted and minted a new root token. Drop the stale token,
     // re-exchange, and retry the request exactly once.
-    if (resp.status === 401 && allowReauth) {
+    if (resp.status === 401 && allowRetry) {
       invalidateDaemonConnection()
       return daemonFetch<T>(path, init, false)
     }
@@ -194,6 +232,12 @@ async function daemonFetch<T>(
 
   const data: T = await resp.json()
   return { ok: true, data }
+}
+
+async function daemonFetchData<T>(path: string, init?: RequestInit): Promise<T> {
+  const result = await daemonFetch<T>(path, init)
+  if (!result.ok) throw new Error(result.error)
+  return result.data
 }
 
 // ─── Workspace-control types (mirrors Rust workspace_control.rs) ──────────────
@@ -633,22 +677,39 @@ export interface DaemonMcpServerConfig {
 
 export async function getDaemonMcp(
   workspaceId: string,
-): Promise<Record<string, DaemonMcpServerConfig> | null> {
-  const result = await daemonFetch<Record<string, DaemonMcpServerConfig>>(
+): Promise<Record<string, DaemonMcpServerConfig>> {
+  return daemonFetchData<Record<string, DaemonMcpServerConfig>>(
     `/v1/workspaces/${workspaceId}/mcp`,
   )
-  return result.ok ? result.data : null
 }
 
 export async function putDaemonMcp(
   workspaceId: string,
   servers: Record<string, DaemonMcpServerConfig>,
-): Promise<DaemonApplyOutcome | null> {
-  const result = await daemonFetch<{ outcome: DaemonApplyOutcome }>(
+): Promise<DaemonApplyOutcome> {
+  const data = await daemonFetchData<{ outcome: DaemonApplyOutcome }>(
     `/v1/workspaces/${workspaceId}/mcp`,
     { method: 'PUT', body: JSON.stringify(servers) },
   )
-  return result.ok ? result.data.outcome : null
+  return data.outcome
+}
+
+export interface DaemonMcpServerProbeResult {
+  probe_status: 'skipped' | 'ready' | 'failed'
+  tools: string[]
+  error: string | null
+  probed_at: string | null
+}
+
+export async function getDaemonMcpTools(
+  workspaceId: string,
+  options?: { refresh?: boolean },
+): Promise<Record<string, DaemonMcpServerProbeResult>> {
+  const query = options?.refresh ? '?refresh=1' : ''
+  const data = await daemonFetchData<{ servers: Record<string, DaemonMcpServerProbeResult> }>(
+    `/v1/workspaces/${workspaceId}/mcp/tools${query}`,
+  )
+  return data.servers
 }
 
 // ─── Runtime ──────────────────────────────────────────────────────────────────

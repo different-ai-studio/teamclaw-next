@@ -90,6 +90,30 @@ paths:
         '503':
           $ref: '#/components/responses/problemRuntimeUnavailable'
 
+  /v1/workspaces/{workspaceId}/mcp/tools:
+    get:
+      operationId: getMcpTools
+      summary: Probe MCP server tools
+      tags: [mcp]
+      parameters:
+        - $ref: '#/components/parameters/workspaceId'
+        - name: refresh
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Force re-probe and bypass cache
+      responses:
+        '200':
+          description: Per-server probe status and tool names
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpToolsResponse'
+        '404':
+          $ref: '#/components/responses/problemNotFound'
+
 components:
   parameters:
     workspaceId:
@@ -167,6 +191,36 @@ components:
         outcome:
           type: string
           enum: [applied_live, reload_required, restart_required]
+
+    ProbeStatus:
+      type: string
+      enum: [skipped, ready, failed]
+
+    McpServerProbeResult:
+      type: object
+      required: [probe_status, tools]
+      properties:
+        probe_status:
+          $ref: '#/components/schemas/ProbeStatus'
+        tools:
+          type: array
+          items:
+            type: string
+        error:
+          type: string
+          nullable: true
+        probed_at:
+          type: string
+          nullable: true
+
+    McpToolsResponse:
+      type: object
+      required: [servers]
+      properties:
+        servers:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/McpServerProbeResult'
 
     Problem:
       type: object

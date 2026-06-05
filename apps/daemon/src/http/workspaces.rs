@@ -619,6 +619,8 @@ pub async fn get_mcp(
     Path(workspace_id): Path<String>,
 ) -> Result<Json<HashMap<String, McpServerConfig>>, HttpError> {
     require_scope(&principal, "workspace:read")?;
+    let wpath = workspace_path_or_404(&workspace_id).await?;
+    crate::runtime::supervisor::ensure_inherent_mcp(&wpath).map_err(map_control_err)?;
     let store = resolve_store(&state)?;
     let servers = store.get_mcp(&workspace_id).map_err(map_control_err)?;
     Ok(Json(servers))
@@ -635,11 +637,37 @@ pub async fn put_mcp(
     Json(body): Json<HashMap<String, McpServerConfig>>,
 ) -> Result<Json<ApplyResponse>, HttpError> {
     require_scope(&principal, "workspace:write")?;
+    let wpath = workspace_path_or_404(&workspace_id).await?;
     let store = resolve_store(&state)?;
     let outcome = store
         .put_mcp(&workspace_id, body)
         .map_err(map_control_err)?;
+    // PUT replaces the full map; re-seed built-in entries the UI always shows.
+    crate::runtime::supervisor::ensure_inherent_mcp(&wpath).map_err(map_control_err)?;
     Ok(apply_ok(outcome))
+}
+
+#[derive(Deserialize)]
+pub struct McpToolsQuery {
+    #[serde(default)]
+    pub refresh: bool,
+}
+
+/// `GET /v1/workspaces/:id/mcp/tools`
+pub async fn get_mcp_tools(
+    principal: Principal,
+    State(state): State<HttpState>,
+    Path(workspace_id): Path<String>,
+    Query(query): Query<McpToolsQuery>,
+) -> Result<Json<crate::mcp_probe::McpToolsResponse>, HttpError> {
+    require_scope(&principal, "workspace:read")?;
+    let wpath = workspace_path_or_404(&workspace_id).await?;
+    crate::runtime::supervisor::ensure_inherent_mcp(&wpath).map_err(map_control_err)?;
+    let store = resolve_store(&state)?;
+    let servers = store.get_mcp(&workspace_id).map_err(map_control_err)?;
+    let response =
+        crate::mcp_probe::probe_all_servers(&wpath, servers, query.refresh, &workspace_id).await;
+    Ok(Json(response))
 }
 
 // ── Roles & skills handlers ───────────────────────────────────────────────────

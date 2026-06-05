@@ -16,7 +16,6 @@ import {
 
 import { useMCPStore, type MCPServerConfig } from '@/stores/mcp'
 import { useDepsStore } from '@/stores/deps'
-import type { MCPServerStatus } from '@/lib/opencode/mcp-types'
 import { cn } from '@/lib/utils'
 import { buildConfig } from '@/lib/build-config'
 import { Button } from '@/components/ui/button'
@@ -35,13 +34,11 @@ import { AddMCPDialog } from './AddMCPDialog'
 const INHERENT_MCP_NAMES = new Set(['playwright', 'chrome-control', 'autoui', 'teamclaw-introspect'])
 
 // Status indicator component
-function StatusDot({ status }: { status?: MCPServerStatus }) {
+function StatusDot({ status }: { status?: 'ready' | 'disabled' | 'failed' }) {
   const color = !status ? 'bg-gray-400'
-    : status === 'connected' ? 'bg-emerald-500'
+    : status === 'ready' ? 'bg-emerald-500'
     : status === 'disabled' ? 'bg-gray-400'
-    : status === 'failed' ? 'bg-red-500'
-    : status === 'needs_auth' ? 'bg-amber-500'
-    : 'bg-amber-500'
+    : 'bg-red-500'
 
   return <span className={cn('inline-block h-2 w-2 rounded-full shrink-0', color)} />
 }
@@ -68,30 +65,74 @@ function ToolChip({ name }: { name: string }) {
 // Server status summary with optional tool count (like Cursor's "7 tools enabled" / "Disabled")
 function ServerStatusSummary({
   tools,
-  status,
-  error,
+  probeStatus,
+  probeError,
+  toolsLoading,
+  disabled,
   expanded,
   onToggle,
+  onRetry,
 }: {
   tools: string[]
-  status?: MCPServerStatus
-  error?: string
+  probeStatus?: 'skipped' | 'ready' | 'failed'
+  probeError?: string
+  toolsLoading: boolean
+  disabled: boolean
   expanded: boolean
   onToggle: () => void
+  onRetry: () => void
 }) {
   const { t } = useTranslation()
 
-  // For connected servers with tools, show expandable tool count
-  if (status === 'connected' && tools.length > 0) {
+  if (disabled || probeStatus === 'skipped') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-faint">
+        <StatusDot status="disabled" />
+        {t('settings.mcp.statusDisabled')}
+      </span>
+    )
+  }
+
+  if (toolsLoading) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-faint">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        {t('settings.mcp.toolsProbing')}
+      </span>
+    )
+  }
+
+  if (probeStatus === 'failed') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-destructive">
+        <StatusDot status="failed" />
+        <span>{t('settings.mcp.toolsProbeFailed')}</span>
+        {probeError && <span className="text-faint">({probeError})</span>}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onRetry()
+          }}
+          className="ml-1 underline text-faint hover:text-foreground transition-colors"
+        >
+          {t('settings.mcp.retryProbe')}
+        </button>
+      </span>
+    )
+  }
+
+  if (probeStatus === 'ready' && tools.length > 0) {
     return (
       <button
+        type="button"
         onClick={(e) => {
           e.stopPropagation()
           onToggle()
         }}
-        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        className="inline-flex items-center gap-1 text-xs text-faint hover:text-foreground transition-colors"
       >
-        <StatusDot status="connected" />
+        <StatusDot status="ready" />
         <span>{t('settings.mcp.toolsEnabled', { count: tools.length })}</span>
         {expanded ? (
           <ChevronUp className="h-3 w-3" />
@@ -102,49 +143,40 @@ function ServerStatusSummary({
     )
   }
 
-  // For other statuses, show a status label
-  const label = !status ? null
-    : status === 'connected' ? t('settings.mcp.statusConnected')
-    : status === 'disabled' ? t('settings.mcp.statusDisabled')
-    : status === 'failed' ? (error || t('settings.mcp.statusNotConnected'))
-    : status === 'needs_auth' ? t('settings.mcp.statusNeedsAuth')
-    : t('settings.mcp.statusPending')
+  if (probeStatus === 'ready') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-faint">
+        <StatusDot status="ready" />
+        {t('settings.mcp.toolsNone')}
+      </span>
+    )
+  }
 
-  if (!label) return null
-
-  return (
-    <span className={cn(
-      'inline-flex items-center gap-1.5 text-xs',
-      status === 'connected' ? 'text-emerald-600 dark:text-emerald-400'
-        : status === 'failed' ? 'text-red-500 dark:text-red-400'
-        : 'text-muted-foreground'
-    )}>
-      <StatusDot status={status} />
-      {label}
-    </span>
-  )
+  return null
 }
 
 // Single MCP server row
 function MCPServerRow({
   name,
   config,
-  runtimeStatus,
-  runtimeError,
+  serverProbe,
   tools,
+  toolsLoading,
   nodeInstalled,
   isInherent,
+  onRetry,
   onToggle,
   onEdit,
   onDelete,
 }: {
   name: string
   config: MCPServerConfig
-  runtimeStatus?: MCPServerStatus
-  runtimeError?: string
+  serverProbe?: { status: 'skipped' | 'ready' | 'failed'; error?: string }
   tools: string[]
+  toolsLoading: boolean
   nodeInstalled: boolean
   isInherent?: boolean
+  onRetry: () => void
   onToggle: (enabled: boolean) => void
   onEdit: () => void
   onDelete: () => void
@@ -165,9 +197,6 @@ function MCPServerRow({
     }
     return config.url || t('settings.mcp.remoteServer')
   }
-
-  // Determine effective status for display
-  const effectiveStatus = runtimeStatus || (enabled ? undefined : 'disabled' as MCPServerStatus)
 
   return (
     <div className="p-3 rounded-lg border transition-all">
@@ -201,10 +230,13 @@ function MCPServerRow({
           <div className="mt-1">
             <ServerStatusSummary
               tools={tools}
-              status={effectiveStatus}
-              error={runtimeError}
+              probeStatus={serverProbe?.status}
+              probeError={serverProbe?.error}
+              toolsLoading={toolsLoading}
+              disabled={!enabled}
               expanded={expanded}
               onToggle={() => setExpanded(!expanded)}
+              onRetry={onRetry}
             />
           </div>
         </div>
@@ -258,12 +290,12 @@ function MCPServerRow({
 export const MCPSection = React.memo(function MCPSection() {
   const { t } = useTranslation()
   const servers = useMCPStore((s) => s.servers)
-  const runtimeStatus = useMCPStore((s) => s.runtimeStatus)
   const serverTools = useMCPStore((s) => s.serverTools)
+  const serverProbe = useMCPStore((s) => s.serverProbe)
+  const toolsLoading = useMCPStore((s) => s.toolsLoading)
   const isLoading = useMCPStore((s) => s.isLoading)
   const error = useMCPStore((s) => s.error)
   const loadConfig = useMCPStore((s) => s.loadConfig)
-  const loadRuntimeStatus = useMCPStore((s) => s.loadRuntimeStatus)
   const loadTools = useMCPStore((s) => s.loadTools)
   const addServer = useMCPStore((s) => s.addServer)
   const updateServer = useMCPStore((s) => s.updateServer)
@@ -274,43 +306,36 @@ export const MCPSection = React.memo(function MCPSection() {
   const [editingServer, setEditingServer] = React.useState<{ name: string; config: MCPServerConfig } | null>(null)
   const [deleteConfirm, setDeleteConfirm] = React.useState<string | null>(null)
 
-  // Load config on mount
+  // Load config on mount; drop any stale daemon port cache first (amuxd restarts
+  // pick a new loopback port and the webview may still hold the old one).
   React.useEffect(() => {
-    loadConfig()
+    void (async () => {
+      const { invalidateDaemonConnection } = await import('@/lib/daemon-local-client')
+      invalidateDaemonConnection()
+      await loadConfig()
+    })()
   }, [loadConfig])
-
-  // Load runtime status and tools after config is loaded
-  React.useEffect(() => {
-    if (Object.keys(servers).length > 0) {
-      loadRuntimeStatus()
-      loadTools()
-    }
-  }, [servers, loadRuntimeStatus, loadTools])
-
-  // Poll runtime status periodically (tools are cached, no need to re-query often)
-  React.useEffect(() => {
-    const interval = setInterval(() => {
-      loadRuntimeStatus()
-    }, 10000) // Every 10 seconds
-    return () => clearInterval(interval)
-  }, [loadRuntimeStatus])
 
   const handleAddServer = async (name: string, config: MCPServerConfig) => {
     await addServer(name, config)
+    await loadTools({ refresh: true })
   }
 
   const handleUpdateServer = async (name: string, config: MCPServerConfig) => {
     await updateServer(name, config)
+    await loadTools({ refresh: true })
     setEditingServer(null)
   }
 
   const handleDeleteServer = async (name: string) => {
     await removeServer(name)
+    await loadTools({ refresh: true })
     setDeleteConfirm(null)
   }
 
   const handleToggleServer = async (name: string, enabled: boolean) => {
     await toggleServer(name, enabled)
+    await loadTools({ refresh: true })
   }
 
   const allEntries = Object.entries(servers).sort(([a], [b]) => a.localeCompare(b))
@@ -379,18 +404,19 @@ export const MCPSection = React.memo(function MCPSection() {
           </h4>
           <div className="space-y-3">
             {inherentEntries.map(([name, config]) => {
-              const runtime = runtimeStatus[name]
               const tools = serverTools[name] || []
+              const probe = serverProbe[name]
               return (
                 <MCPServerRow
                   key={name}
                   name={name}
                   config={config}
-                  runtimeStatus={runtime?.status as MCPServerStatus | undefined}
-                  runtimeError={runtime?.error}
+                  serverProbe={probe}
                   tools={tools}
+                  toolsLoading={toolsLoading}
                   nodeInstalled={nodeInstalled}
                   isInherent
+                  onRetry={() => loadTools({ refresh: true })}
                   onToggle={(enabled) => handleToggleServer(name, enabled)}
                   onEdit={() => {
                     setEditingServer({ name, config })
@@ -413,17 +439,18 @@ export const MCPSection = React.memo(function MCPSection() {
           </h4>
           <div className="space-y-3">
             {customEntries.map(([name, config]) => {
-              const runtime = runtimeStatus[name]
               const tools = serverTools[name] || []
+              const probe = serverProbe[name]
               return (
                 <MCPServerRow
                   key={name}
                   name={name}
                   config={config}
-                  runtimeStatus={runtime?.status as MCPServerStatus | undefined}
-                  runtimeError={runtime?.error}
+                  serverProbe={probe}
                   tools={tools}
+                  toolsLoading={toolsLoading}
                   nodeInstalled={nodeInstalled}
+                  onRetry={() => loadTools({ refresh: true })}
                   onToggle={(enabled) => handleToggleServer(name, enabled)}
                   onEdit={() => {
                     setEditingServer({ name, config })

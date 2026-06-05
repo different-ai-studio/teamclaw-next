@@ -35,6 +35,7 @@ interface AddMCPDialogProps {
 const INHERENT_MCP_NAMES = new Set([
   'playwright',
   'chrome-control',
+  'autoui',
   'teamclaw-introspect',
 ])
 
