@@ -4,6 +4,7 @@ import { CheckCircle2, ChevronDown, ChevronUp, Circle, Clock3, ListTodo, Trash2,
 import type { Todo } from "@/stores/session-types";
 import type { QueuedMessage } from "@/stores/session";
 import { cn } from "@/lib/utils";
+import { ComposerPlanSlot } from "./ComposerPlanSlot";
 
 interface TodoListProps {
   todos?: Todo[];
@@ -291,7 +292,13 @@ export const TodoList = React.memo(function TodoList({
   if (todos.length === 0 && queue.length === 0) return null;
 
   if (variant === "inline") {
-    return <InlineTodoList todos={todos} queue={queue} onRemoveFromQueue={onRemoveFromQueue} />;
+    return (
+      <ComposerPlanSlot
+        todos={todos}
+        queue={queue}
+        onRemoveFromQueue={onRemoveFromQueue}
+      />
+    );
   }
 
   return <SidebarTodoList todos={todos} />;

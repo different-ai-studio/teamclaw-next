@@ -1,7 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react"
 import * as Sentry from "@sentry/react"
 import i18n from "@/lib/i18n"
-import { copyToClipboard } from "@/lib/utils"
+import { copyToClipboard, removeStartupSkeleton } from "@/lib/utils"
 import { AlertTriangle, RotateCw, Copy, ChevronDown, ChevronUp } from "lucide-react"
 
 interface ErrorBoundaryProps {
@@ -41,6 +41,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    // A crash during startup must reveal the error UI rather than leave the
+    // static skeleton (z-9999) covering it. Idempotent no-op once removed.
+    removeStartupSkeleton()
     console.error(`[ErrorBoundary${this.props.scope ? `:${this.props.scope}` : ""}] Caught error:`, error, errorInfo)
     Sentry.captureException(error, { extra: { componentStack: errorInfo?.componentStack, scope: this.props.scope } })
     this.setState({ errorInfo })

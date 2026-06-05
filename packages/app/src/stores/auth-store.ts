@@ -6,6 +6,7 @@ import {
 } from "@/lib/backend";
 import type { AuthClaimResult, AuthSession } from "@/lib/backend";
 import { clearBootstrapAppliedFields, fetchAndApplyBootstrap } from "@/lib/bootstrap";
+import { markStartup } from "@/lib/startup-perf";
 
 export type { AuthClaimResult } from "@/lib/backend";
 
@@ -74,7 +75,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   upgradeEmail: null,
   hydrate: async () => {
     set({ loading: true, authFlow: "idle", errorMessage: null });
+    markStartup("auth-hydrate:start");
     const session = await getBackend().auth.getSession();
+    markStartup("auth-session:end");
     set({ session: storeSession(session), loading: false });
     if (session) {
       void fetchAndApplyBootstrap({ accessToken: session.accessToken });

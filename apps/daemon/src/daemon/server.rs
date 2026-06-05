@@ -995,8 +995,9 @@ impl DaemonServer {
     async fn sync_team_shared_dirs_for_known_workspaces(&self) {
         let grouped = group_workspaces_by_team(&self.workspaces.workspaces);
         for (team_id, workspace_paths) in grouped {
+            let gate = crate::team_link::team_share_gate(self.backend.as_ref(), &team_id).await;
             for ws_path in &workspace_paths {
-                ensure_team_link(&team_id, ws_path);
+                crate::team_link::materialize_or_teardown(gate, &team_id, ws_path);
             }
         }
     }
@@ -1871,7 +1872,9 @@ impl DaemonServer {
                 // The startup sweep runs *before* this fresh-machine
                 // registration, so link the just-stamped workspace here too.
                 if let Some(team_id) = workspace.team_id.clone() {
-                    ensure_team_link(&team_id, &workspace.path);
+                    let gate =
+                        crate::team_link::team_share_gate(self.backend.as_ref(), &team_id).await;
+                    crate::team_link::materialize_or_teardown(gate, &team_id, &workspace.path);
                 }
 
                 info!(
@@ -4107,7 +4110,9 @@ impl DaemonServer {
                 // sweep (the normal app flow) must materialize the global dir +
                 // symlink now, not wait for the next daemon restart.
                 if let Some(team_id) = ws.team_id.clone() {
-                    ensure_team_link(&team_id, &ws.path);
+                    let gate =
+                        crate::team_link::team_share_gate(self.backend.as_ref(), &team_id).await;
+                    crate::team_link::materialize_or_teardown(gate, &team_id, &ws.path);
                 }
                 if let Some(registry) = self.refresh_watch_registry.as_ref() {
                     registry
@@ -4695,7 +4700,8 @@ impl DaemonServer {
         let workspace_team_id = self.resolve_workspace_team_id(&resolved_worktree, &ws_id);
 
         if let Some(ref team_id) = workspace_team_id {
-            crate::team_link::ensure_team_link(team_id, &resolved_worktree);
+            let gate = crate::team_link::team_share_gate(self.backend.as_ref(), team_id).await;
+            crate::team_link::materialize_or_teardown(gate, team_id, &resolved_worktree);
         }
 
         if let Some(config) = load_team_shared_config_for_workspace(Path::new(&resolved_worktree)) {

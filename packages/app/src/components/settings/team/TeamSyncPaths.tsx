@@ -91,13 +91,18 @@ export function TeamSyncPaths({
   const [data, setData] = React.useState<TeamSyncPathsData | null>(null)
 
   React.useEffect(() => {
-    if (!teamId || !workspacePath || !isTauri()) return
+    if (!workspacePath || !isTauri()) return
     let cancelled = false
     void (async () => {
       try {
         const { invoke } = await import('@tauri-apps/api/core')
+        // Global sync dir is materialized under the daemon's onboarded team, not
+        // necessarily the app UI's current team when the two have diverged.
+        const daemonTeamId = await invoke<string | null>('get_daemon_team_id')
+        const pathTeamId = daemonTeamId ?? teamId
+        if (!pathTeamId) return
         const res = await invoke<TeamSyncPathsData>('team_sync_paths', {
-          teamId,
+          teamId: pathTeamId,
           workspacePath,
         })
         if (!cancelled) setData(res)

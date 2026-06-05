@@ -18,6 +18,7 @@ use crate::commands::oss_sync::get_fc_endpoint;
 use crate::commands::team::resolve_workspace_path;
 use crate::commands::team_share::custom_git;
 use crate::commands::team_share::enable::load_team_workspaces;
+use crate::commands::team_sync_proxy;
 use crate::commands::{team_secret_store, TEAM_REPO_DIR};
 
 const LEGACY_TEAM_REPO: &str = "teamclaw";
@@ -157,6 +158,13 @@ pub async fn team_disconnect_repo(
         remove_workspace_team_repo_entry(path)?;
         remove_legacy_workspace_team_repo(path)?;
         clear_workspace_team_local_config(path, &team_id)?;
+        if let Err(e) = team_sync_proxy::daemon_team_unlink(path).await {
+            tracing::warn!(
+                team_id = %team_id,
+                workspace_path = %path,
+                "daemon team unlink deferred: {e}"
+            );
+        }
     }
 
     remove_global_team_home(&team_id)?;

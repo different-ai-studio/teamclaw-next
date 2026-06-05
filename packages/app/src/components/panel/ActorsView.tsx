@@ -456,7 +456,11 @@ export function ActorsView() {
       </div>
       {renderBody()}
       <InviteActorDialog open={inviteOpen} onOpenChange={setInviteOpen} />
-      <ActorDetailDialog actor={detailFor} onOpenChange={(open) => { if (!open) setDetailFor(null) }} />
+      <ActorDetailDialog
+        actor={detailFor}
+        teamId={teamId}
+        onOpenChange={(open) => { if (!open) setDetailFor(null) }}
+      />
     </div>
   )
 }

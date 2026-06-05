@@ -31,6 +31,7 @@ import { useTeamModeStore } from "@/stores/team-mode";
 import { useOssSyncStore } from "@/stores/oss-sync";
 import { getSkillDirectories, loadAllSkills } from "@/lib/git/skill-loader";
 import { appShortName, TEAM_REPO_DIR } from "@/lib/build-config";
+import { markStartup } from "@/lib/startup-perf";
 
 export const SKILLS_CHANGED_EVENT = "skills-files-changed";
 
@@ -143,7 +144,7 @@ export function useWorkspaceInit() {
 
       if (!cancelled) {
         setInitialWorkspaceResolved(true);
-        performance.mark('workspace-restored');
+        markStartup('workspace-restored');
       }
     })();
 
@@ -179,7 +180,7 @@ export function useWorkspaceInit() {
         setOpenCodeBootstrapped(true);
         setOpenCodeReady(true);
         setOpenCodeError(null);
-        performance.mark("daemon-ready");
+        markStartup("daemon-ready");
       } else {
         setOpenCodeBootstrapped(false);
         setOpenCodeReady(false);

@@ -56,7 +56,7 @@ import { useSessionPermissionMode } from "@/lib/session-permission-mode";
 import { interruptAgentActor } from "@/lib/teamclaw/interrupt-agent";
 import { toast } from "sonner";
 import { AcpStreamDebugPanel } from "./AcpStreamDebugPanel";
-import { TodoList } from "./TodoList";
+import type { Todo } from "@/stores/session-types";
 import { QuestionInputDock } from "./QuestionInputDock";
 import { SessionContinueBanner } from "./SessionContinueBanner";
 import {
@@ -316,6 +316,10 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     () => (planTodos.length > 0 ? [...planTodos, ...todos] : todos),
     [planTodos, todos],
   );
+  const hasComposerPlanData =
+    !isViewingArchived &&
+    !isViewingChild &&
+    (combinedTodos.length > 0 || messageQueue.length > 0);
   const displayedChildSessionMessages = React.useMemo(() => {
     if (!isViewingChild || !viewingChildSessionId) return EMPTY_MESSAGES;
 
@@ -2050,20 +2054,9 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             onRemoveFromQueue={removeFromQueue}
             onHeightChange={handleInputHeightChange}
             bottomOffsetPx={terminalBottomOffset}
-            headerContent={
-              <>
-                {showInlineTodo ? (
-                  <TodoList
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    todos={combinedTodos as any}
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    queue={messageQueue as any}
-                    onRemoveFromQueue={removeFromQueue}
-                    variant="inline"
-                  />
-                ) : null}
-              </>
-            }
+            stackTodos={hasComposerPlanData ? (combinedTodos as Todo[]) : []}
+            stackQueue={hasComposerPlanData ? messageQueue : []}
+            planSlotHidden={hasComposerPlanData && !showInlineTodo}
           />
           </>
         )

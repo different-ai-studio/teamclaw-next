@@ -5,6 +5,7 @@ import { getBackend } from '@/lib/backend'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { useMemberPreferencesStore } from '@/stores/member-preferences-store'
 import { probeDaemonHttp, invalidateDaemonConnection } from '@/lib/daemon-local-client'
+import { markStartup } from '@/lib/startup-perf'
 
 /**
  * After onboarding a local daemon, adopt it as the user's default agent — but
@@ -150,16 +151,20 @@ export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get)
       set({ status: 'ready', loaded: true })
       return
     }
+    markStartup('daemon-refresh:start')
     const currentTeamId = useCurrentTeamStore.getState().team?.id ?? null
     const dTeam = await daemonTeamId()
+    markStartup('daemon-teamid:end')
     const base = computeOnboardingStatus(dTeam, currentTeamId)
     if (base !== 'ready') {
       // unknown / needs-onboard / mismatch — team-level, handled by the wizard.
       set({ status: base, loaded: true })
+      markStartup('daemon-refresh:end')
       return
     }
     // Onboarded to the current team: also verify running + token valid, auto-recover.
     const first = await probeDaemonHttp()
+    markStartup('daemon-refresh:end')
     if (first.ok) {
       set({ status: 'ready', loaded: true })
       // Daemon and actor share a team — ensure the default team workspace is

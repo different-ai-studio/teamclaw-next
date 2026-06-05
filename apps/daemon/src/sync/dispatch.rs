@@ -51,6 +51,22 @@ impl SyncDispatcher {
         &self.secrets
     }
 
+    pub async fn team_share_gate(&self, team_id: &str) -> crate::team_link::TeamShareGate {
+        match &self.backend {
+            Some(b) => crate::team_link::team_share_gate(b.as_ref(), team_id).await,
+            None => crate::team_link::TeamShareGate::Enabled,
+        }
+    }
+
+    /// `true` when the cloud API reports an enabled share mode. When no backend
+    /// is wired (focused HTTP tests), returns `true` to preserve legacy link behavior.
+    pub async fn is_team_share_enabled(&self, team_id: &str) -> bool {
+        matches!(
+            self.team_share_gate(team_id).await,
+            crate::team_link::TeamShareGate::Enabled
+        )
+    }
+
     /// FC base URL for OSS sync: the same cloud the daemon authenticates
     /// against (from the backend), falling back to the default endpoint when no
     /// backend / no URL is available (e.g. tests).
@@ -139,7 +155,7 @@ impl SyncDispatcher {
                     // falls back to the remote default / `main`).
                     git_branch: secrets.git_branch.clone(),
                     git_token: None,
-                    shared_dir_name: "teamclaw".to_string(),
+                    shared_dir_name: crate::config::global_team_store::TEAM_LINK_NAME.to_string(),
                     env_secret: None,
                     enabled: true,
                 };
