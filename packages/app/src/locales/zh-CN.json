@@ -419,7 +419,10 @@
       "scopeAll": "全部",
       "copy": "复制",
       "clear": "清空",
-      "waiting": "等待 {{token}} …"
+      "waiting": "等待 {{token}} …",
+      "logFileSession": "{{dir}}/{{sessionId}}.log + _all.log",
+      "logFileAll": "{{dir}}/_all.log",
+      "openLog": "在 Finder 中打开日志"
     },
     "toast": {
       "emptyMessageTitle": "请输入消息内容",

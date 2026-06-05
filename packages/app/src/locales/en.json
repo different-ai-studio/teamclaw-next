@@ -419,7 +419,10 @@
       "scopeAll": "All",
       "copy": "Copy",
       "clear": "Clear",
-      "waiting": "Waiting for {{token}} …"
+      "waiting": "Waiting for {{token}} …",
+      "logFileSession": "{{dir}}/{{sessionId}}.log + _all.log",
+      "logFileAll": "{{dir}}/_all.log",
+      "openLog": "Open log in Finder"
     },
     "toast": {
       "emptyMessageTitle": "Enter a message",

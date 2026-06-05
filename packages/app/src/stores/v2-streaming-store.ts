@@ -938,12 +938,13 @@ export const useV2StreamingStore = create<State>((set, get) => ({
       if (!hasTools && textPartCount <= 1) {
         const preview = previewTextUpdate(existing, trimmedFinal);
         parts = preview.parts;
-      } else if (daemonFinalDuplicatesTranscript(parts, trimmedFinal)) {
-        parts = parts;
-      } else if (hasTools) {
-        parts = replaceLastPostToolTextPart(parts, trimmedFinal);
-      } else {
-        parts = reconcileSingleSegmentDrift(parts, trimmedFinal);
+      } else if (!daemonFinalDuplicatesTranscript(parts, trimmedFinal)) {
+        // When the daemon final duplicates the transcript, keep parts as-is.
+        if (hasTools) {
+          parts = replaceLastPostToolTextPart(parts, trimmedFinal);
+        } else {
+          parts = reconcileSingleSegmentDrift(parts, trimmedFinal);
+        }
       }
     }
 
