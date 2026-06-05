@@ -31,6 +31,10 @@ vi.mock('@/components/ui/traffic-lights', () => ({
   TrafficLights: () => null,
 }))
 
+vi.mock('@/hooks/use-session-workspace-labels', () => ({
+  useSessionWorkspaceLabels: () => new Map([['s1', 'copilot-ws-v3']]),
+}))
+
 const mkSessionRow = (over: Partial<{
   id: string
   title: string
@@ -127,5 +131,18 @@ describe('SessionListColumn', () => {
     useUIStore.setState({ sidebarFilter: { kind: 'pinned' } })
     rerender(<SessionListColumn />)
     expect(screen.queryByRole('button', { name: /显示定时会话|显示全部会话/ })).not.toBeInTheDocument()
+  })
+
+  it('shows workspace subline under session title in non-workspace filters', () => {
+    render(<SessionListColumn />)
+    expect(screen.getByTestId('v2-session-row-workspace')).toHaveTextContent('copilot-ws-v3')
+  })
+
+  it('hides workspace subline when filtering by workspace', () => {
+    useUIStore.setState({
+      sidebarFilter: { kind: 'workspace', workspaceId: 'ws1', path: '/p', name: 'copilot-ws-v3' },
+    })
+    render(<SessionListColumn />)
+    expect(screen.queryByTestId('v2-session-row-workspace')).not.toBeInTheDocument()
   })
 })

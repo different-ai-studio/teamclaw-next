@@ -31,6 +31,7 @@ import { buildSessionListActivityMap, type SessionListActivity } from '@/lib/ses
 import { loadSessionIdsForActor } from '@/lib/session-by-actor'
 import { loadSessionIdsForWorkspace } from '@/lib/session-by-workspace'
 import { actorAvatarColor } from '@/lib/actor-color'
+import { useSessionWorkspaceLabels } from '@/hooks/use-session-workspace-labels'
 
 /**
  * Merged row shape consumed by the rendering pipeline. Combines list-canonical
@@ -147,6 +148,7 @@ export function SessionListColumn() {
   // Load actor-session set when filter switches to actor mode.
   // teamId is only used for cache namespacing; the supabase query is by actor_id.
   const teamIdFromList = useCurrentTeamStore((s) => s.team?.id ?? '')
+  const sessionWorkspaceLabels = useSessionWorkspaceLabels(teamIdFromList || null)
   React.useEffect(() => {
     initPinnedSessionIds(workspacePath)
   }, [initPinnedSessionIds, workspacePath])
@@ -330,6 +332,8 @@ export function SessionListColumn() {
     const isActive = row.id === activeSessionId
     const activity = sessionActivityMap.get(row.id)
     const parts = participantsBySession[row.id] ?? []
+    const workspaceLabel = sessionWorkspaceLabels.get(row.id)
+    const showWorkspaceSubline = filter.kind !== 'workspace' && !!workspaceLabel
     return (
       <SidebarMenuItem key={row.id}>
         <SidebarMenuButton
@@ -387,6 +391,14 @@ export function SessionListColumn() {
                 </>
               )}
             </div>
+            {!isRenaming && showWorkspaceSubline && (
+              <span
+                className="w-full truncate font-mono text-[11px] text-faint"
+                data-testid="v2-session-row-workspace"
+              >
+                {workspaceLabel}
+              </span>
+            )}
             {/* Preview line: 2 lines max from last_message_preview. AGENTS.md §2. */}
             {!isRenaming && row.lastMessagePreview && (
               <div
