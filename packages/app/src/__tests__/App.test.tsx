@@ -81,6 +81,7 @@ vi.mock('sonner', () => ({
 vi.mock('@/lib/utils', () => ({
   cn: (...a: string[]) => a.join(' '),
   isTauri: () => false,
+  removeStartupSkeleton: () => {},
 }))
 vi.mock('@/lib/build-config', () => ({
   appShortName: 'teamclaw',

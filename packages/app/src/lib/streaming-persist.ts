@@ -28,6 +28,7 @@ function buildCanonicalPartsFromEntry(
 
   const replyContent = reply?.content?.trim() ? reply.content : "";
   if (
+    reply &&
     replyContent &&
     !orderedParts.some(
       (part) =>

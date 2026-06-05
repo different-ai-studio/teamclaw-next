@@ -115,7 +115,7 @@ export function ComposerStack({
   onRemoveFromQueue?: (id: string) => void;
   /** Hide plan slot visually but keep state (e.g. while approval card is showing). */
   planSlotHidden?: boolean;
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }) {
   const {
     sessionPermissionMode,

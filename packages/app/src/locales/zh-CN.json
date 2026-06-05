@@ -64,8 +64,6 @@
     "verify": "验证",
     "verifying": "验证中…",
     "useDifferentEmail": "换一个邮箱",
-    "settingUpWorkspace": "正在为你准备工作区…",
-    "loading": "加载中…",
     "serverConfigRequired": "Supabase 尚未配置。请返回并选择「使用自建 server」后再登录。",
     "upgrade": {
       "title": "升级账号",
@@ -160,7 +158,6 @@
     "showMore": "展开全文",
     "showLess": "收起",
     "streamingBar": {
-      "streaming": "正在输出…",
       "streamingActive": "正在回复",
       "waitingApproval": "等待你审批后继续…"
     },
@@ -176,8 +173,6 @@
       "waitingExternalPathApproval": "读取工作区外路径前需要你的确认",
       "childSessionWaitingApproval": "子会话正在等待你的审批",
       "toolInvocationWaitingApproval": "工具调用正在等待你的审批",
-      "pendingCount": "{{count}} 个待处理",
-      "waitingBadge": "等待审批",
       "queuePosition": "第 {{current}} / {{total}} 条",
       "approvalSectionAria": "权限审批",
       "approve": "允许"

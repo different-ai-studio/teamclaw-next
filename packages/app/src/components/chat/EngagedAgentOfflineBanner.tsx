@@ -105,11 +105,11 @@ export function pillSuffixForUiState(
 ): string | null {
   switch (uiState) {
     case 'offline':
-      return t('chat.sessionAgent.pillOffline')
+      return t('chat.sessionAgent.pillOffline', 'Offline')
     case 'stale':
-      return t('chat.sessionAgent.pillStale')
+      return t('chat.sessionAgent.pillStale', 'Rebind required')
     case 'connecting':
-      return t('chat.sessionAgent.pillConnecting')
+      return t('chat.sessionAgent.pillConnecting', 'Connecting…')
     default:
       return null
   }

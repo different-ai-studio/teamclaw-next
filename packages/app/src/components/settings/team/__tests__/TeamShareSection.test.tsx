@@ -161,6 +161,7 @@ describe('TeamShareSection', () => {
         teamId: 'team-1',
         workspacePath: '/workspace',
         accessToken: 'test-token',
+        teamSecretHex: null,
       })
     })
 

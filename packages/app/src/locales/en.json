@@ -64,8 +64,6 @@
     "verify": "Verify",
     "verifying": "Verifying…",
     "useDifferentEmail": "Use a different email",
-    "settingUpWorkspace": "Setting up your workspace…",
-    "loading": "Loading…",
     "serverConfigRequired": "Supabase is not configured. Go back and choose self-hosted server before signing in.",
     "upgrade": {
       "title": "Upgrade account",
@@ -160,7 +158,6 @@
     "showMore": "Show more",
     "showLess": "Show less",
     "streamingBar": {
-      "streaming": "Streaming…",
       "streamingActive": "Replying",
       "waitingApproval": "Waiting for your approval…"
     },
@@ -176,8 +173,6 @@
       "waitingExternalPathApproval": "Confirmation is required before accessing a path outside the workspace",
       "childSessionWaitingApproval": "A child session is waiting for your approval",
       "toolInvocationWaitingApproval": "A tool call is waiting for your approval",
-      "pendingCount": "{{count}} pending",
-      "waitingBadge": "Waiting for approval",
       "queuePosition": "{{current}} / {{total}}",
       "approvalSectionAria": "Permission approval",
       "approve": "Allow"
