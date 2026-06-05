@@ -98,6 +98,23 @@ export interface SessionDisplayRow {
   title: string | null;
 }
 
+export interface SessionDetailRow {
+  id: string;
+  team_id: string;
+  title: string;
+  mode: string;
+  idea_id: string | null;
+  primary_agent_id: string | null;
+  created_by_actor_id: string | null;
+  summary: string | null;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  acp_session_id: string | null;
+  binding: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 export interface SessionsBackend {
   listCurrentActorSessions(args: { limit: number; cursor: SessionListCursor | null }): Promise<SessionListPage>;
   markCurrentActorSessionViewed(sessionId: string, lastReadMessageId?: string | null): Promise<void>;
@@ -106,6 +123,7 @@ export interface SessionsBackend {
   updateSessionTitle(sessionId: string, title: string): Promise<void>;
   archiveSession(sessionId: string, archivedAt: string): Promise<void>;
   getSessionParticipants(sessionId: string): Promise<SessionParticipant[]>;
+  getSession(sessionId: string): Promise<SessionDetailRow | null>;
   getSessionTeamId(sessionId: string): Promise<string | null>;
   listSessionsForTeamSince(teamId: string, updatedAfter: string): Promise<SessionSyncRow[]>;
   listSessionDisplayRows(teamId: string, sessionIds: string[]): Promise<SessionDisplayRow[]>;
