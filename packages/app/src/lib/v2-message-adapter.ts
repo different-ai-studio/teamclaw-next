@@ -123,6 +123,56 @@ function parsePartsJson(json: string): MessagePart[] {
   }
 }
 
+function partText(part: MessagePart): string {
+  return (part.text || part.content || "").trim();
+}
+
+/** Merge ordered per-reply parts_json slices from the same turn (reload path). */
+function mergeTurnPartsFromReplies(replies: TeamclawMessage[]): MessagePart[] {
+  const sorted = [...replies].sort(compareTeamclawMessages);
+  const out: MessagePart[] = [];
+  const toolIndexById = new Map<string, number>();
+
+  for (const reply of sorted) {
+    const json = partsJson(reply);
+    if (!json.trim()) continue;
+    for (const part of parsePartsJson(json)) {
+      if (part.type === "tool-call" && part.toolCall) {
+        const toolId = part.toolCall.id;
+        const existingIndex = toolIndexById.get(toolId);
+        if (existingIndex !== undefined) {
+          out[existingIndex] = part;
+          continue;
+        }
+        toolIndexById.set(toolId, out.length);
+        out.push(part);
+        continue;
+      }
+      if (part.type === "reasoning") {
+        const text = partText(part);
+        if (!text) continue;
+        const last = out[out.length - 1];
+        if (last?.type === "reasoning") {
+          const merged = `${partText(last)}\n\n${text}`.trim();
+          out[out.length - 1] = { ...last, text: merged, content: merged };
+        } else {
+          out.push(part);
+        }
+        continue;
+      }
+      if (part.type === "text") {
+        const text = partText(part);
+        if (!text) continue;
+        const last = out[out.length - 1];
+        if (last?.type === "text" && partText(last) === text) continue;
+        out.push(part);
+      }
+    }
+  }
+
+  return out;
+}
+
 function paramsFromDescription(description: string): Record<string, unknown> {
   if (!description) return {};
   if (!description.trim().startsWith("{")) {
@@ -274,6 +324,37 @@ function buildTurnSdkMessage(group: TeamclawMessage[]): SdkMessage {
   const thinkingText = thinking.map((t) => t.content).join("\n");
 
   const groupId = uniqueReplies[0]?.messageId ?? group[0].messageId;
+  const repliesWithParts = uniqueReplies.filter((reply) => partsJson(reply).trim());
+  const mergedPersistedParts =
+    repliesWithParts.length > 1
+      ? mergeTurnPartsFromReplies(repliesWithParts)
+      : repliesWithParts.length === 1
+        ? parsePartsJson(partsJson(repliesWithParts[0]!))
+        : [];
+
+  if (mergedPersistedParts.length > 0) {
+    const canonicalReply = uniqueReplies[uniqueReplies.length - 1]!;
+    const canonicalToolCalls = mergedPersistedParts
+      .filter((part) => part.type === "tool-call" && part.toolCall)
+      .map((part) => part.toolCall!);
+    const canonicalModelID =
+      canonicalReply.model ||
+      uniqueReplies[uniqueReplies.length - 1]?.model ||
+      group.find((m) => m.model)?.model ||
+      undefined;
+    return {
+      id: canonicalReply.messageId,
+      sessionId: canonicalReply.sessionId,
+      senderActorId: canonicalReply.senderActorId,
+      role: "assistant",
+      content: replyText,
+      modelID: canonicalModelID,
+      parts: mergedPersistedParts,
+      toolCalls: canonicalToolCalls,
+      timestamp: new Date(Number(group[0].createdAt) * 1000),
+    };
+  }
+
   const canonicalReply = [...uniqueReplies].reverse().find((reply) => partsJson(reply));
   if (canonicalReply) {
     const canonicalParts = parsePartsJson(partsJson(canonicalReply));
