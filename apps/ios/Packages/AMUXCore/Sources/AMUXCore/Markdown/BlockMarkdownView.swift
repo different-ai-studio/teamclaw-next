@@ -1,4 +1,9 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 public struct BlockMarkdownView: View {
     let blocks: [MarkdownBlock]
@@ -14,6 +19,39 @@ public struct BlockMarkdownView: View {
         self.baseFont = baseFont
         self.codeFont = codeFont
     }
+
+    /// Pebble code-block fill, adaptive to color scheme. `#E2DFD9` (Hai
+    /// Pebble) in light, `#3A352F` (Sumi stone) in dark. Resolved via a
+    /// platform dynamic color since AMUXCore can't reach the AMUXSharedUI
+    /// theme without a dependency cycle.
+    static let pebbleAdaptive: Color = {
+        let light: UInt = 0xE2DFD9
+        let dark: UInt = 0x3A352F
+        #if canImport(UIKit)
+        return Color(UIColor { traits in
+            let hex = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(
+                red: CGFloat((hex >> 16) & 0xFF) / 255,
+                green: CGFloat((hex >> 8) & 0xFF) / 255,
+                blue: CGFloat(hex & 0xFF) / 255,
+                alpha: 1
+            )
+        })
+        #elseif canImport(AppKit)
+        return Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            let hex = isDark ? dark : light
+            return NSColor(
+                srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
+                green: CGFloat((hex >> 8) & 0xFF) / 255,
+                blue: CGFloat(hex & 0xFF) / 255,
+                alpha: 1
+            )
+        })
+        #else
+        return Color(red: 0xE2 / 255, green: 0xDF / 255, blue: 0xD9 / 255)
+        #endif
+    }()
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -45,9 +83,12 @@ public struct BlockMarkdownView: View {
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 // Hai's Pebble token inlined — AMUXCore can't import the
-                // higher-level AMUXSharedUI theme module without a cycle.
+                // higher-level AMUXSharedUI theme module without a cycle. Kept
+                // adaptive (Pebble light → Sumi "stone" dark) so the code-block
+                // fill doesn't strand the `.primary` text on a light ground in
+                // dark mode. Mirror AMUXTheme.pebble if that token changes.
                 .background(
-                    Color(red: 0xE2 / 255, green: 0xDF / 255, blue: 0xD9 / 255),
+                    Self.pebbleAdaptive,
                     in: RoundedRectangle(cornerRadius: 8)
                 )
                 .textSelection(.enabled)

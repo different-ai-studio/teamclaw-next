@@ -1,6 +1,12 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
-/// AMUX visual tokens — the **Hai 灰** wabi-sabi palette ratified for v1.
+/// AMUX visual tokens — the **Hai 灰** wabi-sabi palette ratified for v1, with
+/// the **Sumi 墨** dark variant from `DESIGN.md`.
 ///
 /// Six tokens drive the entire surface set: five paper/ink neutrals plus a
 /// single restrained vermillion accent. The principle is "spare the
@@ -8,41 +14,101 @@ import SwiftUI
 /// CTA, and the unread/permission marker. Everywhere else stays in
 /// Mist / Pebble / Slate / Basalt / Onyx.
 ///
+/// Each token is an **adaptive** color: it resolves to its Hai value in light
+/// mode and its Sumi value in dark mode via a platform dynamic provider
+/// (`UIColor` on iOS, `NSColor` on macOS). Because the resolution happens
+/// inside the system color, all `Color.amux.*` call sites pick up dark mode
+/// automatically — no per-view `@Environment(\.colorScheme)` branching.
+///
 /// The tokens are exposed as `Color.amux.*` so call sites read like a
 /// design spec rather than a hex bag.
 public enum AMUXTheme {
-    /// `#F2F0EC` — Mist. Primary background. Replaces iOS systemGray6.
-    public static let mist        = Color(red: 0xF2 / 255, green: 0xF0 / 255, blue: 0xEC / 255)
-    /// `#F8F6F1` — Paper. Soft white card surface. Replaces pure white.
-    public static let paper       = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF1 / 255)
-    /// `#E2DFD9` — Pebble. Secondary surface (chips, dividers, inactive).
-    public static let pebble      = Color(red: 0xE2 / 255, green: 0xDF / 255, blue: 0xD9 / 255)
-    /// `#A6A39C` — Slate. Tertiary text / muted decoration.
-    public static let slate       = Color(red: 0xA6 / 255, green: 0xA3 / 255, blue: 0x9C / 255)
-    /// `#5E5B55` — Basalt. Secondary text / icon stroke.
-    public static let basalt      = Color(red: 0x5E / 255, green: 0x5B / 255, blue: 0x55 / 255)
-    /// `#22201D` — Onyx. Primary text / ink. Replaces iOS label primary.
-    public static let onyx        = Color(red: 0x22 / 255, green: 0x20 / 255, blue: 0x1D / 255)
-    /// `#B84B36` — Cinnabar. The single accent. Active state, primary CTA,
-    /// unread dot, permission marker.
-    public static let cinnabar    = Color(red: 0xB8 / 255, green: 0x4B / 255, blue: 0x36 / 255)
-    /// `#8E3A2C` — Cinnabar deep. Destructive variant. Replaces iOS red.
-    public static let cinnabarDeep = Color(red: 0x8E / 255, green: 0x3A / 255, blue: 0x2C / 255)
-    /// `#6B8E5A` — Sage. Muted "active green". Replaces iOS green for the
-    /// breathing dot so it doesn't read as alarming next to Mist.
-    public static let sage        = Color(red: 0x6B / 255, green: 0x8E / 255, blue: 0x5A / 255)
+    /// Mist. Primary background. `#F2F0EC` light → `#181513` (night) dark.
+    public static let mist        = adaptive(light: 0xF2F0EC, dark: 0x181513)
+    /// Paper. Soft card surface. `#F8F6F1` light → `#25221E` (lamp) dark.
+    public static let paper       = adaptive(light: 0xF8F6F1, dark: 0x25221E)
+    /// Pebble. Secondary surface (chips, dividers, inactive). `#E2DFD9` →
+    /// `#3A352F` (stone).
+    public static let pebble      = adaptive(light: 0xE2DFD9, dark: 0x3A352F)
+    /// Slate. Tertiary text / muted decoration. `#A6A39C` → `#7A7166` (ash).
+    public static let slate       = adaptive(light: 0xA6A39C, dark: 0x7A7166)
+    /// Basalt. Secondary text / icon stroke. `#5E5B55` → `#CFC8BA` (a dimmed
+    /// bone, one step below the Onyx→bone primary so the text hierarchy
+    /// survives inversion).
+    public static let basalt      = adaptive(light: 0x5E5B55, dark: 0xCFC8BA)
+    /// Onyx. Primary text / ink. `#22201D` → `#E8E2D5` (bone).
+    public static let onyx        = adaptive(light: 0x22201D, dark: 0xE8E2D5)
+    /// Cinnabar. The single accent — active state, primary CTA, unread dot,
+    /// permission marker. `#B84B36` → `#D86B53` (ember; "coral becomes an
+    /// ember, never a stop sign").
+    public static let cinnabar    = adaptive(light: 0xB84B36, dark: 0xD86B53)
+    /// Cinnabar deep. Destructive variant. `#8E3A2C` reads as a desaturated,
+    /// non-alarming red on both the Mist and the Sumi night ground, so it is
+    /// held constant across modes.
+    public static let cinnabarDeep = adaptive(light: 0x8E3A2C, dark: 0x8E3A2C)
+    /// Sage. Muted "active green" for the breathing dot. `#6B8E5A` light →
+    /// `#7FA06B` dark (lifted so it reads against the night ground without
+    /// turning alarming).
+    public static let sage        = adaptive(light: 0x6B8E5A, dark: 0x7FA06B)
 
-    /// Hairline color — `Onyx` at low opacity. Use for row separators and
-    /// quiet card borders. The warm tint matches the Mist background so
-    /// hairlines never look bluish-cool against the paper.
-    public static let hairline    = Color(red: 0x22 / 255, green: 0x20 / 255, blue: 0x1D / 255)
-        .opacity(0.10)
+    /// Hairline — ink at low opacity. Use for row separators and quiet card
+    /// borders. Light: Onyx @ 10% (warm, matches Mist). Dark: bone @ 10% so
+    /// the line lifts off the night ground instead of vanishing into it.
+    public static let hairline    = adaptive(light: 0x22201D, dark: 0xE8E2D5, opacity: 0.10)
+
+    /// Build a light/dark adaptive `Color` from two `0xRRGGBB` hex values.
+    /// Resolution happens inside a platform dynamic color so the value tracks
+    /// the active color scheme at render time.
+    static func adaptive(light: UInt, dark: UInt, opacity: Double = 1.0) -> Color {
+        #if canImport(UIKit)
+        return Color(UIColor { traits in
+            let hex = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(rgb: hex, alpha: opacity)
+        })
+        #elseif canImport(AppKit)
+        return Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            let hex = isDark ? dark : light
+            return NSColor(rgb: hex, alpha: opacity)
+        })
+        #else
+        // Fallback for platforms without a dynamic-color primitive: light only.
+        let r = Double((light >> 16) & 0xFF) / 255
+        let g = Double((light >> 8) & 0xFF) / 255
+        let b = Double(light & 0xFF) / 255
+        return Color(red: r, green: g, blue: b).opacity(opacity)
+        #endif
+    }
 }
 
+#if canImport(UIKit)
+private extension UIColor {
+    convenience init(rgb hex: UInt, alpha: Double) {
+        self.init(
+            red: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: CGFloat(alpha)
+        )
+    }
+}
+#elseif canImport(AppKit)
+private extension NSColor {
+    convenience init(rgb hex: UInt, alpha: Double) {
+        self.init(
+            srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: CGFloat(alpha)
+        )
+    }
+}
+#endif
+
 public extension Color {
-    /// Namespaced access to the Hai palette tokens. Prefer
-    /// `Color.amux.cinnabar` over hard-coding hex; switching themes later
-    /// becomes a single-file change.
+    /// Namespaced access to the Hai / Sumi palette tokens. Prefer
+    /// `Color.amux.cinnabar` over hard-coding hex; each token already adapts
+    /// to light/dark, so call sites need no color-scheme branching.
     enum amux {
         public static var mist: Color         { AMUXTheme.mist }
         public static var paper: Color        { AMUXTheme.paper }
