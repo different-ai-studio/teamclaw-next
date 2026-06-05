@@ -7,7 +7,7 @@ import { useActorsForTeam, type ActorRow as ActorRowData } from '@/components/pa
 import { InviteActorDialog } from '@/components/sidebar/InviteActorDialog'
 import { ActorRow } from '@/components/sidebar/ActorRow'
 import { LocalDaemonRow } from '@/components/sidebar/LocalDaemonRow'
-import { getCurrentDaemonAgent } from '@/lib/daemon-agent-admin'
+import { getLocalDaemonAgent } from '@/lib/daemon-agent-admin'
 import { ActorDetailDialog } from '@/components/sidebar/ActorDetailDialog'
 import {
   AlertDialog,
@@ -46,7 +46,7 @@ export function ActorsSection() {
   React.useEffect(() => {
     if (!teamId) { setLocalDaemonAgentId(null); return }
     let cancelled = false
-    void getCurrentDaemonAgent(teamId).then((a) => { if (!cancelled) setLocalDaemonAgentId(a?.id ?? null) })
+    void getLocalDaemonAgent(teamId).then((a) => { if (!cancelled) setLocalDaemonAgentId(a?.id ?? null) })
     return () => { cancelled = true }
   }, [teamId])
 
@@ -57,7 +57,7 @@ export function ActorsSection() {
 
   // The local daemon's full actor row (for the pinned LocalDaemonRow + its
   // shared right-click menu). Resolved from the team actor list by the id we
-  // looked up via getCurrentDaemonAgent.
+  // looked up via getLocalDaemonAgent.
   const localDaemonActor = React.useMemo(
     () => actors.find((a) => a.id === localDaemonAgentId) ?? null,
     [actors, localDaemonAgentId],

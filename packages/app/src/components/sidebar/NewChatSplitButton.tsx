@@ -1,49 +1,41 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, Loader2, Plus, SquarePen } from 'lucide-react'
-import { createQuickDaemonSession } from '@/lib/quick-daemon-session'
+import type { QuickChatState } from '@/hooks/use-quick-chat-readiness'
 import { useUIStore } from '@/stores/ui'
 import { cn } from '@/lib/utils'
 
 export type NewChatSplitButtonProps = {
-  hasWorkspace: boolean
-  localAgentReady: boolean
-  onOpenAgentSettings: () => void
+  quickChatState: QuickChatState
+  creating: boolean
+  onPrimaryClick: () => void
+}
+
+function isPrimaryDisabled(state: QuickChatState, creating: boolean): boolean {
+  if (creating) return true
+  return (
+    state.kind === 'no_workspace'
+    || state.kind === 'no_team'
+    || state.kind === 'daemon_down'
+    || state.kind === 'loading'
+  )
 }
 
 export function NewChatSplitButton({
-  hasWorkspace,
-  localAgentReady,
-  onOpenAgentSettings,
+  quickChatState,
+  creating,
+  onPrimaryClick,
 }: NewChatSplitButtonProps) {
   const { t } = useTranslation()
-  const [creating, setCreating] = React.useState(false)
   const [moreOpen, setMoreOpen] = React.useState(false)
-
-  const handleQuickCreate = React.useCallback(async () => {
-    if (!hasWorkspace || !localAgentReady || creating) return
-    setCreating(true)
-    try {
-      const result = await createQuickDaemonSession()
-      if (!result) {
-        const { toast } = await import('sonner')
-        toast.error(t('chat.quickSessionCreateError', 'Could not start a session with your local agent'))
-      }
-    } catch (e) {
-      console.error('[NewChatSplitButton] quick create failed', e)
-      const { toast } = await import('sonner')
-      toast.error(t('chat.quickSessionCreateError', 'Could not start a session with your local agent'))
-    } finally {
-      setCreating(false)
-    }
-  }, [hasWorkspace, localAgentReady, creating, t])
+  const hasWorkspace = quickChatState.kind !== 'no_workspace'
 
   const openMultiPersonDialog = () => {
     setMoreOpen(false)
     useUIStore.getState().openNewSessionDialog()
   }
 
-  const primaryDisabled = !hasWorkspace || !localAgentReady || creating
+  const primaryDisabled = isPrimaryDisabled(quickChatState, creating)
 
   return (
     <div className="flex w-full flex-col gap-1.5">
@@ -51,7 +43,7 @@ export function NewChatSplitButton({
         <div className="flex w-full bg-coral">
           <button
             type="button"
-            onClick={() => void handleQuickCreate()}
+            onClick={onPrimaryClick}
             disabled={primaryDisabled}
             className={cn(
               'flex min-w-0 flex-1 items-center gap-2 rounded-none px-2.5 py-1.5 text-left text-[13px] font-semibold text-white transition-colors',
@@ -128,26 +120,6 @@ export function NewChatSplitButton({
           </div>
         )}
       </div>
-      {hasWorkspace && !localAgentReady && (
-        <div className="px-0.5">
-          <p className="text-[11.5px] leading-snug text-muted-foreground">
-            {t('chat.noLocalDaemonAgent', 'No local amuxd agent on this device')}
-          </p>
-          <p className="mt-0.5 text-[11px] leading-snug text-faint">
-            {t(
-              'chat.noLocalDaemonAgentHint',
-              'Finish agent setup or start the daemon, then try again.',
-            )}
-          </p>
-          <button
-            type="button"
-            onClick={onOpenAgentSettings}
-            className="mt-1.5 text-[11.5px] font-medium text-ink-2 underline-offset-2 hover:underline"
-          >
-            {t('chat.openAgentSettings', 'Open agent settings')}
-          </button>
-        </div>
-      )}
     </div>
   )
 }

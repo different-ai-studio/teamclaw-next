@@ -7,7 +7,7 @@ import { DaemonOnboardingWizard } from '@/components/auth/DaemonOnboardingWizard
 import { useDaemonOnboardingStore } from '@/stores/daemon-onboarding'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import {
-  getCurrentDaemonAgent,
+  getLocalDaemonAgent,
   listAgentAccess,
   listTeamMembersForAccess,
   removeAgentAccess,
@@ -20,6 +20,7 @@ import {
   type CurrentDaemonAgent,
   type TeamMemberOption,
 } from '@/lib/daemon-agent-admin'
+import { useUIStore } from '@/stores/ui'
 import { cn, isTauri } from '@/lib/utils'
 import { SectionHeader, SettingCard } from './shared'
 
@@ -61,6 +62,8 @@ export function DaemonGeneralSection() {
   // is cleared (status 'mismatch'); once re-init starts there's no going back.
   const onboardingStatus = useDaemonOnboardingStore((s) => s.status)
   const onboardingBusy = useDaemonOnboardingStore((s) => s.busy)
+  const daemonGeneralPrompt = useUIStore((s) => s.daemonGeneralPrompt)
+  const clearDaemonGeneralPrompt = useUIStore((s) => s.clearDaemonGeneralPrompt)
 
   // The local daemon is single-team (its team_id is fixed at `amuxd init`).
   // Read it so we can warn when it diverges from the app's selected team —
@@ -87,8 +90,9 @@ export function DaemonGeneralSection() {
     setLoading(true)
     setError(null)
     try {
-      const nextAgent = await getCurrentDaemonAgent(team.id)
+      const nextAgent = await getLocalDaemonAgent(team.id)
       setAgent(nextAgent)
+      if (nextAgent) clearDaemonGeneralPrompt()
       setDisplayName(nextAgent?.displayName ?? '')
       setVisibility(nextAgent?.visibility ?? 'team')
       setDefaultAgentType(nextAgent?.defaultAgentType ?? '')
@@ -104,7 +108,7 @@ export function DaemonGeneralSection() {
     } finally {
       setLoading(false)
     }
-  }, [team?.id])
+  }, [team?.id, clearDaemonGeneralPrompt])
 
   React.useEffect(() => {
     void load()
@@ -227,6 +231,38 @@ export function DaemonGeneralSection() {
         </SettingCard>
       )}
 
+      {daemonGeneralPrompt === 'quick_chat' && !agent && !loading && (
+        <SettingCard className="border-coral/25 bg-coral-soft/40">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-coral" />
+            <div className="min-w-0 space-y-1.5">
+              <p className="text-[13px] font-medium text-foreground">
+                {t('settings.daemonGeneral.quickChatBlockedTitle', '无法一键开聊')}
+              </p>
+              <p className="text-[12px] leading-5 text-muted-foreground">
+                {t(
+                  'settings.daemonGeneral.quickChatBlockedDesc',
+                  '本机 Agent 尚未加入当前团队。完成下方绑定后，即可使用侧边栏的「新聊天」与本机 Agent 开聊。',
+                )}
+              </p>
+              <div className="pt-1">
+                <Button
+                  size="sm"
+                  className="h-8 gap-1.5"
+                  onClick={() => {
+                    clearDaemonGeneralPrompt()
+                    setRebinding(true)
+                  }}
+                >
+                  <Bot className="h-3.5 w-3.5" />
+                  {t('settings.daemonGeneral.bindLocalAgent', '绑定本机 Agent')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </SettingCard>
+      )}
+
       {teamMismatch && (
         <SettingCard className="border-amber-500/30 bg-amber-500/5">
           <div className="flex items-start gap-3">
@@ -279,6 +315,19 @@ export function DaemonGeneralSection() {
           <p className="text-[13px] text-muted-foreground">
             {t('settings.daemonGeneral.noAgent', 'No daemon agent is associated with this machine yet.')}
           </p>
+          {daemonGeneralPrompt !== 'quick_chat' && (
+            <div className="mt-3">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5"
+                onClick={() => setRebinding(true)}
+              >
+                <Bot className="h-3.5 w-3.5" />
+                {t('settings.daemonGeneral.bindLocalAgent', '绑定本机 Agent')}
+              </Button>
+            </div>
+          )}
         </SettingCard>
       ) : (
         <>
@@ -455,6 +504,7 @@ export function DaemonGeneralSection() {
           <DaemonOnboardingWizard
             onDone={() => {
               setRebinding(false)
+              clearDaemonGeneralPrompt()
               // Daemon is now bound to the current team — clear the warning and
               // reload the agent profile/access for the freshly-bound team.
               void loadDaemonTeamId()

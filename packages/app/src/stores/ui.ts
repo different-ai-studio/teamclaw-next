@@ -31,6 +31,9 @@ export type SidebarFilter =
 
 export type SettingsSection = 'llm' | 'general' | 'voice' | 'prompt' | 'mcp' | 'channels' | 'automation' | 'daemonGeneral' | 'daemonWorkspaces' | 'daemonRuntimes' | 'team' | 'envVars' | 'skills' | 'roles' | 'rolesSkills' | 'knowledge' | 'deps' | 'tokenUsage' | 'privacy' | 'permissions' | 'leaderboard' | 'shortcuts' | 'cache'
 
+/** Context passed when opening Agent settings from a blocked quick-new-chat action. */
+export type DaemonGeneralPrompt = 'quick_chat'
+
 interface UIState {
   currentView: View
   layoutMode: LayoutMode
@@ -44,6 +47,8 @@ interface UIState {
    * share state. */
   actorSheetOpen: boolean
   settingsInitialSection: SettingsSection | null
+  /** Shown as a banner in DaemonGeneralSection when the user was redirected here. */
+  daemonGeneralPrompt: DaemonGeneralPrompt | null
   draftPreselectedActor: DraftActor | null
   sidebarFilter: SidebarFilter
   ideasSectionCollapsed: boolean
@@ -71,6 +76,8 @@ interface UIState {
   selectDefaultPrimaryTab: (tab: DefaultPrimaryTab) => void
   openDefaultMoreDestination: (destination: DefaultMoreDestination) => Promise<void> | void
   openSettings: (section?: SettingsSection) => void
+  openDaemonAgentSettings: (prompt?: DaemonGeneralPrompt) => void
+  clearDaemonGeneralPrompt: () => void
   closeSettings: () => void
   setLayoutMode: (mode: LayoutMode) => void
   toggleLayoutMode: () => void
@@ -94,6 +101,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   defaultMoreOpen: false,
   actorSheetOpen: false,
   settingsInitialSection: null,
+  daemonGeneralPrompt: null,
   draftPreselectedActor: null,
   sidebarFilter: { kind: 'all' },
   ideasSectionCollapsed: false,
@@ -132,6 +140,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       defaultMoreOpen: false,
       currentView: 'chat',
       settingsInitialSection: null,
+      daemonGeneralPrompt: null,
     })
 
     if (tab === 'session') {
@@ -156,9 +165,22 @@ export const useUIStore = create<UIState>((set, get) => ({
   openSettings: (section) => set({
     currentView: 'settings',
     settingsInitialSection: section ?? null,
+    daemonGeneralPrompt: null,
   }),
 
-  closeSettings: () => set({ currentView: 'chat', settingsInitialSection: null }),
+  openDaemonAgentSettings: (prompt) => set({
+    currentView: 'settings',
+    settingsInitialSection: 'daemonGeneral',
+    daemonGeneralPrompt: prompt ?? null,
+  }),
+
+  clearDaemonGeneralPrompt: () => set({ daemonGeneralPrompt: null }),
+
+  closeSettings: () => set({
+    currentView: 'chat',
+    settingsInitialSection: null,
+    daemonGeneralPrompt: null,
+  }),
 
   startNewChat: () => {
     // Switch to chat view synchronously so settings hides immediately —
@@ -167,6 +189,7 @@ export const useUIStore = create<UIState>((set, get) => ({
     set({
       currentView: 'chat',
       settingsInitialSection: null,
+      daemonGeneralPrompt: null,
       // Starting a fresh chat overrides any pending actor-draft selection.
       draftPreselectedActor: null,
       sidebarFilter: { kind: 'all' },
@@ -235,6 +258,7 @@ export const useUIStore = create<UIState>((set, get) => ({
     set({
       currentView: 'chat',
       settingsInitialSection: null,
+      daemonGeneralPrompt: null,
     })
     useWorkspaceStore.getState().clearSelection()
     useTabsStore.getState().hideAll()
@@ -254,6 +278,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       defaultMoreOpen: false,
       currentView: 'chat',
       settingsInitialSection: null,
+      daemonGeneralPrompt: null,
     })
     // Mirror startNewChat's clear-out so the chat view shows an empty
     // canvas with the preselected actor as the implicit recipient. We
