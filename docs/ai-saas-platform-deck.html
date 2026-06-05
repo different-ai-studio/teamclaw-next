@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TeamClaw · AI-SaaS 平台 — 项目演示</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Noto+Serif+SC:wght@400;600;700;900&family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F4EFE4;        /* warm paper */
+    --paper-2:#ECE5D6;
+    --ink:#211E1A;          /* near-black ink */
+    --ink-soft:#5A544A;
+    --coral:#DF4B2E;        /* sharp accent */
+    --coral-deep:#B53A23;
+    --sage:#6E7257;         /* secondary */
+    --clay:#A8744C;
+    --line:rgba(33,30,26,.16);
+    --line-strong:rgba(33,30,26,.32);
+    --ok:#3E6B4F;
+    --build:#B5731F;
+    --shadow:0 18px 50px -24px rgba(33,30,26,.45);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"Noto Sans SC",sans-serif;
+    font-weight:400;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* grain texture */
+  body::after{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:.04;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .deck{position:fixed;inset:0}
+  .slide{
+    position:absolute;inset:0;
+    display:flex;flex-direction:column;justify-content:center;
+    padding:clamp(2.2rem,5.5vw,6rem);
+    opacity:0;visibility:hidden;
+    transform:translateY(14px) scale(.992);
+    transition:opacity .5s ease,transform .6s cubic-bezier(.2,.7,.2,1),visibility 0s linear .55s;
+    overflow:hidden;
+  }
+  .slide.active{opacity:1;visibility:visible;transform:none;transition:opacity .55s ease,transform .7s cubic-bezier(.2,.7,.2,1)}
+
+  /* staggered reveal */
+  .slide.active [data-r]{animation:rise .65s cubic-bezier(.2,.7,.2,1) both}
+  .slide.active [data-r="1"]{animation-delay:.06s}
+  .slide.active [data-r="2"]{animation-delay:.14s}
+  .slide.active [data-r="3"]{animation-delay:.22s}
+  .slide.active [data-r="4"]{animation-delay:.30s}
+  .slide.active [data-r="5"]{animation-delay:.38s}
+  .slide.active [data-r="6"]{animation-delay:.46s}
+  .slide.active [data-r="7"]{animation-delay:.54s}
+  .slide.active [data-r="8"]{animation-delay:.62s}
+  @keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+
+  /* typography */
+  .kicker{
+    font-family:"JetBrains Mono",monospace;font-size:.72rem;letter-spacing:.28em;
+    text-transform:uppercase;color:var(--coral);font-weight:500;margin-bottom:1.4rem;
+    display:flex;align-items:center;gap:.7rem;
+  }
+  .kicker::before{content:"";width:26px;height:1px;background:var(--coral)}
+  h1{font-family:"Noto Serif SC",serif;font-weight:900;line-height:1.04;letter-spacing:-.01em}
+  h2{font-family:"Noto Serif SC",serif;font-weight:700;line-height:1.1;font-size:clamp(1.7rem,3.6vw,3rem);letter-spacing:-.01em}
+  .lead{color:var(--ink-soft);font-size:clamp(1rem,1.5vw,1.3rem);line-height:1.7;font-weight:300;max-width:60ch}
+  .serif{font-family:"Noto Serif SC",serif}
+  .fr{font-family:"Fraunces",serif}
+  .mono{font-family:"JetBrains Mono",monospace}
+  em{color:var(--coral);font-style:normal;font-weight:500}
+  strong{font-weight:700}
+
+  /* ---------- COVER ---------- */
+  #s-cover{justify-content:space-between}
+  .cover-top{display:flex;justify-content:space-between;align-items:flex-start}
+  .brand{font-family:"JetBrains Mono",monospace;font-weight:700;letter-spacing:.12em;font-size:.9rem}
+  .brand span{color:var(--coral)}
+  .cover-main h1{font-size:clamp(2.8rem,9vw,8rem)}
+  .cover-main .sub{font-family:"Fraunces",serif;font-style:italic;font-weight:400;font-size:clamp(1.1rem,2.6vw,2rem);color:var(--ink-soft);margin-top:1.4rem}
+  .cover-foot{display:flex;justify-content:space-between;align-items:flex-end;gap:2rem;flex-wrap:wrap}
+  .cover-foot .tagline{font-family:"Noto Serif SC",serif;font-weight:600;font-size:clamp(1rem,2vw,1.5rem);max-width:24ch;line-height:1.4}
+  .cover-foot .meta{font-family:"JetBrains Mono",monospace;font-size:.74rem;color:var(--ink-soft);text-align:right;line-height:1.9}
+  .bigmark{position:absolute;right:-4vw;top:38%;font-family:"Fraunces",serif;font-weight:900;font-size:42vw;color:var(--coral);opacity:.06;line-height:.8;pointer-events:none;z-index:0}
+
+  /* ---------- generic heads ---------- */
+  .slide-head{margin-bottom:clamp(1.4rem,3vh,2.6rem)}
+  .slide-num{position:absolute;top:clamp(1.6rem,4vw,3rem);right:clamp(1.8rem,4.5vw,4rem);font-family:"Fraunces",serif;font-weight:900;font-size:clamp(2rem,5vw,4rem);color:var(--ink);opacity:.1;z-index:0}
+
+  /* ---------- columns ---------- */
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:clamp(1.4rem,3vw,3.2rem);align-items:start}
+  .panel{background:var(--paper-2);border:1px solid var(--line);border-radius:4px;padding:clamp(1.1rem,2vw,1.8rem)}
+  .panel.coral{background:#F7E6DF;border-color:rgba(223,75,46,.3)}
+  .panel h3{font-family:"Noto Serif SC",serif;font-size:1.15rem;margin-bottom:.7rem;display:flex;align-items:center;gap:.6rem}
+  .panel p{color:var(--ink-soft);font-weight:300;line-height:1.65;font-size:.95rem}
+  .tag{font-family:"JetBrains Mono",monospace;font-size:.62rem;letter-spacing:.12em;padding:.18rem .5rem;border-radius:99px;text-transform:uppercase;font-weight:500}
+  .tag.old{background:rgba(33,30,26,.08);color:var(--ink-soft)}
+  .tag.new{background:rgba(223,75,46,.14);color:var(--coral-deep)}
+
+  /* ---------- decision cards ---------- */
+  .dgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:clamp(.9rem,1.8vw,1.5rem)}
+  .dcard{background:var(--paper-2);border:1px solid var(--line);border-left:3px solid var(--coral);border-radius:3px;padding:1.1rem 1.3rem}
+  .dcard .dn{font-family:"Fraunces",serif;font-weight:900;color:var(--coral);font-size:1.5rem;line-height:1}
+  .dcard h4{font-family:"Noto Serif SC",serif;font-size:1.05rem;margin:.5rem 0 .4rem}
+  .dcard p{font-size:.85rem;color:var(--ink-soft);font-weight:300;line-height:1.6}
+
+  /* ---------- architecture diagram ---------- */
+  .arch{display:flex;flex-direction:column;gap:.5rem;width:100%;max-width:1100px;margin:0 auto}
+  .band{border:1px solid var(--line);border-radius:6px;padding:.85rem 1rem;position:relative;background:var(--paper-2)}
+  .band.cloud{background:#EAE7DB;border-color:var(--line-strong)}
+  .band.app{background:#F7E6DF;border-color:rgba(223,75,46,.3)}
+  .band-label{position:absolute;top:-9px;left:14px;background:var(--paper);padding:0 .5rem;font-family:"JetBrains Mono",monospace;font-size:.62rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-soft);font-weight:500}
+  .band.app .band-label{color:var(--coral-deep)}
+  .chips{display:flex;gap:.5rem;flex-wrap:wrap}
+  .chip{background:var(--paper);border:1px solid var(--line);border-radius:4px;padding:.5rem .75rem;font-size:.78rem;font-weight:500;flex:1;min-width:120px}
+  .chip .ct{font-family:"JetBrains Mono",monospace;font-size:.6rem;color:var(--coral);letter-spacing:.1em;display:block;margin-bottom:.2rem;text-transform:uppercase}
+  .chip small{color:var(--ink-soft);font-weight:300;font-size:.68rem;display:block;margin-top:.15rem;line-height:1.4}
+  .chip.core{border-color:var(--line-strong);border-width:2px}
+  .chip.s4{border-color:var(--coral);border-width:2px;background:#F7E6DF}
+  .flow{text-align:center;color:var(--coral);font-size:1rem;line-height:.4;font-weight:700}
+
+  /* ---------- table ---------- */
+  table{width:100%;border-collapse:collapse;font-size:.9rem}
+  th,td{text-align:left;padding:.7rem .85rem;border-bottom:1px solid var(--line)}
+  th{font-family:"JetBrains Mono",monospace;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);font-weight:500}
+  td .mono{font-size:.82rem}
+  tr td:first-child{font-weight:500}
+  .win{color:var(--coral-deep);font-weight:700}
+  .star{color:var(--coral)}
+
+  /* ---------- batteries grid ---------- */
+  .bgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:.7rem}
+  .bcat{background:var(--paper-2);border:1px solid var(--line);border-radius:5px;padding:.85rem .9rem}
+  .bcat h4{font-family:"Noto Serif SC",serif;font-size:.95rem;margin-bottom:.55rem;padding-bottom:.4rem;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:.4rem}
+  .bcat h4 .bl{font-family:"Fraunces",serif;color:var(--coral);font-weight:900}
+  .bcat li{list-style:none;font-size:.74rem;color:var(--ink-soft);font-weight:300;line-height:1.5;margin-bottom:.32rem;padding-left:1.15rem;position:relative}
+  .bcat li::before{position:absolute;left:0;top:0;font-family:"JetBrains Mono",monospace;font-size:.7rem}
+  .bcat li.have::before{content:"✓";color:var(--ok)}
+  .bcat li.todo::before{content:"◆";color:var(--build)}
+
+  /* ---------- roadmap ---------- */
+  .road{display:flex;gap:.55rem;align-items:stretch;width:100%}
+  .stage{flex:1;border:1px solid var(--line);border-radius:5px;padding:.85rem .8rem;background:var(--paper-2);position:relative;display:flex;flex-direction:column;gap:.35rem}
+  .stage.mvp{background:#F7E6DF;border-color:var(--coral);border-width:2px}
+  .stage.cur{background:var(--ink);color:var(--paper)}
+  .stage .sid{font-family:"Fraunces",serif;font-weight:900;font-size:1.3rem;line-height:1}
+  .stage.cur .sid{color:var(--coral)}
+  .stage h5{font-family:"Noto Serif SC",serif;font-size:.82rem;line-height:1.25}
+  .stage p{font-size:.66rem;color:var(--ink-soft);font-weight:300;line-height:1.45}
+  .stage.cur p{color:rgba(244,239,228,.7)}
+  .stage .ph{margin-top:auto;font-family:"JetBrains Mono",monospace;font-size:.56rem;letter-spacing:.1em;text-transform:uppercase;color:var(--coral)}
+  .mvp-band{margin-top:1.1rem;font-size:.85rem;color:var(--ink-soft);font-weight:300;border-left:3px solid var(--coral);padding-left:.9rem;line-height:1.6}
+
+  /* ---------- step flow ---------- */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem;width:100%}
+  .step{background:var(--paper-2);border:1px solid var(--line);border-radius:6px;padding:1rem 1.1rem;position:relative;display:flex;flex-direction:column;gap:.35rem}
+  .step .sn{font-family:"Fraunces",serif;font-weight:900;font-size:1.7rem;color:var(--coral);line-height:1}
+  .step h4{font-family:"Noto Serif SC",serif;font-size:1rem}
+  .step p{font-size:.8rem;color:var(--ink-soft);font-weight:300;line-height:1.55}
+  .step .sk{position:absolute;top:.95rem;right:1.1rem;font-family:"JetBrains Mono",monospace;font-size:.56rem;letter-spacing:.1em;color:var(--clay);text-transform:uppercase}
+  .step.accent{background:#F7E6DF;border-color:rgba(223,75,46,.3)}
+
+  /* ---------- workspace ---------- */
+  .wsbox{border:2px solid var(--coral);border-radius:8px;padding:1.3rem 1.2rem 1.3rem;background:#F7E6DF;position:relative;width:100%;max-width:1080px;margin:0 auto}
+  .wsmods{display:grid;grid-template-columns:repeat(5,1fr);gap:.7rem}
+  .wsmod{background:var(--paper);border:1px solid var(--line);border-radius:5px;padding:.85rem .85rem}
+  .wsmod .ct{font-family:"JetBrains Mono",monospace;font-size:.6rem;color:var(--coral);letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:.3rem}
+  .wsmod b{font-family:"Noto Serif SC",serif;font-size:.95rem;font-weight:600}
+  .wsmod small{display:block;color:var(--ink-soft);font-weight:300;font-size:.68rem;line-height:1.45;margin-top:.3rem}
+
+  /* ---------- principles ---------- */
+  .pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(.9rem,2vw,1.6rem)}
+  .pcard{padding:.4rem 0}
+  .pcard .pn{font-family:"Fraunces",serif;font-weight:900;font-size:2.2rem;color:var(--coral);line-height:1;opacity:.85}
+  .pcard h4{font-family:"Noto Serif SC",serif;font-size:1.1rem;margin:.55rem 0 .4rem}
+  .pcard p{font-size:.85rem;color:var(--ink-soft);font-weight:300;line-height:1.6}
+
+  /* ---------- code block ---------- */
+  .code{background:var(--ink);color:#E9E3D6;border-radius:6px;padding:1.1rem 1.3rem;font-family:"JetBrains Mono",monospace;font-size:.78rem;line-height:1.7;overflow:auto;box-shadow:var(--shadow)}
+  .code .k{color:#E8956B}.code .c{color:#7E8870}.code .f{color:#9FB0C9}
+
+  .iface-list li{list-style:none;font-size:.92rem;margin-bottom:.55rem;padding-left:1.3rem;position:relative;color:var(--ink-soft);font-weight:300;line-height:1.5}
+  .iface-list li::before{content:"→";position:absolute;left:0;color:var(--coral);font-weight:700}
+  .iface-list b{color:var(--ink);font-weight:600}
+
+  /* ---------- closing ---------- */
+  #s-end{align-items:flex-start;justify-content:center}
+  #s-end h1{font-size:clamp(2.2rem,6vw,5rem);max-width:18ch}
+  .end-line{font-family:"Fraunces",serif;font-style:italic;font-size:clamp(1.1rem,2.4vw,1.8rem);color:var(--coral);margin-top:1.5rem}
+
+  /* ---------- nav / chrome ---------- */
+  .progress{position:fixed;top:0;left:0;height:3px;background:var(--coral);z-index:100;transition:width .4s ease}
+  .nav{position:fixed;bottom:1.4rem;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:1rem;z-index:100;
+       background:rgba(244,239,228,.8);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:99px;padding:.5rem .9rem}
+  .dots{display:flex;gap:.4rem}
+  .dot{width:7px;height:7px;border-radius:99px;background:var(--line-strong);border:none;cursor:pointer;padding:0;transition:all .3s}
+  .dot.on{background:var(--coral);width:22px}
+  .counter{font-family:"JetBrains Mono",monospace;font-size:.72rem;color:var(--ink-soft);min-width:48px;text-align:center}
+  .arrow{background:none;border:none;cursor:pointer;color:var(--ink);font-size:1.1rem;line-height:1;padding:.2rem .4rem;border-radius:6px;transition:.2s}
+  .arrow:hover{background:var(--line);color:var(--coral)}
+  .hint{position:fixed;bottom:1.7rem;right:1.6rem;font-family:"JetBrains Mono",monospace;font-size:.64rem;color:var(--ink-soft);opacity:.7;z-index:100}
+
+  @media (max-width:880px){
+    .two,.dgrid,.bgrid,.pgrid{grid-template-columns:1fr}
+    .road{flex-direction:column}
+    .bgrid{grid-template-columns:1fr 1fr}
+    .hint{display:none}
+  }
+
+  /* ---------- print → PDF ---------- */
+  @media print{
+    @page{size:1280px 720px;margin:0}
+    body{overflow:visible;background:var(--paper)}
+    body::after,.nav,.progress,.hint{display:none}
+    .slide{position:relative;inset:auto;opacity:1!important;visibility:visible!important;transform:none!important;
+           width:1280px;height:720px;page-break-after:always;break-after:page}
+    .slide.active [data-r]{animation:none}
+  }
+</style>
+</head>
+<body>
+<div class="progress" id="prog"></div>
+
+<div class="deck" id="deck">
+
+  <!-- 1 COVER -->
+  <section class="slide active" id="s-cover">
+    <div class="bigmark">爪</div>
+    <div class="cover-top" data-r="1">
+      <div class="brand">TEAM<span>CLAW</span> · AI-SAAS</div>
+      <div class="brand" style="color:var(--ink-soft)">2026 · 项目演示</div>
+    </div>
+    <div class="cover-main" style="position:relative;z-index:1">
+      <div class="kicker" data-r="2">面向中小商家的 AI 应用创造平台</div>
+      <h1 data-r="3">让每一种<br><em>经营方式</em><br>成为可能</h1>
+      <div class="sub" data-r="4">Core SaaS × AI Codegen × 商家应用 PaaS</div>
+    </div>
+    <div class="cover-foot" data-r="5">
+      <div class="tagline">不是用一套标准软件满足所有商家——<br>而是让每个商家创造自己的经营系统。</div>
+      <div class="meta">TeamClaw Desktop · Core SaaS<br>Customer App · Deploy Provider<br>teamclaw + saas-mono</div>
+    </div>
+  </section>
+
+  <!-- 2 PROBLEM -->
+  <section class="slide" id="s-problem">
+    <div class="slide-num fr">01</div>
+    <div class="slide-head" data-r="1">
+      <div class="kicker">为什么</div>
+      <h2>传统 SaaS 的天花板</h2>
+    </div>
+    <div class="two">
+      <div class="panel" data-r="2">
+        <h3>🧱 标准软件的困境</h3>
+        <p>一套标准功能,试图满足所有商家。结果是:<strong>大商家嫌不够、小商家嫌太重</strong>,定制要排期、要外包,演进缓慢且昂贵。每一种独特的经营方式,都被标准化磨平。</p>
+      </div>
+      <div class="panel coral" data-r="3">
+        <h3>✦ TeamClaw 的主张</h3>
+        <p>平台提供标准化的<strong>核心能力</strong>(客户/商品/销售/权限),再用 <em>AI 驱动的应用生成</em> 让每个商家基于自身场景<strong>自主创造、持续演进</strong>专属业务应用。</p>
+      </div>
+    </div>
+    <div class="lead" data-r="4" style="margin-top:1.8rem">
+      AI 负责<em>降低应用创造的门槛</em>,而不是限制应用创造的能力。<br>
+      每个商家都拥有创造、部署、持续演进自身业务应用的能力。
+    </div>
+  </section>
+
+  <!-- 3 TWO-LAYER -->
+  <section class="slide" id="s-arch2">
+    <div class="slide-num fr">02</div>
+    <div class="slide-head" data-r="1">
+      <div class="kicker">总体架构</div>
+      <h2>Core SaaS + Customer App 双层</h2>
+    </div>
+    <div class="two">
+      <div class="panel" data-r="2" style="border-top:3px solid var(--sage)">
+        <h3>⬡ Core SaaS · 统一业务底座</h3>
+        <p>身份认证与权限 · 客户管理(CRM) · 商品管理 · 销售管理 · 组织与用户 · 文件与消息 · API 与事件。</p>
+        <p style="margin-top:.7rem"><strong>统一管理企业核心数据,通过标准 API 对外开放。</strong></p>
+        <p class="mono" style="font-size:.72rem;margin-top:.7rem;color:var(--sage)">React · TanStack · PostgreSQL · 多租户 tenant_id</p>
+      </div>
+      <div class="panel coral" data-r="3" style="border-top:3px solid var(--coral)">
+        <h3>◆ Customer App · 商家专属应用</h3>
+        <p>营销系统 · 客户跟进 · 会员积分 · 预约管理 · 行业专属业务系统……</p>
+        <p style="margin-top:.7rem"><strong>独立代码、独立数据库结构、独立业务逻辑,通过 API 调用 Core SaaS,松耦合集成。</strong></p>
+        <p class="mono" style="font-size:.72rem;margin-top:.7rem;color:var(--coral-deep)">TanStack Start · Drizzle ORM · PostgreSQL</p>
+      </div>
+    </div>
+    <div class="lead" data-r="4" style="margin-top:1.6rem">
+      <strong>TeamClaw Desktop</strong>(Tauri · React · TypeScript)负责 AI 生成、编辑、预览和部署应用——把"造一个 app"变成对话。
+    </div>
+  </section>
+
+  <!-- 4 DECISIONS -->
+  <section class="slide" id="s-decisions">
+    <div class="slide-num fr">03</div>
+    <div class="slide-head" data-r="1">
+      <div class="kicker">已锁定</div>
+      <h2>四个架构决策</h2>
+    </div>
+    <div class="dgrid">
+      <div class="dcard" data-r="2"><div class="dn fr">①</div><h4>隔离模型 = 混合</h4><p>逻辑独立、物理共享:每商家独立 pg schema(非独立实例)+ 独立逻辑模块,共享平台运行时;大客户可下沉独立部署。</p></div>
+      <div class="dcard" data-r="3"><div class="dn fr">②</div><h4>AI 产物 = 真实工程代码</h4><p>codegen 完整 TanStack Start + Drizzle 工程,作为可部署模块运行。创造力无上限,贴合 teamclaw "AI 写代码" 基因。</p></div>
+      <div class="dcard" data-r="4"><div class="dn fr">③</div><h4>Core 来源 = betly 去垂直化</h4><p>把现有攀岩 SaaS 抽象成通用底座,攀岩业务降级为平台上<strong>第一个 Customer App</strong>——吃自己狗粮。</p></div>
+      <div class="dcard" data-r="5"><div class="dn fr">④</div><h4>部署底座 = Dokploy</h4><p>原生 Docker Swarm 横扩 + 可下钻底座,包在自有 <span class="mono">DeployProvider</span> 抽象后,预留 Swarm / k3s 逃生口。</p></div>
+    </div>
+  </section>
+
+  <!-- 4 ARCHITECTURE MAP -->
+  <section class="slide" id="s-map" style="padding-top:clamp(1.6rem,3.5vw,3rem);padding-bottom:clamp(1.3rem,3vw,2.4rem)">
+    <div class="slide-num fr">04</div>
+    <div class="slide-head" data-r="1" style="margin-bottom:1rem">
+      <div class="kicker">架构全景 · 端 / 云 / Core / Customer</div>
+      <h2 style="font-size:clamp(1.5rem,3vw,2.4rem)">一图看清四层关系</h2>
+    </div>
+    <div class="arch" style="max-width:1200px;gap:.7rem">
+      <div class="band" data-r="2" style="padding:1.05rem 1.15rem">
+        <span class="band-label">端 · Clients</span>
+        <div class="chips">
+          <div class="chip"><span class="ct">Desktop</span>TeamClaw · Tauri + React<small>AI 生成 / 编辑 / 预览　daemon(amuxd): git · OSS · secret · ACP</small></div>
+          <div class="chip"><span class="ct">Mobile</span>iOS / Expo<small>已有移动端,复用同一 Cloud API</small></div>
+          <div class="chip"><span class="ct">商家管理员</span>betly admin<small>核心数据后台管理</small></div>
+          <div class="chip"><span class="ct">终端用户</span>浏览器 / 小程序<small>访问商家自己的应用</small></div>
+        </div>
+      </div>
+      <div class="flow" data-r="3" style="font-size:1.25rem;padding:.2rem 0">▼　①AI 生成代码 push 到 git　　　　▼　②调平台 API「部署商家 Y」</div>
+      <div class="band cloud" data-r="4" style="padding:1.1rem 1.15rem">
+        <span class="band-label">云 · Cloud</span>
+        <div class="chips">
+          <div class="chip"><span class="ct">Managed Git</span>codeup<small>每商家一 repo · git-source(push 即部署)</small></div>
+          <div class="chip s4"><span class="ct">S4 · 常驻容器</span>Deploy Orchestrator<small>DeployProvider 契约 · DokployAdapter · 异步 job · 状态 / 幂等 / 补偿</small></div>
+          <div class="chip"><span class="ct">部署底座</span>Dokploy / Swarm + Traefik<small>app 容器 A / B · 大客户独立部署 · 自动 TLS · &lt;merchant&gt;.apps.&lt;域&gt;</small></div>
+          <div class="chip core"><span class="ct">Core SaaS · FC3 无状态</span>/v1 API<small>客户 · 商品 · 销售 · 权限 · 文件 · 消息　多租户 tenant_id</small></div>
+          <div class="chip"><span class="ct">数据</span>Shared PG + pgbouncer<small>core 数据 · schema_A · schema_B · 每商家最小权限 role</small></div>
+        </div>
+      </div>
+      <div class="flow" data-r="5" style="font-size:1.25rem;padding:.2rem 0">▼　③git-source 构建起容器　　▼　④建 merchant schema + DSN　　▼　⑥认证终端用户 · 服务身份调 /v1</div>
+      <div class="band app" data-r="6" style="padding:1.1rem 1.2rem">
+        <span class="band-label">Customer App · 生成的商家应用</span>
+        <div class="chips">
+          <div class="chip" style="flex:3"><span class="ct">TanStack Start + Drizzle · 真实工程代码</span>AI codegen 产出 → push managed git → Dokploy 构建运行<small>⑤ 独立 pg schema(经 pgbouncer 读写)· 独立业务逻辑 · 通过 SDK 调 Core SaaS · 大客户可整体下沉独立部署</small></div>
+        </div>
+      </div>
+    </div>
+    <div data-r="7" style="display:flex;gap:.55rem;margin-top:1.05rem;flex-wrap:wrap">
+      <span style="flex:1;min-width:150px;font-size:.7rem;color:var(--ink-soft);font-weight:300;border-top:2px solid var(--coral);padding-top:.4rem;line-height:1.4"><b style="color:var(--coral);font-family:'Fraunces'">①</b>　生成代码 push 到 git</span>
+      <span style="flex:1;min-width:150px;font-size:.7rem;color:var(--ink-soft);font-weight:300;border-top:2px solid var(--coral);padding-top:.4rem;line-height:1.4"><b style="color:var(--coral);font-family:'Fraunces'">②</b>　Desktop 触发部署</span>
+      <span style="flex:1;min-width:150px;font-size:.7rem;color:var(--ink-soft);font-weight:300;border-top:2px solid var(--coral);padding-top:.4rem;line-height:1.4"><b style="color:var(--coral);font-family:'Fraunces'">③</b>　Dokploy 构建起容器</span>
+      <span style="flex:1;min-width:150px;font-size:.7rem;color:var(--ink-soft);font-weight:300;border-top:2px solid var(--coral);padding-top:.4rem;line-height:1.4"><b style="color:var(--coral);font-family:'Fraunces'">④</b>　provision 商家 schema</span>
+      <span style="flex:1;min-width:150px;font-size:.7rem;color:var(--ink-soft);font-weight:300;border-top:2px solid var(--coral);padding-top:.4rem;line-height:1.4"><b style="color:var(--coral);font-family:'Fraunces'">⑤</b>　app 读写自己 schema</span>
+      <span style="flex:1;min-width:150px;font-size:.7rem;color:var(--ink-soft);font-weight:300;border-top:2px solid var(--coral);padding-top:.4rem;line-height:1.4"><b style="color:var(--coral);font-family:'Fraunces'">⑥</b>　调 Core SaaS /v1</span>
+    </div>
+  </section>
+
+  <!-- 5 CUSTOMER FLOW -->
+  <section class="slide" id="s-flow">
+    <div class="slide-num fr">05</div>
+    <div class="slide-head" data-r="1">
+      <div class="kicker">用户旅程 · 商家如何造一个自己的 App</div>
+      <h2 style="font-size:clamp(1.5rem,3vw,2.4rem)">从一句话到上线,六步</h2>
+    </div>
+    <div class="steps">
+      <div class="step" data-r="2"><span class="sk">Desktop</span><div class="sn fr">1</div><h4>描述需求</h4><p>商家在 TeamClaw Desktop 用自然语言说:"我要一个会员积分 + 预约的系统"。</p></div>
+      <div class="step" data-r="3"><span class="sk">AI codegen</span><div class="sn fr">2</div><h4>AI 生成工程</h4><p>套用平台模板 + batteries SDK,生成完整 TanStack Start + Drizzle 真实工程代码。</p></div>
+      <div class="step" data-r="4"><span class="sk">Preview</span><div class="sn fr">3</div><h4>实时预览微调</h4><p>桌面内所见即所得预览,继续对话改样式 / 字段 / 逻辑,直到满意。</p></div>
+      <div class="step accent" data-r="5"><span class="sk">S4 Deploy</span><div class="sn fr">4</div><h4>一键部署</h4><p>push managed git → DeployProvider → Dokploy 构建 → provision 独立 schema → 上线 <span class="mono" style="font-size:.7rem">&lt;merchant&gt;.apps.&lt;域&gt;</span>。</p></div>
+      <div class="step" data-r="6"><span class="sk">Core SDK</span><div class="sn fr">5</div><h4>接入核心能力</h4><p>app 调 Core SaaS 客户 / 商品 / 销售 SDK,认证终端用户;支付 / 通知 / 存储 / AI 直接调,密钥在平台。</p></div>
+      <div class="step" data-r="7"><span class="sk">Evolve</span><div class="sn fr">6</div><h4>持续演进</h4><p>商家继续用 AI 改需求,push 即重新部署,版本可回滚——经营系统随生意一起长。</p></div>
+    </div>
+    <div class="mvp-band" data-r="8">全程商家<strong>不写代码、不碰运维、不持密钥</strong>;AI 把"造一个 app"变成一段对话,平台 batteries 兜住其余一切。</div>
+  </section>
+
+  <!-- 9 BATTERIES -->
+  <section class="slide" id="s-batteries">
+    <div class="slide-num fr">06</div>
+    <div class="slide-head" data-r="1">
+      <div class="kicker">护城河 · 平台 Batteries</div>
+      <h2 style="font-size:clamp(1.5rem,3vw,2.3rem)">平台帮 Customer App 做完的基建</h2>
+    </div>
+    <div class="bgrid">
+      <div class="bcat" data-r="2"><h4><span class="bl">A</span>身份与安全</h4>
+        <li class="todo">终端用户认证 / JWT</li><li class="todo">服务身份 + 商家身份注入</li><li class="have">RBAC 权限中间件</li><li class="have">Secret 注入(不持密钥)</li></div>
+      <div class="bcat" data-r="3"><h4><span class="bl">B</span>数据层</h4>
+        <li class="todo">schema 自动 provision</li><li class="todo">Drizzle + pgbouncer + 迁移</li><li class="have">基础表约定脚手架</li><li class="todo">备份 / 导出 / 合规</li></div>
+      <div class="bcat" data-r="4"><h4><span class="bl">C</span>业务能力 SDK</h4>
+        <li class="todo">客户/商品/销售/权限 SDK</li><li class="todo">自动带 token / tenant / 重试</li><li class="have">OpenAPI 契约已有</li></div>
+      <div class="bcat" data-r="5"><h4><span class="bl">D</span>部署运维</h4>
+        <li class="todo">push 即部署 · 回滚</li><li class="have">域名 · 自动 TLS</li><li class="have">健康检查 · 独立部署</li><li class="have">商家/AI 零运维</li></div>
+      <div class="bcat" data-r="6"><h4><span class="bl">E</span>集成能力</h4>
+        <li class="have">支付(微信/支付宝)</li><li class="have">通知(短信/微信/推送)</li><li class="have">AI 网关(LiteLLM)</li><li class="have">对象存储 + 图片处理</li><li class="have">CDN / 边缘防护</li></div>
+      <div class="bcat" data-r="7"><h4><span class="bl">F</span>前端脚手架</h4>
+        <li class="have">UI kit / 设计 token / shadcn</li><li class="have">CRUD 区块 / 后台脚手架</li><li class="have">i18n 基础设施</li><li class="have">小程序(Taro)/ 移动壳</li></div>
+      <div class="bcat" data-r="8"><h4><span class="bl">G</span>调度可观测</h4>
+        <li class="have">定时任务 / job 队列</li><li class="have">日志 / 错误上报(Sentry)</li></div>
+      <div class="bcat" data-r="8" style="background:var(--ink);color:var(--paper);border:none;display:flex;flex-direction:column;justify-content:center">
+        <p style="font-family:'Noto Serif SC';font-size:.92rem;line-height:1.5">AI 实际只剩<br><span style="color:var(--coral);font-weight:700">业务逻辑 + 页面</span><br>要写。</p>
+        <p style="font-size:.66rem;color:rgba(244,239,228,.6);margin-top:.6rem;font-family:'JetBrains Mono'">✓ 已有可复用　◆ 需新建</p></div>
+    </div>
+  </section>
+
+  <!-- 10 ROADMAP -->
+  <section class="slide" id="s-road">
+    <div class="slide-num fr">07</div>
+    <div class="slide-head" data-r="1">
+      <div class="kicker">路线图 · S0 → S7</div>
+      <h2 style="font-size:clamp(1.5rem,3vw,2.3rem)">先造最薄纵切,再上 AI codegen</h2>
+    </div>
+    <div class="road">
+      <div class="stage" data-r="2"><div class="sid fr">S0</div><h5>仓库与骨架</h5><p>monorepo 合并 · Core 落点</p><div class="ph">地基</div></div>
+      <div class="stage" data-r="2"><div class="sid fr">S1</div><h5>认证联邦</h5><p>三层 token 模型</p><div class="ph">横切·先做</div></div>
+      <div class="stage mvp" data-r="3"><div class="sid fr">S2</div><h5>Core 单域契约</h5><p>客户 CRM · API+SDK</p><div class="ph">MVP</div></div>
+      <div class="stage mvp" data-r="3"><div class="sid fr">S3</div><h5>App 运行时模板</h5><p>最小 TanStack + 独立 schema</p><div class="ph">MVP</div></div>
+      <div class="stage cur" data-r="4"><div class="sid fr">S4</div><h5>Deploy Provider</h5><p>本次设计 · Dokploy 适配</p><div class="ph">MVP · 当前</div></div>
+      <div class="stage" data-r="5"><div class="sid fr">S5</div><h5>codegen 链路</h5><p>AI 从 prompt 生成模板</p><div class="ph">闭环</div></div>
+      <div class="stage" data-r="5"><div class="sid fr">S6</div><h5>Core 去垂直化</h5><p>商品/销售/权限全量 API</p><div class="ph">扩展</div></div>
+      <div class="stage" data-r="5"><div class="sid fr">S7</div><h5>攀岩重建</h5><p>狗粮验证全链路</p><div class="ph">验收</div></div>
+    </div>
+    <div class="mvp-band" data-r="6">
+      <strong>MVP 闭环 = S1 + S2 + S3 + S4</strong>:一个手写的最小商家 app,认证终端用户、调 Core 客户 API、独立 schema、部署在 Dokploy 上能跑——<strong>完全不碰 AI</strong>,把最大不确定性(codegen)隔离到 S5 再打。
+    </div>
+  </section>
+
+  <!-- 11 PRINCIPLES -->
+  <section class="slide" id="s-principles">
+    <div class="slide-num fr">08</div>
+    <div class="slide-head" data-r="1">
+      <div class="kicker">架构原则</div>
+      <h2>六条不变量</h2>
+    </div>
+    <div class="pgrid">
+      <div class="pcard" data-r="2"><div class="pn fr">1</div><h4>稳定的底座</h4><p>Core SaaS 负责稳定的基础经营能力。</p></div>
+      <div class="pcard" data-r="3"><div class="pn fr">2</div><h4>灵活的创新</h4><p>Customer App 负责灵活的业务创新与个性化。</p></div>
+      <div class="pcard" data-r="4"><div class="pn fr">3</div><h4>能力即 API</h4><p>所有核心能力均通过 API 对外开放。</p></div>
+      <div class="pcard" data-r="5"><div class="pn fr">4</div><h4>松耦合</h4><p>应用与核心系统保持松耦合架构。</p></div>
+      <div class="pcard" data-r="6"><div class="pn fr">5</div><h4>AI 降门槛</h4><p>AI 降低应用创造门槛,而非限制创造能力。</p></div>
+      <div class="pcard" data-r="7"><div class="pn fr">6</div><h4>商家自主</h4><p>每个商家都能创造、部署、持续演进自身应用。</p></div>
+    </div>
+  </section>
+
+  <!-- 12 END -->
+  <section class="slide" id="s-end">
+    <div class="bigmark" style="opacity:.05">★</div>
+    <div class="kicker" data-r="1" style="position:relative;z-index:1">下一步</div>
+    <h1 data-r="2" style="position:relative;z-index:1">把 <em>S4</em> spec 推进到 plan,<br>同时启动 <em>S1 认证联邦</em>。</h1>
+    <div class="end-line" data-r="3" style="position:relative;z-index:1">让每一种经营方式成为可能。</div>
+    <div data-r="4" class="mono" style="margin-top:2.5rem;font-size:.74rem;color:var(--ink-soft);position:relative;z-index:1;line-height:2">
+      spec → docs/superpowers/specs/2026-06-05-deploy-provider-and-platform-batteries-design.md<br>
+      deck → docs/ai-saas-platform-deck.html · TeamClaw · 2026-06-05
+    </div>
+  </section>
+
+</div>
+
+<div class="nav">
+  <button class="arrow" id="prev" aria-label="上一页">‹</button>
+  <div class="dots" id="dots"></div>
+  <span class="counter" id="counter">01 / 10</span>
+  <button class="arrow" id="next" aria-label="下一页">›</button>
+</div>
+<div class="hint">← → / 空格翻页 · ⌘P 导出 PDF</div>
+
+<script>
+  const slides=[...document.querySelectorAll('.slide')];
+  const dots=document.getElementById('dots');
+  const counter=document.getElementById('counter');
+  const prog=document.getElementById('prog');
+  let i=0;
+  slides.forEach((_,n)=>{const b=document.createElement('button');b.className='dot';b.onclick=()=>go(n);dots.appendChild(b);});
+  const dotEls=[...dots.children];
+  function pad(n){return String(n+1).padStart(2,'0')}
+  function go(n){
+    i=Math.max(0,Math.min(slides.length-1,n));
+    slides.forEach((s,k)=>s.classList.toggle('active',k===i));
+    dotEls.forEach((d,k)=>d.classList.toggle('on',k===i));
+    counter.textContent=pad(i)+' / '+String(slides.length).padStart(2,'0');
+    prog.style.width=(i/(slides.length-1)*100)+'%';
+    location.hash=i;
+  }
+  function next(){go(i+1)} function prev(){go(i-1)}
+  document.getElementById('next').onclick=next;
+  document.getElementById('prev').onclick=prev;
+  document.addEventListener('keydown',e=>{
+    if(['ArrowRight','ArrowDown',' ','PageDown'].includes(e.key)){e.preventDefault();next();}
+    if(['ArrowLeft','ArrowUp','PageUp'].includes(e.key)){e.preventDefault();prev();}
+    if(e.key==='Home')go(0); if(e.key==='End')go(slides.length-1);
+  });
+  let tx=0;
+  addEventListener('touchstart',e=>tx=e.touches[0].clientX,{passive:true});
+  addEventListener('touchend',e=>{const dx=e.changedTouches[0].clientX-tx; if(Math.abs(dx)>50){dx<0?next():prev();}},{passive:true});
+  const start=parseInt(location.hash.slice(1));
+  go(Number.isInteger(start)?start:0);
+</script>
+</body>
+</html>
