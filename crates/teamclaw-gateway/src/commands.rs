@@ -35,6 +35,7 @@ enum MetaCommand {
     Sessions(Option<String>),
     Agents(Option<String>),
     Workspaces(Option<String>),
+    Skills,
     Clear,
     Stop,
     Ctx(String),
@@ -47,6 +48,7 @@ fn parse_meta(name: &str, arg: Option<&str>) -> Option<MetaCommand> {
         "sessions" => Some(MetaCommand::Sessions(arg.map(str::to_string))),
         "agents" => Some(MetaCommand::Agents(arg.map(str::to_string))),
         "workspaces" => Some(MetaCommand::Workspaces(arg.map(str::to_string))),
+        "skills" => Some(MetaCommand::Skills),
         "clear" => Some(MetaCommand::Clear),
         "stop" => Some(MetaCommand::Stop),
         "ctx" => match arg {
@@ -64,6 +66,7 @@ Gateway commands:
 /sessions [id] - List sessions
 /agents [type] - List or switch agent type
 /workspaces [id] - List or switch workspace
+/skills - List workspace skills
 /clear - Start new session
 /stop - Stop current processing
 /ctx <text> - Inject context without reply";
@@ -204,6 +207,19 @@ where
         MetaCommand::Workspaces(Some(ws_id)) => {
             acp.set_workspace(session, &ws_id).await?;
             format!("Workspace: {}", ws_id)
+        }
+
+        MetaCommand::Skills => {
+            let skills = acp.list_skills(session).await?;
+            if skills.is_empty() {
+                "No workspace skills found.".to_string()
+            } else {
+                let lines: Vec<String> = skills
+                    .iter()
+                    .map(|(name, desc)| format!("/{} - {}", name, desc))
+                    .collect();
+                format!("Skills:\n{}", lines.join("\n"))
+            }
         }
 
         MetaCommand::Clear => {
@@ -481,6 +497,14 @@ mod tests {
             _workspace_id: &str,
         ) -> Result<(), AcpError> {
             Ok(())
+        }
+        async fn list_skills(
+            &self,
+            _session: &AmuxSessionId,
+        ) -> Result<Vec<(String, String)>, AcpError> {
+            Ok(vec![
+                ("my-skill".to_string(), "A test skill".to_string()),
+            ])
         }
     }
 

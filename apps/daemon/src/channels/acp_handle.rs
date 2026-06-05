@@ -504,31 +504,31 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
             }
         }
 
-        // ── 3. Workspace skills ───────────────────────────────────────────────
-        if let Some(ws_dir) = &self.default_workspace_dir {
-            use crate::config::scan_roles_skills_state;
-            let ws_path = std::path::Path::new(ws_dir);
-            if let Ok(state) = scan_roles_skills_state(ws_path) {
-                for skill in state.skills {
-                    let slash_name = skill
-                        .invocation_name
-                        .as_deref()
-                        .unwrap_or_else(|| {
-                            skill.filename.trim_end_matches(".md")
-                        })
-                        .to_string();
-                    if !result.iter().any(|c| c.name == slash_name) {
-                        result.push(AcpAvailableCommand {
-                            name: slash_name,
-                            description: skill.description,
-                            input_hint: None,
-                        });
-                    }
-                }
-            }
-        }
-
         Ok(result)
+    }
+
+    async fn list_skills(
+        &self,
+        _session: &AmuxSessionId,
+    ) -> Result<Vec<(String, String)>, AcpError> {
+        use crate::config::scan_roles_skills_state;
+        let Some(ws_dir) = &self.default_workspace_dir else {
+            return Ok(vec![]);
+        };
+        let state = scan_roles_skills_state(std::path::Path::new(ws_dir))
+            .map_err(|e| AcpError::Internal(format!("skill scan: {e}")))?;
+        let mut skills: Vec<(String, String)> = state
+            .skills
+            .into_iter()
+            .map(|s| {
+                let name = s
+                    .invocation_name
+                    .unwrap_or_else(|| s.filename.trim_end_matches(".md").to_string());
+                (name, s.description)
+            })
+            .collect();
+        skills.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(skills)
     }
 
     async fn send_slash_command(

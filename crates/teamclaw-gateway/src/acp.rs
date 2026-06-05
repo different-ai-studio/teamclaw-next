@@ -146,6 +146,13 @@ pub trait AcpHandle: Send + Sync + 'static {
         session: &AmuxSessionId,
         workspace_id: &str,
     ) -> Result<(), AcpError>;
+
+    /// List workspace skills available to the session.
+    /// Returns `(slash_name, description)` pairs, alphabetically sorted.
+    async fn list_skills(
+        &self,
+        session: &AmuxSessionId,
+    ) -> Result<Vec<(String, String)>, AcpError>;
 }
 
 #[derive(Debug, thiserror::Error)]
