@@ -1043,6 +1043,11 @@
       "inherentCannotDelete": "内置服务器无法删除",
       "inherentMCP": "内置 MCP",
       "managedByTeamClaw": "由 TeamClaw 管理",
+      "teamMCP": "团队共享 MCP",
+      "teamManagedHint": "在团队仓库 .mcp/ 中管理",
+      "team": "团队",
+      "teamCannotEdit": "请在团队共享 .mcp/ 目录中编辑此服务器",
+      "teamCannotDelete": "请在团队共享 .mcp/ 目录中移除此服务器",
       "customMCP": "自定义 MCP",
       "inherentEnvHint": "在“设置 → 环境变量”中填写后，重启 OpenCode 即可生效。",
       "inherentEnvNotice": "此服务器的环境变量由“环境变量”设置统一管理，请前往配置以下变量："

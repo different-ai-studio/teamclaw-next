@@ -119,6 +119,13 @@ pub fn classify_change_path(
     for workspace in workspaces {
         let kind = if path == workspace.workspace_path.join("opencode.json") {
             Some(RefreshChangeKind::OpencodeJson)
+        } else if path.starts_with(
+            workspace
+                .workspace_path
+                .join(TEAM_LINK_NAME)
+                .join(".mcp"),
+        ) {
+            Some(RefreshChangeKind::Mcp)
         } else if path.starts_with(workspace.workspace_path.join(".teamclaw/skills"))
             || path.starts_with(workspace.workspace_path.join(".opencode/skills"))
             || path.starts_with(workspace.workspace_path.join(".claude/skills"))

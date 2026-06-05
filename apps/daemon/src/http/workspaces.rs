@@ -621,6 +621,7 @@ pub async fn get_mcp(
     require_scope(&principal, "workspace:read")?;
     let wpath = workspace_path_or_404(&workspace_id).await?;
     crate::runtime::supervisor::ensure_inherent_mcp(&wpath).map_err(map_control_err)?;
+    crate::config::team_mcp::materialize_team_mcp_for_runtime(&wpath).map_err(map_control_err)?;
     let store = resolve_store(&state)?;
     let servers = store.get_mcp(&workspace_id).map_err(map_control_err)?;
     Ok(Json(servers))
@@ -663,6 +664,7 @@ pub async fn get_mcp_tools(
     require_scope(&principal, "workspace:read")?;
     let wpath = workspace_path_or_404(&workspace_id).await?;
     crate::runtime::supervisor::ensure_inherent_mcp(&wpath).map_err(map_control_err)?;
+    crate::config::team_mcp::materialize_team_mcp_for_runtime(&wpath).map_err(map_control_err)?;
     let store = resolve_store(&state)?;
     let servers = store.get_mcp(&workspace_id).map_err(map_control_err)?;
     let response =
