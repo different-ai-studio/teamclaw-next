@@ -89,9 +89,18 @@ public actor SessionStore {
             scheduleProactiveRefresh()
             emitRefresh()
             return updated
+        } catch let apiError as CloudAPIError {
+            if case let .requestFailed(status, _, _) = apiError, (400..<500).contains(status) {
+                // Token is invalid/expired — clear session to force re-login.
+                clear()
+                throw AuthRequired.notAuthenticated
+            }
+            // Network or server error — keep the session alive so the next
+            // launch can retry instead of forcing a full re-login.
+            throw apiError
         } catch {
-            clear()
-            throw AuthRequired.notAuthenticated
+            // URLError, decoding failure, etc. — preserve the session.
+            throw error
         }
     }
 
