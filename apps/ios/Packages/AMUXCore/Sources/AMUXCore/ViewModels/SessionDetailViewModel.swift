@@ -191,6 +191,7 @@ public final class SessionDetailViewModel {
     /// clears on `statusChange:.idle` or after 10s of silence.
     public private(set) var isAgentWorking: Bool = false
     private var agentWorkingResetTask: Task<Void, Never>?
+    private var inFlightPermissionRequestIDs: Set<String> = []
     // `nonisolated(unsafe)` required: mutable stored property on an @Observable
     // type, where plain `nonisolated` is rejected by the compiler.
     nonisolated(unsafe) private var spawningPollTask: Task<Void, Never>?
@@ -678,8 +679,12 @@ public final class SessionDetailViewModel {
                     id: agent.id, displayName: agent.displayName,
                     workspacePath: agent.workspacePath, agentType: agent.agentType,
                     runtimeState: chipStateFromRuntime(liveRuntime),
-                    availableModels: agent.availableModels.isEmpty
-                        ? liveRuntime.availableModels.map(\.id) : agent.availableModels,
+                    availableModels: {
+                        let live = liveRuntime.availableModels.map(\.id)
+                        if !live.isEmpty { return live }
+                        if !agent.availableModels.isEmpty { return agent.availableModels }
+                        return []
+                    }(),
                     currentModel: liveRuntime.currentModel ?? agent.currentModel,
                     runtimeID: agent.runtimeID ?? liveRuntime.runtimeId,
                     workspaceID: agent.workspaceID, backendType: agent.backendType
@@ -691,8 +696,12 @@ public final class SessionDetailViewModel {
                     id: agent.id, displayName: agent.displayName,
                     workspacePath: agent.workspacePath, agentType: agent.agentType,
                     runtimeState: chipStateFromRuntime(extra),
-                    availableModels: agent.availableModels.isEmpty
-                        ? extra.availableModels.map(\.id) : agent.availableModels,
+                    availableModels: {
+                        let live = extra.availableModels.map(\.id)
+                        if !live.isEmpty { return live }
+                        if !agent.availableModels.isEmpty { return agent.availableModels }
+                        return []
+                    }(),
                     currentModel: extra.currentModel ?? agent.currentModel,
                     runtimeID: agent.runtimeID, workspaceID: agent.workspaceID,
                     backendType: agent.backendType
@@ -727,6 +736,7 @@ public final class SessionDetailViewModel {
             _ = runtime.status
             _ = runtime.currentModel
             _ = runtime.availableCommandsJSON
+            _ = runtime.availableModels      // MQTT 更新 models 时触发 refresh
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.isObservingRuntimeChanges = false
@@ -740,7 +750,12 @@ public final class SessionDetailViewModel {
 
     private func scheduleSpawningRefreshIfNeeded() {
         let needsPoll = memberSheetAgents.contains {
-            $0.runtimeState == .spawning || $0.runtimeID == nil
+            $0.runtimeState == .spawning
+            || $0.runtimeID == nil
+            || ($0.availableModels.isEmpty
+                && ($0.runtimeState == .active
+                    || $0.runtimeState == .idle
+                    || $0.runtimeState == .ready))
         }
         if needsPoll, spawningPollCount < maxSpawningPolls {
             guard spawningPollTask == nil else { return }
@@ -1072,12 +1087,16 @@ public final class SessionDetailViewModel {
                 print("[RuntimeDetailVM] setModel: skipping — no route actor id for actor=\(actorID)")
                 return
             }
+            // Apply optimistic update immediately so the UI reflects the choice
+            // without waiting for the full RPC + refreshMemberSheet round-trip.
+            let previousModel = self.applyOptimisticModelPatch(agentID: actorID, model: model)
             let (ok, err) = await teamclawService.setModelRpc(
                 targetActorID: routeActor,
                 runtimeID: runtimeID,
                 modelID: model)
             if !ok {
                 print("[RuntimeDetailVM] setModel RPC failed: \(err)")
+                self.rollbackOptimisticModelPatch(agentID: actorID, previousModel: previousModel)
                 return
             }
             // refreshMemberSheet re-reads Supabase, which the daemon writes
@@ -1096,6 +1115,33 @@ public final class SessionDetailViewModel {
                 )
             }
         }
+    }
+
+    @discardableResult
+    private func applyOptimisticModelPatch(agentID actorID: String, model: String) -> String? {
+        guard let idx = memberSheetAgents.firstIndex(where: { $0.id == actorID }) else { return nil }
+        let previous = memberSheetAgents[idx].currentModel
+        let cur = memberSheetAgents[idx]
+        memberSheetAgents[idx] = MemberSheetAgent(
+            id: cur.id, displayName: cur.displayName,
+            workspacePath: cur.workspacePath, agentType: cur.agentType,
+            runtimeState: cur.runtimeState, availableModels: cur.availableModels,
+            currentModel: model,
+            runtimeID: cur.runtimeID, workspaceID: cur.workspaceID, backendType: cur.backendType
+        )
+        return previous
+    }
+
+    private func rollbackOptimisticModelPatch(agentID actorID: String, previousModel: String?) {
+        guard let idx = memberSheetAgents.firstIndex(where: { $0.id == actorID }) else { return }
+        let cur = memberSheetAgents[idx]
+        memberSheetAgents[idx] = MemberSheetAgent(
+            id: cur.id, displayName: cur.displayName,
+            workspacePath: cur.workspacePath, agentType: cur.agentType,
+            runtimeState: cur.runtimeState, availableModels: cur.availableModels,
+            currentModel: previousModel,
+            runtimeID: cur.runtimeID, workspaceID: cur.workspaceID, backendType: cur.backendType
+        )
     }
 
     /// Removes an agent participant from this session.
@@ -1440,6 +1486,10 @@ public final class SessionDetailViewModel {
 
         recomputeGroups()
         hasLoadedInitialFeed = true
+        // Note: the inline incomplete-output hydration above (incompleteOutputIndex path)
+        // deletes the event from `events` before restoreStreamingAgentSetFromIncompleteOutput()
+        // runs, so the two paths never double-restore the same agent.
+        restoreStreamingAgentSetFromIncompleteOutput()
 
         // Single subscription path: session/{sid}/live. iOS only ever
         // resolves a session-backed detail view — bare-runtime navigation
@@ -2279,6 +2329,14 @@ public final class SessionDetailViewModel {
 
     private func markAgentDone() {
         isAgentWorking = false
+        streamingAgentSet.removeAll()
+        streamingTextByAgent.removeAll()
+        streamingModelByAgent.removeAll()
+        streamingTurnIDByAgent.removeAll()
+        timelineState.streamingAgentSet = []
+        timelineState.streamingTextByAgent = [:]
+        timelineState.streamingModelByAgent = [:]
+        timelineState.streamingTurnIDByAgent = [:]
         recomputeGroups()
         agentWorkingResetTask?.cancel()
         agentWorkingResetTask = nil
@@ -2379,17 +2437,43 @@ public final class SessionDetailViewModel {
         timelineState.streamingAgentSet = []
         timelineState.streamingTurnIDByAgent = [:]
     }
+
+    /// After a stop()/start() cycle (e.g. NavigationStack push/pop), check if
+    /// any persisted incomplete-output events exist in `events`. If so, the
+    /// agent was mid-stream when stop() flushed its buffer; restore the
+    /// streaming set so the active-stream card reappears immediately instead
+    /// of waiting for the next MQTT delta.
+    private func restoreStreamingAgentSetFromIncompleteOutput() {
+        for event in events where event.eventType == "output" && event.isComplete == false {
+            let agentID = event.senderActorID ?? eventScopeKey
+            guard let text = event.text, !text.isEmpty else { continue }
+            streamingTextByAgent[agentID] = text
+            if let model = event.model { streamingModelByAgent[agentID] = model }
+            streamingAgentSet.insert(agentID)
+            timelineState.streamingAgentSet.insert(agentID)
+            timelineState.streamingTextByAgent[agentID] = text
+            if let model = event.model { timelineState.streamingModelByAgent[agentID] = model }
+        }
+        if !streamingAgentSet.isEmpty {
+            recomputeGroups()
+        }
+    }
+
     public func grantPermission(
         requestId: String,
         agentActorID: String? = nil,
         optionID: String = ""
     ) async throws {
+        guard inFlightPermissionRequestIDs.insert(requestId).inserted else { return }
+        defer { inFlightPermissionRequestIDs.remove(requestId) }
         var g = Amux_AcpGrantPermission()
         g.requestID = requestId
         g.optionID = optionID
         try await sendCommand(agentActorID: agentActorID) { $0.command = .grantPermission(g) }
     }
     public func denyPermission(requestId: String, agentActorID: String? = nil) async throws {
+        guard inFlightPermissionRequestIDs.insert(requestId).inserted else { return }
+        defer { inFlightPermissionRequestIDs.remove(requestId) }
         var d = Amux_AcpDenyPermission(); d.requestID = requestId
         try await sendCommand(agentActorID: agentActorID) { $0.command = .denyPermission(d) }
     }
@@ -2470,6 +2554,55 @@ extension SessionDetailViewModel {
         relabelRawRuntimeIDStampsToActorIDs()
     }
 
+    public func _test_setMemberSheetAgents(_ agents: [MemberSheetAgent]) {
+        memberSheetAgents = agents
+    }
+
+    public func _test_applyOptimisticModelPatch(agentID: String, model: String) {
+        applyOptimisticModelPatch(agentID: agentID, model: model)
+    }
+
+    public func _test_rollbackOptimisticModelPatch(agentID: String, previousModel: String?) {
+        rollbackOptimisticModelPatch(agentID: agentID, previousModel: previousModel)
+    }
+
+    public func _test_markPermissionInFlight(_ id: String) {
+        inFlightPermissionRequestIDs.insert(id)
+    }
+
+    public func _test_removePermissionInFlight(_ id: String) {
+        inFlightPermissionRequestIDs.remove(id)
+    }
+
+    public func _test_isPermissionInFlight(_ id: String) -> Bool {
+        inFlightPermissionRequestIDs.contains(id)
+    }
+
+    /// Returns true if the id was NOT already in flight (i.e. the call should proceed).
+    public func _test_tryMarkInFlight(_ id: String) -> Bool {
+        inFlightPermissionRequestIDs.insert(id).inserted
+    }
+
+    /// Returns whether the current member sheet state would cause
+    /// scheduleSpawningRefreshIfNeeded() to enqueue a poll.
+    public func _test_needsSpawningPoll() -> Bool {
+        memberSheetAgents.contains {
+            $0.runtimeState == .spawning
+            || $0.runtimeID == nil
+            || ($0.availableModels.isEmpty
+                && ($0.runtimeState == .active
+                    || $0.runtimeState == .idle
+                    || $0.runtimeState == .ready))
+        }
+    }
+
+    /// Exposes the partial-retain merge logic for testing.
+    public static func _test_mergeAvailableModels(liveModels: [String], existingModels: [String]) -> [String] {
+        if !liveModels.isEmpty { return liveModels }
+        if !existingModels.isEmpty { return existingModels }
+        return []
+    }
+
     /// Append a raw event to in-memory `events` + `timelineState.entries`
     /// the same way the production live path would, without going through
     /// the reducer. Lets tests seed pre-memberSheet stamps.
@@ -2498,6 +2631,61 @@ extension SessionDetailViewModel {
         streamingAgentSet = timelineState.streamingAgentSet
         streamingTextByAgent = timelineState.streamingTextByAgent
         streamingModelByAgent = timelineState.streamingModelByAgent
+    }
+
+    public func _test_markAgentDone() {
+        markAgentDone()
+    }
+
+    public func _test_markAgentWorking() {
+        markAgentWorking()
+    }
+
+    public func _test_makeInMemoryContainer() -> ModelContainer {
+        (try? ModelContainer(
+            for: AgentEvent.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        ))!
+    }
+
+    /// Simulates stop(): flushes streaming buffers to incomplete events in
+    /// `modelContext`, then clears all streaming state. Bypasses the
+    /// `runtime != nil` guard so unit tests without a live runtime can exercise
+    /// the flush path.
+    public func _test_stop(modelContext: ModelContext) {
+        startModelContext = modelContext
+        var seq = (events.last?.sequence ?? 0) + 1
+        for agentID in streamingAgentSet {
+            guard let text = streamingTextByAgent[agentID], !text.isEmpty else { continue }
+            let event = AgentEvent(agentId: eventScopeKey, sequence: seq, eventType: "output")
+            event.senderActorID = agentID
+            event.text = text
+            event.isComplete = false
+            event.model = streamingModelByAgent[agentID]
+            modelContext.insert(event)
+            appendEvent(event)
+            seq += 1
+        }
+        try? modelContext.save()
+        streamingAgentSet.removeAll()
+        streamingTextByAgent.removeAll()
+        streamingModelByAgent.removeAll()
+        streamingTurnIDByAgent.removeAll()
+        recomputeGroups()
+    }
+
+    /// Simulates start(): reloads events from `modelContext` and restores
+    /// streaming state from any persisted incomplete output events.
+    public func _test_start(modelContext: ModelContext) {
+        startModelContext = modelContext
+        let scope = eventScopeKey
+        let descriptor = FetchDescriptor<AgentEvent>(
+            predicate: #Predicate { $0.agentId == scope },
+            sortBy: [SortDescriptor(\.timestamp), SortDescriptor(\.sequence)]
+        )
+        events = (try? modelContext.fetch(descriptor)) ?? []
+        rehydrateTimelineStateFromEvents()
+        restoreStreamingAgentSetFromIncompleteOutput()
     }
 }
 

@@ -48,6 +48,24 @@ struct SessionMemberSheetLoaderStaticHelpersTests {
         #expect(SessionMemberSheetLoader.displayName(forBackendType: nil).isEmpty)
         #expect(SessionMemberSheetLoader.displayName(forBackendType: "").isEmpty)
     }
+
+    @Test("fallbackModelIDs returns non-empty list for claude, opencode, and codex")
+    func fallbackModelIDs() {
+        let claude = SessionMemberSheetLoader.fallbackModelIDs(forBackendType: "claude")
+        #expect(!claude.isEmpty)
+        #expect(claude.contains("claude-sonnet-4-6"))
+
+        let opencode = SessionMemberSheetLoader.fallbackModelIDs(forBackendType: "opencode")
+        #expect(!opencode.isEmpty,
+                "opencode backend must have a non-empty fallback model list")
+
+        let codex = SessionMemberSheetLoader.fallbackModelIDs(forBackendType: "codex")
+        #expect(!codex.isEmpty,
+                "codex backend must have a non-empty fallback model list")
+
+        let unknown = SessionMemberSheetLoader.fallbackModelIDs(forBackendType: "unknown-backend")
+        #expect(unknown.isEmpty)
+    }
 }
 
 // MARK: - Loader shaping tests with stub repositories

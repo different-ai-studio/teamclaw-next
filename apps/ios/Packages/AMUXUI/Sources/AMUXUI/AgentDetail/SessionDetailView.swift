@@ -33,6 +33,9 @@ public struct SessionDetailView: View {
     @State private var hasAutoOpenedPlans: Bool = false
     @State private var isInitialFeedVisible: Bool = false
     @State private var initialAutoScrollSettled: Bool = false
+    @State private var isAtBottom: Bool = true
+    @State private var scrollProxy: ScrollViewProxy? = nil
+    private let nearBottomThreshold: CGFloat = 80
     /// Cached TeamclawService used to lazily build the OutboxSender once
     /// the modelContext (and therefore its container) is available.
     private let pendingTeamclawService: TeamclawService?
@@ -156,13 +159,25 @@ public struct SessionDetailView: View {
                     await Task.yield()
                     proxy.scrollTo("session-detail-bottom", anchor: .bottom)
                 }
+                // Store the proxy so the composer's onSend callback (inside
+                // safeAreaInset, outside this ScrollViewReader scope) can
+                // programmatically scroll to bottom after the user sends.
+                .onAppear { scrollProxy = proxy }
+                // Track whether the user is near the bottom so incoming
+                // messages don't hijack the scroll position while they are
+                // browsing history.
+                .onScrollGeometryChange(for: Bool.self) { geo in
+                    geo.contentSize.height - geo.contentOffset.y - geo.containerSize.height < nearBottomThreshold
+                } action: { _, atBottom in
+                    isAtBottom = atBottom
+                }
                 // Follow the bottom whenever the feed grows after the initial
                 // settle. `.defaultScrollAnchor(.bottom, for: .initialOffset)`
                 // only governs first paint, so without this the just-sent
                 // message lands beneath the composer's safeAreaInset and the
                 // user has to scroll manually to see it.
                 .onChange(of: viewModel.feedItems.count) { oldCount, newCount in
-                    guard initialAutoScrollSettled, newCount > oldCount else { return }
+                    guard initialAutoScrollSettled, newCount > oldCount, isAtBottom else { return }
                     Task { @MainActor in
                         await Task.yield()
                         withAnimation(AMUXAnimation.fast) {
@@ -304,6 +319,13 @@ public struct SessionDetailView: View {
                         let modelId = resolvedModelId
                         promptText = ""
                         attachments = []
+                        // Snap to bottom when the user sends so the outbox
+                        // message and the incoming reply are always visible,
+                        // regardless of where they were scrolled to.
+                        isAtBottom = true
+                        withAnimation(AMUXAnimation.fast) {
+                            scrollProxy?.scrollTo("session-detail-bottom", anchor: .bottom)
+                        }
                         Task {
                             try? await viewModel.sendPrompt(text, modelId: modelId, attachmentURLs: attachmentURLs, modelContext: modelContext)
                         }
