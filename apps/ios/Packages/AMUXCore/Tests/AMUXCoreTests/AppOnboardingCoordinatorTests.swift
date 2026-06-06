@@ -190,6 +190,14 @@ private actor InMemoryOnboardingStore: AppOnboardingStore {
         // no-op
     }
 
+    func sendUpgradePhoneOTP(phone: String) async throws {
+        // no-op
+    }
+
+    func verifyUpgradePhoneOTP(phone: String, token: String) async throws {
+        // no-op
+    }
+
     func upgradeWithAppleCredential(idToken: String, nonce: String) async throws {
         // no-op
     }

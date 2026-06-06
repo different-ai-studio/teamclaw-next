@@ -3,16 +3,28 @@ import AMUXSharedUI
 import AMUXCore
 
 /// Presented from Settings when the current session is anonymous. Lets the
-/// user attach a permanent identity (email verification code or Apple) to keep
-/// the existing user_id and all team / actor / agent_member_access rows.
+/// user attach a permanent identity (email or phone verification code, or
+/// Apple) to keep the existing user_id and all team / actor / agent_member_access
+/// rows.
 struct UpgradeAccountSheet: View {
     @Bindable var coordinator: AppOnboardingCoordinator
     @Environment(\.dismiss) private var dismiss
     @State private var email = ""
+    @State private var phone = "+86"
     @State private var code = ""
+    @State private var method: UpgradeMethod = .email
 
-    /// True once a code has been emailed — switches the sheet to code entry.
-    private var isCodeStep: Bool { coordinator.pendingEmailOTPEmail != nil }
+    private enum UpgradeMethod: Hashable { case email, phone }
+
+    /// True once a code has been sent (email or SMS) — switches to code entry.
+    private var isCodeStep: Bool {
+        coordinator.pendingEmailOTPEmail != nil || coordinator.pendingPhoneOTPPhone != nil
+    }
+
+    /// Whether the in-progress flow (entry or code step) is phone-based.
+    private var isPhoneFlow: Bool {
+        isCodeStep ? coordinator.pendingPhoneOTPPhone != nil : method == .phone
+    }
 
     var body: some View {
         NavigationStack {
@@ -21,9 +33,7 @@ struct UpgradeAccountSheet: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Upgrade your account")
                             .font(.title2.bold())
-                        Text(isCodeStep
-                             ? "Enter the 6-digit code we emailed to \(coordinator.pendingEmailOTPEmail ?? email)."
-                             : "Attach a permanent identity so you don't lose access to this workspace.")
+                        Text(subtitle)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -31,7 +41,12 @@ struct UpgradeAccountSheet: View {
                     if isCodeStep {
                         codeStep
                     } else {
-                        emailStep
+                        methodPicker
+                        if method == .email {
+                            emailStep
+                        } else {
+                            phoneStep
+                        }
                     }
 
                     if let err = coordinator.errorMessage {
@@ -42,7 +57,9 @@ struct UpgradeAccountSheet: View {
                         appleUpgradeSection
                     }
 
-                    Text("After upgrading, sign in with the same email next time you launch Teamclaw.")
+                    Text(isPhoneFlow
+                         ? "After upgrading, sign in with the same phone number next time you launch Teamclaw."
+                         : "After upgrading, sign in with the same email next time you launch Teamclaw.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -53,12 +70,33 @@ struct UpgradeAccountSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Cancel") {
-                        coordinator.resetPendingEmailOTP()
+                        resetPending()
                         dismiss()
                     }
                 }
             }
         }
+    }
+
+    private var subtitle: String {
+        if let pendingPhone = coordinator.pendingPhoneOTPPhone {
+            return "Enter the 6-digit code we texted to \(pendingPhone)."
+        }
+        if let pendingEmail = coordinator.pendingEmailOTPEmail {
+            return "Enter the 6-digit code we emailed to \(pendingEmail)."
+        }
+        return "Attach a permanent identity so you don't lose access to this workspace."
+    }
+
+    // MARK: - Method picker
+
+    private var methodPicker: some View {
+        Picker("Upgrade method", selection: $method) {
+            Text("Email").tag(UpgradeMethod.email)
+            Text("Phone").tag(UpgradeMethod.phone)
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("upgrade.methodPicker")
     }
 
     // MARK: - Step 1: email entry
@@ -76,9 +114,31 @@ struct UpgradeAccountSheet: View {
                 .accessibilityIdentifier("upgrade.emailField")
         }
 
-        Button {
+        sendCodeButton(enabled: !email.isEmpty) {
             Task { await coordinator.sendUpgradeEmailOTP(email: email) }
-        } label: {
+        }
+    }
+
+    // MARK: - Step 1: phone entry
+
+    @ViewBuilder private var phoneStep: some View {
+        VStack(spacing: 12) {
+            TextField("Phone number", text: $phone)
+                .textContentType(.telephoneNumber)
+                .keyboardType(.phonePad)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .liquidGlass(in: RoundedRectangle(cornerRadius: 16), interactive: false)
+                .accessibilityIdentifier("upgrade.phoneField")
+        }
+
+        sendCodeButton(enabled: phone.count > 4) {
+            Task { await coordinator.sendUpgradePhoneOTP(phone: phone) }
+        }
+    }
+
+    private func sendCodeButton(enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack {
                 if coordinator.isBusy { ProgressView().progressViewStyle(.circular).tint(.white) }
                 Text("Send code").fontWeight(.semibold)
@@ -87,7 +147,7 @@ struct UpgradeAccountSheet: View {
             .padding(.vertical, 14)
         }
         .glassProminentButtonStyle()
-        .disabled(coordinator.isBusy || email.isEmpty)
+        .disabled(coordinator.isBusy || !enabled)
         .accessibilityIdentifier("upgrade.sendCodeButton")
     }
 
@@ -110,12 +170,16 @@ struct UpgradeAccountSheet: View {
 
         Button {
             Task {
-                await coordinator.verifyUpgradeEmailOTP(
-                    email: coordinator.pendingEmailOTPEmail ?? email,
-                    token: code
-                )
+                if let pendingPhone = coordinator.pendingPhoneOTPPhone {
+                    await coordinator.verifyUpgradePhoneOTP(phone: pendingPhone, token: code)
+                } else {
+                    await coordinator.verifyUpgradeEmailOTP(
+                        email: coordinator.pendingEmailOTPEmail ?? email,
+                        token: code
+                    )
+                }
                 if !coordinator.isAnonymous {
-                    coordinator.resetPendingEmailOTP()
+                    resetPending()
                     dismiss()
                 }
             }
@@ -131,9 +195,9 @@ struct UpgradeAccountSheet: View {
         .disabled(coordinator.isBusy || code.count != 6)
         .accessibilityIdentifier("upgrade.verifyButton")
 
-        Button("Use a different email") {
+        Button(coordinator.pendingPhoneOTPPhone != nil ? "Use a different number" : "Use a different email") {
             code = ""
-            coordinator.resetPendingEmailOTP()
+            resetPending()
         }
         .font(.footnote)
         .foregroundStyle(.secondary)
@@ -164,5 +228,10 @@ struct UpgradeAccountSheet: View {
         }
         .glassButtonStyle()
         .disabled(coordinator.isBusy)
+    }
+
+    private func resetPending() {
+        coordinator.resetPendingEmailOTP()
+        coordinator.resetPendingPhoneOTP()
     }
 }

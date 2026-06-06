@@ -122,6 +122,12 @@ public protocol AppOnboardingStore: Sendable {
     /// Confirm the code from `sendUpgradeEmailOTP`, finalizing the upgrade
     /// while keeping the same user_id.
     func verifyUpgradeEmailOTP(email: String, token: String) async throws
+    /// Send an SMS verification code to attach `phone` to the current
+    /// anonymous user (GoTrue phone_change flow). Bearer = current session.
+    func sendUpgradePhoneOTP(phone: String) async throws
+    /// Confirm the code from `sendUpgradePhoneOTP`, finalizing the upgrade
+    /// while keeping the same user_id.
+    func verifyUpgradePhoneOTP(phone: String, token: String) async throws
     func upgradeWithAppleCredential(idToken: String, nonce: String) async throws
 
     /// Emits each time the underlying auth provider rotates the access
@@ -658,6 +664,28 @@ public final class AppOnboardingCoordinator {
     /// user_id is unchanged, so existing team / actor rows are retained.
     public func verifyUpgradeEmailOTP(email: String, token: String) async {
         await performAuth { try await self.store.verifyUpgradeEmailOTP(email: email, token: token) }
+    }
+
+    /// Step 1 of the phone-based upgrade: text a verification code. Mirrors
+    /// `sendUpgradeEmailOTP` — stashes `pendingPhoneOTPPhone` so the sheet can
+    /// switch to the code-entry step, and does NOT route away on success.
+    public func sendUpgradePhoneOTP(phone: String) async {
+        guard !isBusy else { return }
+        isBusy = true
+        errorMessage = nil
+        defer { isBusy = false }
+        do {
+            try await store.sendUpgradePhoneOTP(phone: phone)
+            pendingPhoneOTPPhone = phone
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Step 2: confirm the SMS code and finalize the upgrade. On success the
+    /// user_id is unchanged, so existing team / actor rows are retained.
+    public func verifyUpgradePhoneOTP(phone: String, token: String) async {
+        await performAuth { try await self.store.verifyUpgradePhoneOTP(phone: phone, token: token) }
     }
 
     /// Same as `upgradeWithPassword` but linking an Apple identity instead.
