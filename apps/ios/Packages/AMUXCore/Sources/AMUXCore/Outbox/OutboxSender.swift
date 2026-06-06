@@ -248,6 +248,15 @@ public actor OutboxSender {
             try? ctx.save()
             outboxLogger.notice("outbox delivered msgId=\(msgPrefix, privacy: .public) attempts=\(row.attemptCount + 1, privacy: .public)")
         } catch {
+            // 409 Conflict: the server already persisted this message (idempotent
+            // duplicate from a retry or MQTT re-delivery). Treat as delivered.
+            if Self.isConflictError(error) {
+                row.state = .delivered
+                row.lastError = nil
+                try? ctx.save()
+                outboxLogger.notice("outbox delivered (409 conflict, idempotent) msgId=\(msgPrefix, privacy: .public)")
+                return
+            }
             row.attemptCount += 1
             row.lastError = String(describing: error)
             if row.attemptCount >= Self.maxAttempts {
@@ -262,6 +271,14 @@ public actor OutboxSender {
             }
             try? ctx.save()
         }
+    }
+
+    /// Returns true when `error` is a 409 Conflict, meaning the server
+    /// already processed the message (idempotent duplicate). The correct
+    /// action is to mark the row delivered and stop retrying.
+    static func isConflictError(_ error: Error) -> Bool {
+        guard case let .requestFailed(status, _, _) = error as? CloudAPIError else { return false }
+        return status == 409
     }
 
     /// Schedule: 0.5, 1, 2, 4, 8, 16, then 30 capped.
