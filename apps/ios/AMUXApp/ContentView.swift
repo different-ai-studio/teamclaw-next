@@ -12,6 +12,9 @@ struct ContentView: View {
     @State private var hub: MQTTMessageHub
     @State private var teamclawService = TeamclawService()
     @State private var onboarding: AppOnboardingCoordinator
+    /// Bridges push/deep-link "open session" intents into RootTabView's
+    /// session NavigationStack (which owns `sessionsPath`).
+    @State private var navigationRouter = NavigationRouter()
     @State private var isConnecting = false
     @State private var connectTask: Task<Void, Never>?
     /// One-shot legacy→CloudAPI session migration, run before the first
@@ -80,6 +83,7 @@ struct ContentView: View {
                     preferencesAPI: PushBootstrap.shared.preferencesAPI
                 )
                 .environment(onboarding)
+                .environment(navigationRouter)
                 .task {
                     if let team = onboarding.currentContext?.team {
                         OnboardingLocalCacheBootstrapper.ensureWorkspaceExists(team: team, modelContext: modelContext)
@@ -151,13 +155,14 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .amuxOpenSession)) { note in
             guard let sid = note.userInfo?["session_id"] as? String else { return }
-            // TODO(push): wire deep-link to session detail.
-            // ContentView does not own the session navigation primitive — that
-            // is `sessionsPath: [String]` inside RootTabView (AMUXUI package).
-            // T20 should hoist sessionsPath (or an equivalent Binding/action)
-            // up to ContentView or use an @Environment-injected router so this
-            // receiver can push the session onto the NavigationStack.
-            NSLog("[push] open session deep link received: %@", sid)
+            // Record the intent on the shared router. RootTabView observes
+            // `pendingSessionID`, switches to the Sessions tab, and pushes the
+            // session onto its NavigationStack. We record even before
+            // onboarding is `.ready` (cold launch from a push): RootTabView
+            // consumes any already-pending intent when it first mounts, so the
+            // deep link survives the launch-time onboarding gap.
+            logger.info("Open-session deep link received; routing to \(sid, privacy: .public)")
+            navigationRouter.openSession(sid)
         }
         .onChange(of: scenePhase) { _, phase in
             // iOS freezes sockets when backgrounded but rarely delivers a

@@ -23,9 +23,20 @@ to the active state. Reads as "studio software".
 - `error` `#8E3A2C` — desaturated, never bright red
 - `idle / stopped` → `slate` `#A6A39C`
 
-### Dark mode (Sumi 墨) — reference only, not yet implemented
+### Dark mode (Sumi 墨) — implemented
 `#181513` night, `#25221E` lamp, `#3A352F` stone, `#7A7166` ash, `#E8E2D5` bone,
 `#D86B53` ember. Coral becomes an ember, never a stop sign.
+
+Every `Color.amux.*` token is adaptive (`AMUXTheme.adaptive(light:dark:)`, a
+`UIColor`/`NSColor` dynamic provider), so the whole surface follows the system
+appearance automatically — no per-view `@Environment(\.colorScheme)` branching.
+Hai→Sumi mapping: `mist`→night, `paper`→lamp, `pebble`→stone, `slate`→ash,
+`onyx`→bone, `cinnabar`→ember. Three values DESIGN didn't pin are derived:
+`basalt`→`#CFC8BA` (a dimmed bone, one rung below the onyx→bone primary so the
+text hierarchy survives inversion), `sage`→`#7FA06B` (lifted so the breathing
+dot reads on the night ground), and `cinnabarDeep`→held at `#8E3A2C` (already a
+desaturated, non-alarming red on both grounds). Hairline flips onyx@10% →
+bone@10% so separators lift off the night instead of vanishing.
 
 ## Type
 

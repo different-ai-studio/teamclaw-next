@@ -14,6 +14,7 @@ public struct RootTabView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(AppOnboardingCoordinator.self) private var coordinator: AppOnboardingCoordinator?
+    @Environment(NavigationRouter.self) private var navigationRouter: NavigationRouter?
     @State private var viewModel = SessionListViewModel()
     @SceneStorage("rootTab") private var selection: AppTab = .sessions
     @State private var sessionsPath: [String] = []
@@ -171,6 +172,23 @@ public struct RootTabView: View {
             // before this view is mounted).
             if ready { replayPendingInviteIfNeeded() }
         }
+        .onAppear {
+            // Cold launch from a push: the intent may have been recorded
+            // before this view mounted, so `onChange` never sees the
+            // transition. Consume any already-pending session here.
+            if let pending = navigationRouter?.pendingSessionID, !pending.isEmpty {
+                openSessionFromDeepLink(pending)
+            }
+        }
+        .onChange(of: navigationRouter?.pendingSessionID) { _, sessionID in
+            // A push notification / deep link asked to open a session. Switch
+            // to the Sessions tab and push it onto the NavigationStack using
+            // the same `"session:<id>"` path element that in-app navigation
+            // (SearchTab, session list) uses, then clear the intent so the
+            // next deep link to the same session fires again.
+            guard let sessionID, !sessionID.isEmpty else { return }
+            openSessionFromDeepLink(sessionID)
+        }
         .sheet(isPresented: $showFirstAgentReminder) {
             ZeroAgentReminderSheet {
                 // Switch to the Actors tab and present its existing
@@ -181,6 +199,22 @@ public struct RootTabView: View {
                 showInviteAfterReminder = true
             }
         }
+    }
+
+    /// Push/deep-link entry point: reveal the Sessions tab and push the given
+    /// session, mirroring the `"session:<id>"` path convention that
+    /// `SessionsTab.navigationDestination` resolves. Idempotent — skips the
+    /// push if the session is already on top of the stack.
+    @MainActor
+    private func openSessionFromDeepLink(_ sessionID: String) {
+        selection = .sessions
+        let element = "session:\(sessionID)"
+        if sessionsPath.last != element {
+            sessionsPath.append(element)
+        }
+        // Consume the intent so a repeat deep link to the same session
+        // re-triggers the observer (nil -> id transition).
+        navigationRouter?.pendingSessionID = nil
     }
 
     @MainActor
