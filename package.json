@@ -26,7 +26,7 @@
     "daemon:build": "cargo build -p amuxd",
     "daemon:test": "cargo test -p amuxd",
     "ios:generate": "cd apps/ios && xcodegen generate",
-    "ios:build": "xcodebuild -project apps/ios/AMUX.xcodeproj -scheme AMUX -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath apps/ios/build build",
+    "ios:build": "xcodebuild -project apps/ios/AMUX.xcodeproj -scheme AMUX -destination 'generic/platform=iOS Simulator' -derivedDataPath apps/ios/build build",
     "ios:run": "scripts/run-ios.sh",
     "ios:test:core": "swift test --package-path apps/ios/Packages/AMUXCore",
     "ios:test": "xcodebuild test -project apps/ios/AMUX.xcodeproj -scheme AMUXUITests -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath apps/ios/build",
