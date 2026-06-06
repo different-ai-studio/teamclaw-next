@@ -97,15 +97,6 @@ struct AgentsSheet: View {
         let isSelected = selection.contains(agent.id)
         let isRunning = streamingAgentIDs.contains(agent.id)
         let runtime = runtimeForAgent(agent)
-        // Prefer the MQTT-synced SwiftData Runtime model list; fall back to
-        // the MemberSheetAgent's pre-computed fallback (populated by
-        // SessionMemberSheetLoader.fallbackModels when the MQTT ACTIVE
-        // retained state hasn't arrived yet — e.g. newly spawned runtimes).
-        let effectiveModels: [AvailableModel] = {
-            if let rt = runtime, !rt.availableModels.isEmpty { return rt.availableModels }
-            return agent.availableModels.map { AvailableModel(id: $0, displayName: Self.modelDisplayName($0)) }
-        }()
-        let effectiveCurrentModel = runtime?.currentModel ?? agent.currentModel
 
         HStack(spacing: 12) {
             // Selection indicator
@@ -120,15 +111,15 @@ struct AgentsSheet: View {
             Spacer()
 
             // Model picker — available when the runtime has model options
-            if !effectiveModels.isEmpty {
+            if let runtime, !runtime.availableModels.isEmpty {
                 Menu {
-                    ForEach(effectiveModels) { model in
+                    ForEach(runtime.availableModels) { model in
                         Button {
                             onApplyModel(agent, model.id)
                         } label: {
                             HStack {
                                 Text(model.displayName)
-                                if model.id == effectiveCurrentModel {
+                                if model.id == runtime.currentModel {
                                     Spacer()
                                     Image(systemName: "checkmark")
                                 }
@@ -137,7 +128,7 @@ struct AgentsSheet: View {
                     }
                 } label: {
                     HStack(spacing: 2) {
-                        Text(effectiveCurrentModel.map { Self.modelDisplayName($0) } ?? "Model")
+                        Text(currentModelLabel(runtime))
                             .font(.caption)
                         Image(systemName: "chevron.down")
                             .font(.caption2)
@@ -182,20 +173,11 @@ struct AgentsSheet: View {
 
     // MARK: - Helpers
 
-    /// Maps a raw model ID to a human-readable display name. Mirrors the
-    /// fallback table in SessionMemberSheetLoader; used when the MQTT
-    /// ACTIVE retained state hasn't arrived yet.
-    private static func modelDisplayName(_ id: String) -> String {
-        switch id {
-        case "claude-haiku-4-5": return "Claude Haiku 4.5"
-        case "claude-sonnet-4-6": return "Claude Sonnet 4.6"
-        case "claude-opus-4-7": return "Claude Opus 4.7"
-        case "gpt-4o": return "GPT-4o"
-        case "gpt-4o-mini": return "GPT-4o Mini"
-        case "codex-mini-latest": return "Codex Mini"
-        case "o4-mini": return "o4 Mini"
-        default: return id
+    private func currentModelLabel(_ runtime: Runtime) -> String {
+        guard let currentID = runtime.currentModel, !currentID.isEmpty else {
+            return "Model"
         }
+        return runtime.availableModels.first(where: { $0.id == currentID })?.displayName ?? currentID
     }
 
     private func toggleSelection(_ agent: MemberSheetAgent) {

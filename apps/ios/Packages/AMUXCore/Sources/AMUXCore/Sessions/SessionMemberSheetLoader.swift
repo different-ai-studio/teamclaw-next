@@ -143,9 +143,7 @@ public struct SessionMemberSheetLoader: Sendable {
                     agentType: Self.displayName(forBackendType: runtime?.backendType),
                     runtimeState: Self.chipState(forStatus: runtime?.status,
                                                  lastSeenAt: runtime?.lastSeenAt),
-                    availableModels: liveModels.isEmpty
-                        ? Self.fallbackModelIDs(forBackendType: runtime?.backendType)
-                        : liveModels,
+                    availableModels: liveModels,
                     currentModel: runtime?.currentModel,
                     runtimeID: runtime?.runtimeID,
                     workspaceID: runtime?.workspaceID,
@@ -204,39 +202,4 @@ public struct SessionMemberSheetLoader: Sendable {
         }
     }
 
-    /// Hardcoded fallback list mirroring daemon's `available_models_for`
-    /// (apps/daemon/src/runtime/models.rs). Used when the live MQTT
-    /// retained state hasn't surfaced an availableModels list — most
-    /// often because the daemon was MQTT-disconnected when ACTIVE was
-    /// published, so iOS only ever saw the STARTING payload (which uses
-    /// `Default::default()` and so ships empty available_models).
-    /// Keep this in sync with the daemon source on any model add/remove.
-    public static func fallbackModels(forBackendType backendType: String?) -> [AvailableModel] {
-        switch backendType {
-        case "claude":
-            return [
-                AvailableModel(id: "claude-haiku-4-5", displayName: "Claude Haiku 4.5"),
-                AvailableModel(id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6"),
-                AvailableModel(id: "claude-opus-4-7", displayName: "Claude Opus 4.7"),
-            ]
-        case "opencode":
-            return [
-                AvailableModel(id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6"),
-                AvailableModel(id: "claude-opus-4-7", displayName: "Claude Opus 4.7"),
-                AvailableModel(id: "gpt-4o", displayName: "GPT-4o"),
-                AvailableModel(id: "gpt-4o-mini", displayName: "GPT-4o Mini"),
-            ]
-        case "codex":
-            return [
-                AvailableModel(id: "codex-mini-latest", displayName: "Codex Mini"),
-                AvailableModel(id: "o4-mini", displayName: "o4 Mini"),
-            ]
-        default:
-            return []
-        }
-    }
-
-    public static func fallbackModelIDs(forBackendType backendType: String?) -> [String] {
-        fallbackModels(forBackendType: backendType).map(\.id)
-    }
 }
