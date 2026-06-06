@@ -1145,6 +1145,48 @@ fn should_use_claude_agent_acp_wrapper(binary: &str) -> bool {
     binary_name == "claude" || binary_name == "claude-agent-acp"
 }
 
+/// Build a PATH for spawned agent runtimes that includes common user-level
+/// binary directories.
+///
+/// amuxd is typically launched by launchd (macOS) or systemd (Linux) with a
+/// minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) that omits Homebrew
+/// (`/opt/homebrew/bin`), `~/.local/bin`, and the other locations where agent
+/// runtimes like `npx`, `opencode`, and `claude` actually live. Without this,
+/// the ClaudeCode ACP wrapper (`npx @zed-industries/claude-agent-acp`) fails to
+/// spawn with `ENOENT`, surfaced to clients as the opaque "ACP host init
+/// channel closed".
+///
+/// Inherited PATH entries keep priority; the well-known directories are
+/// appended as fallbacks, and duplicates are removed preserving first
+/// occurrence. The extra directories are harmless on platforms where they don't
+/// exist — a non-existent PATH entry is simply skipped during lookup.
+fn enriched_spawn_path(existing: Option<&str>, home: Option<&Path>) -> String {
+    let mut candidates: Vec<String> = Vec::new();
+
+    // Inherited PATH first — preserves whatever the launcher configured.
+    if let Some(existing) = existing {
+        candidates.extend(existing.split(':').map(|s| s.to_string()));
+    }
+
+    // Well-known user-level bin dirs that minimal launchd/systemd PATHs omit.
+    if let Some(home) = home {
+        for sub in [".local/bin", ".npm-global/bin", ".bun/bin", ".cargo/bin"] {
+            candidates.push(home.join(sub).to_string_lossy().into_owned());
+        }
+    }
+    for dir in ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"] {
+        candidates.push(dir.to_string());
+    }
+
+    // Dedupe preserving first occurrence; drop empty segments.
+    let mut seen = std::collections::HashSet::new();
+    candidates
+        .into_iter()
+        .filter(|d| !d.is_empty() && seen.insert(d.clone()))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
 #[cfg(test)]
 mod attachment_ext_tests {
     use super::path_and_ext;
@@ -1201,6 +1243,56 @@ mod command_selection_tests {
     }
 }
 
+#[cfg(test)]
+mod spawn_path_tests {
+    use super::enriched_spawn_path;
+    use std::path::Path;
+
+    #[test]
+    fn appends_homebrew_and_user_local_to_minimal_path() {
+        // launchd hands amuxd this minimal PATH, which omits Homebrew and
+        // ~/.local/bin where npx/opencode/claude live.
+        let path = enriched_spawn_path(
+            Some("/usr/bin:/bin:/usr/sbin:/sbin"),
+            Some(Path::new("/Users/x")),
+        );
+        let dirs: Vec<&str> = path.split(':').collect();
+        assert!(
+            dirs.contains(&"/opt/homebrew/bin"),
+            "missing homebrew bin: {path}"
+        );
+        assert!(
+            dirs.contains(&"/Users/x/.local/bin"),
+            "missing ~/.local/bin: {path}"
+        );
+        // Inherited entries keep priority (come first).
+        assert!(
+            path.starts_with("/usr/bin:/bin:/usr/sbin:/sbin"),
+            "inherited PATH not first: {path}"
+        );
+    }
+
+    #[test]
+    fn dedupes_existing_entries() {
+        let path = enriched_spawn_path(
+            Some("/opt/homebrew/bin:/usr/bin"),
+            Some(Path::new("/home/u")),
+        );
+        let count = path
+            .split(':')
+            .filter(|d| *d == "/opt/homebrew/bin")
+            .count();
+        assert_eq!(count, 1, "duplicate homebrew entry: {path}");
+    }
+
+    #[test]
+    fn handles_missing_existing_path() {
+        let path = enriched_spawn_path(None, Some(Path::new("/home/u")));
+        assert!(path.split(':').any(|d| d == "/home/u/.local/bin"), "{path}");
+        assert!(path.split(':').any(|d| d == "/opt/homebrew/bin"), "{path}");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Public API: long-lived ACP host (initialize once, many session/new)
 // ---------------------------------------------------------------------------
@@ -1231,6 +1323,17 @@ fn build_acp_process_command(
         c.args(args);
         c
     };
+    // amuxd is usually launched by launchd/systemd with a minimal PATH that
+    // omits Homebrew and ~/.local/bin, so the agent runtime (npx/opencode/
+    // claude) can't be found and spawn fails with ENOENT. Enrich PATH before
+    // applying caller-supplied env so a forced PATH override still wins.
+    cmd.env(
+        "PATH",
+        enriched_spawn_path(
+            std::env::var("PATH").ok().as_deref(),
+            std::env::var_os("HOME").map(PathBuf::from).as_deref(),
+        ),
+    );
     for (key, value) in extra_env {
         if force_env_keys.contains(key) || std::env::var_os(key).is_none() {
             cmd.env(key, value);
