@@ -5,7 +5,9 @@ import Foundation
 @Suite("PairingManager")
 struct PairingManagerTests {
 
-    final class InMemoryStore: CredentialStore {
+    // Single-threaded test double; CredentialStore is Sendable but this needs
+    // mutable storage, so vouch for it under Swift 6 strict concurrency.
+    final class InMemoryStore: CredentialStore, @unchecked Sendable {
         var saved: PairingCredentials?
         func save(_ credentials: PairingCredentials) throws { saved = credentials }
         func load() throws -> PairingCredentials? { saved }

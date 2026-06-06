@@ -1,6 +1,6 @@
 import Foundation
 
-public struct ServicesDefaults: Codable {
+public struct ServicesDefaults: Codable, Sendable {
     public let supabaseUrl: String
     public let supabaseAnonKey: String
     public let cloudApiUrl: String?

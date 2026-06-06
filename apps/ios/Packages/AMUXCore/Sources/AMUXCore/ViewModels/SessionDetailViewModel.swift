@@ -135,6 +135,9 @@ public final class SessionDetailViewModel {
     /// Writes happen only from main-actor methods (`start`, `stop`); the
     /// deinit's read happens after all strong references are gone, so the
     /// data-race waiver here is safe in practice.
+    // `nonisolated(unsafe)` (not plain `nonisolated`): this is a mutable stored
+    // property on an @Observable type, where plain `nonisolated` is rejected.
+    // The deinit read is safe in practice (see the note above).
     nonisolated(unsafe) private var task: Task<Void, Never>?
 
     // MARK: - Chip-bar state
@@ -188,6 +191,8 @@ public final class SessionDetailViewModel {
     /// clears on `statusChange:.idle` or after 10s of silence.
     public private(set) var isAgentWorking: Bool = false
     private var agentWorkingResetTask: Task<Void, Never>?
+    // `nonisolated(unsafe)` required: mutable stored property on an @Observable
+    // type, where plain `nonisolated` is rejected by the compiler.
     nonisolated(unsafe) private var spawningPollTask: Task<Void, Never>?
     /// Number of consecutive 2s polls fired while waiting for at least one
     /// agent to leave .spawning / nil-runtimeID state. Reset to 0 whenever
@@ -566,12 +571,24 @@ public final class SessionDetailViewModel {
             sessionsRepository: sessionsRepository,
             agentRuntimesRepository: agentRuntimesRepository
         )
+        // Snapshot the bound-runtime model lookup into Sendable locals on the
+        // MainActor, then hand the loader a @Sendable closure that touches none
+        // of `self`. `availableModels(forAgentActorID:)` only consults the
+        // single bound `runtime` + the session's primary agent, so this is
+        // behaviourally identical without sending main-actor state into the
+        // loader's nonisolated execution.
+        let boundRuntimeID = runtime?.runtimeId
+        let boundModelIDs = runtime?.availableModels.map(\.id) ?? []
+        let primaryAgentID = session.primaryAgentId
         guard let snapshot = await loader.load(
             sessionID: session.sessionId,
             teamID: teamID,
             currentHumanActorID: teamclawService?.currentHumanActorId ?? "",
-            availableModelsForAgent: { [weak self] actorID in
-                self?.availableModels(forAgentActorID: actorID) ?? []
+            availableModelsForAgent: { actorID in
+                if let boundRuntimeID, boundRuntimeID == actorID || primaryAgentID == actorID {
+                    return boundModelIDs
+                }
+                return []
             }
         ) else {
             print("[RuntimeDetailVM] refreshMemberSheet: loader returned nil (no repo or fetch failed)")
@@ -2065,7 +2082,7 @@ public final class SessionDetailViewModel {
     }
 
     private func sendCommand(agentActorID: String? = nil,
-                             makeCommand: (inout Amux_AcpCommand) -> Void) async throws {
+                             makeCommand: sending (inout Amux_AcpCommand) -> Void) async throws {
         let route = commandRoute(forAgentActorID: agentActorID, fallbackRuntime: runtime)
         guard !route.runtimeID.isEmpty else {
             let key = agentActorID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

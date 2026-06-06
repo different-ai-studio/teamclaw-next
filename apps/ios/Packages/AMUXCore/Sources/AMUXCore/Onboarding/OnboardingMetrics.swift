@@ -10,6 +10,11 @@ let onboardingSignposter = OSSignposter(logger: onboardingLogger)
 @discardableResult
 func measureOnboarding<T>(
     _ name: String,
+    // Inherit the caller's actor isolation so `block` runs in the caller's
+    // context (e.g. the @MainActor AppOnboardingCoordinator) instead of being
+    // "sent" into a detached nonisolated execution — which Swift 6 rejects
+    // because the closure captures non-Sendable main-actor state.
+    isolation: isolated (any Actor)? = #isolation,
     _ block: () async throws -> T
 ) async rethrows -> T {
     let start = Date()

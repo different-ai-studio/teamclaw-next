@@ -102,7 +102,7 @@ public struct SessionMemberSheetLoader: Sendable {
         sessionID: String,
         teamID: String,
         currentHumanActorID: String,
-        availableModelsForAgent: (String) -> [String]
+        availableModelsForAgent: @Sendable (String) -> [String]
     ) async -> SessionMemberSheetSnapshot? {
         guard let sessionsRepo = sessionsRepository else { return nil }
 
