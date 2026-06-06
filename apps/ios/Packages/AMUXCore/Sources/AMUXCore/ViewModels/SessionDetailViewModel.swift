@@ -678,8 +678,12 @@ public final class SessionDetailViewModel {
                     id: agent.id, displayName: agent.displayName,
                     workspacePath: agent.workspacePath, agentType: agent.agentType,
                     runtimeState: chipStateFromRuntime(liveRuntime),
-                    availableModels: agent.availableModels.isEmpty
-                        ? liveRuntime.availableModels.map(\.id) : agent.availableModels,
+                    availableModels: {
+                        let live = liveRuntime.availableModels.map(\.id)
+                        if !live.isEmpty { return live }
+                        if !agent.availableModels.isEmpty { return agent.availableModels }
+                        return []
+                    }(),
                     currentModel: liveRuntime.currentModel ?? agent.currentModel,
                     runtimeID: agent.runtimeID ?? liveRuntime.runtimeId,
                     workspaceID: agent.workspaceID, backendType: agent.backendType
@@ -691,8 +695,12 @@ public final class SessionDetailViewModel {
                     id: agent.id, displayName: agent.displayName,
                     workspacePath: agent.workspacePath, agentType: agent.agentType,
                     runtimeState: chipStateFromRuntime(extra),
-                    availableModels: agent.availableModels.isEmpty
-                        ? extra.availableModels.map(\.id) : agent.availableModels,
+                    availableModels: {
+                        let live = extra.availableModels.map(\.id)
+                        if !live.isEmpty { return live }
+                        if !agent.availableModels.isEmpty { return agent.availableModels }
+                        return []
+                    }(),
                     currentModel: extra.currentModel ?? agent.currentModel,
                     runtimeID: agent.runtimeID, workspaceID: agent.workspaceID,
                     backendType: agent.backendType
@@ -727,6 +735,7 @@ public final class SessionDetailViewModel {
             _ = runtime.status
             _ = runtime.currentModel
             _ = runtime.availableCommandsJSON
+            _ = runtime.availableModels      // MQTT 更新 models 时触发 refresh
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.isObservingRuntimeChanges = false
@@ -740,7 +749,12 @@ public final class SessionDetailViewModel {
 
     private func scheduleSpawningRefreshIfNeeded() {
         let needsPoll = memberSheetAgents.contains {
-            $0.runtimeState == .spawning || $0.runtimeID == nil
+            $0.runtimeState == .spawning
+            || $0.runtimeID == nil
+            || ($0.availableModels.isEmpty
+                && ($0.runtimeState == .active
+                    || $0.runtimeState == .idle
+                    || $0.runtimeState == .ready))
         }
         if needsPoll, spawningPollCount < maxSpawningPolls {
             guard spawningPollTask == nil else { return }
@@ -2502,6 +2516,30 @@ extension SessionDetailViewModel {
     public func _test_setMemberSheetAgentsAndRelabel(_ agents: [MemberSheetAgent]) {
         memberSheetAgents = agents
         relabelRawRuntimeIDStampsToActorIDs()
+    }
+
+    public func _test_setMemberSheetAgents(_ agents: [MemberSheetAgent]) {
+        memberSheetAgents = agents
+    }
+
+    /// Returns whether the current member sheet state would cause
+    /// scheduleSpawningRefreshIfNeeded() to enqueue a poll.
+    public func _test_needsSpawningPoll() -> Bool {
+        memberSheetAgents.contains {
+            $0.runtimeState == .spawning
+            || $0.runtimeID == nil
+            || ($0.availableModels.isEmpty
+                && ($0.runtimeState == .active
+                    || $0.runtimeState == .idle
+                    || $0.runtimeState == .ready))
+        }
+    }
+
+    /// Exposes the partial-retain merge logic for testing.
+    public static func _test_mergeAvailableModels(liveModels: [String], existingModels: [String]) -> [String] {
+        if !liveModels.isEmpty { return liveModels }
+        if !existingModels.isEmpty { return existingModels }
+        return []
     }
 
     /// Append a raw event to in-memory `events` + `timelineState.entries`
