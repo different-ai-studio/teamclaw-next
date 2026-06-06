@@ -196,6 +196,24 @@
   #s-end h1{font-size:clamp(2.2rem,6vw,5rem);max-width:18ch}
   .end-line{font-family:"Fraunces",serif;font-style:italic;font-size:clamp(1.1rem,2.4vw,1.8rem);color:var(--coral);margin-top:1.5rem}
 
+  /* ---------- salesforce slide (their world · sax blue) ---------- */
+  #s-salesforce{padding:clamp(1.3rem,2.8vw,2.4rem) clamp(2rem,4vw,3.5rem)}
+  .sf-grid{display:grid;grid-template-columns:1.9fr 1fr;gap:clamp(1.4rem,3vw,3rem);align-items:center;width:100%;max-width:1640px;margin:0 auto}
+  .sf-mark{display:inline-block;background:#032D60;color:#fff;font-family:"Noto Serif SC",serif;font-weight:700;font-size:.92rem;letter-spacing:.04em;padding:.42rem 1.1rem;border-radius:99px;margin-bottom:.85rem;box-shadow:0 8px 22px -12px rgba(3,45,96,.6)}
+  .sf-layers{display:flex;flex-direction:column;gap:.7rem}
+  .sfl{background:#EAF4FE;border-left:5px solid #0176D3;border-radius:10px;padding:.95rem 1.15rem;display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:center;box-shadow:0 12px 30px -22px rgba(3,45,96,.55)}
+  .sfl-n{width:36px;height:36px;border-radius:50%;background:#032D60;color:#fff;font-family:"Fraunces",serif;font-weight:900;font-size:1.1rem;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .sfl-t{font-family:"Noto Serif SC",serif;font-weight:700;font-size:1.05rem;color:#032D60;line-height:1.2}
+  .sfl-d{font-size:.84rem;color:#16325C;font-weight:300;line-height:1.5;margin-top:.22rem}
+  .sfl-d b{font-weight:600;color:#0176D3}
+  .sf-explain .kicker{color:#0176D3}
+  .sf-explain .kicker::before{background:#0176D3}
+  .sf-explain h2{color:#032D60;margin-bottom:1.1rem}
+  .sf-explain p{color:var(--ink-soft);font-weight:300;line-height:1.7;font-size:1rem;margin-bottom:.95rem}
+  .sf-explain p b{color:#032D60;font-weight:600}
+  .sf-explain .close{font-family:"Noto Serif SC",serif;font-weight:600;color:#032D60;font-size:1.12rem;line-height:1.55;border-left:3px solid #1B96FF;padding-left:.9rem;margin-top:.3rem}
+  .sf-src{font-family:"JetBrains Mono",monospace;font-size:.66rem;color:var(--ink-soft);opacity:.7;margin-top:1.1rem}
+
   /* ---------- nav / chrome ---------- */
   .progress{position:fixed;top:0;left:0;height:3px;background:var(--coral);z-index:100;transition:width .4s ease}
   .nav{position:fixed;bottom:1.4rem;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:1rem;z-index:100;
@@ -249,9 +267,37 @@
     </div>
   </section>
 
+  <!-- 1 SALESFORCE -->
+  <section class="slide" id="s-salesforce">
+    <div class="slide-num fr">01</div>
+    <div class="sf-grid">
+      <!-- left 2/3 : the stack, recreated in Salesforce blue -->
+      <div data-r="2">
+        <div class="sf-mark">Salesforce 架构</div>
+        <div class="sf-layers">
+          <div class="sfl"><span class="sfl-n">1</span><div><div class="sfl-t">共享多租户</div><div class="sfl-d">全部租户同一套应用实例,<b>org_id</b> 逻辑隔离,统一升级。</div></div></div>
+          <div class="sfl"><span class="sfl-n">2</span><div><div class="sfl-t">元数据驱动引擎</div><div class="sfl-d">对象 / 字段 / 页面 / 流程皆为<b>元数据</b>,运行时解释渲染。</div></div></div>
+          <div class="sfl"><span class="sfl-n">3</span><div><div class="sfl-t">数据层 · Universal Data Dictionary</div><div class="sfl-d">少数几张<b>巨型通用表</b> + 元数据字典,而非每租户真表。</div></div></div>
+          <div class="sfl"><span class="sfl-n">4</span><div><div class="sfl-t">定制两条路</div><div class="sfl-d">声明式(Flow / Process Builder / 校验规则)+ 编程式(<b>Apex + SOQL + Lightning LWC</b>)。</div></div></div>
+          <div class="sfl"><span class="sfl-n">5</span><div><div class="sfl-t">生态</div><div class="sfl-d"><b>AppExchange</b> 应用市场 + Salesforce Platform(Force.com)这层 PaaS。</div></div></div>
+        </div>
+      </div>
+      <!-- right 1/3 : neutral explanation -->
+      <div class="sf-explain">
+        <div class="kicker" data-r="1">行业标杆 · 巨人的架构</div>
+        <h2 data-r="1" style="font-size:clamp(1.5rem,3vw,2.3rem)">Salesforce Platform</h2>
+        <p data-r="3">1999 年以 “No Software” 开创多租户 SaaS,如今是全球最大的企业 SaaS,服务数百万组织。它的架构定义了“在平台上配置出你的应用”这一代范式。</p>
+        <p data-r="4">两根支柱:<b>多租户共享</b> + <b>元数据驱动</b>。客户的对象、字段、流程乃至 Apex 代码,都在同一套共享平台内,靠元数据与专有运行时解释执行。</p>
+        <p data-r="5">定制不出围墙:声明式拖拽 + 编程式 Apex,产物是平台托管的<b>元数据应用</b>,而非每租户独立的真实软件。</p>
+        <div class="close" data-r="6">一套共享平台、元数据建模、专有运行时与语言——上一代企业 SaaS 的集大成者。</div>
+        <div class="sf-src" data-r="7">来源:Salesforce 多租户平台架构</div>
+      </div>
+    </div>
+  </section>
+
   <!-- 2 PROBLEM -->
   <section class="slide" id="s-problem">
-    <div class="slide-num fr">01</div>
+    <div class="slide-num fr">02</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">为什么</div>
       <h2>传统 SaaS 的天花板</h2>
@@ -274,7 +320,7 @@
 
   <!-- 3 TWO-LAYER -->
   <section class="slide" id="s-arch2">
-    <div class="slide-num fr">02</div>
+    <div class="slide-num fr">03</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">总体架构</div>
       <h2>Core SaaS + Customer App 双层</h2>
@@ -300,7 +346,7 @@
 
   <!-- 4 DECISIONS -->
   <section class="slide" id="s-decisions">
-    <div class="slide-num fr">03</div>
+    <div class="slide-num fr">04</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">已锁定</div>
       <h2>四个架构决策</h2>
@@ -315,7 +361,7 @@
 
   <!-- 4 ARCHITECTURE MAP -->
   <section class="slide" id="s-map" style="padding-top:clamp(1.6rem,3.5vw,3rem);padding-bottom:clamp(1.3rem,3vw,2.4rem)">
-    <div class="slide-num fr">04</div>
+    <div class="slide-num fr">05</div>
     <div class="slide-head" data-r="1" style="margin-bottom:1rem">
       <div class="kicker">架构全景 · 端 / 云 / Core / Customer</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.4rem)">一图看清四层关系</h2>
@@ -361,7 +407,7 @@
 
   <!-- 5 CUSTOMER FLOW -->
   <section class="slide" id="s-flow">
-    <div class="slide-num fr">05</div>
+    <div class="slide-num fr">06</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">用户旅程 · 商家如何造一个自己的 App</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.4rem)">从一句话到上线,六步</h2>
@@ -379,7 +425,7 @@
 
   <!-- 9 BATTERIES -->
   <section class="slide" id="s-batteries">
-    <div class="slide-num fr">06</div>
+    <div class="slide-num fr">07</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">护城河 · 平台 Batteries</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.3rem)">平台帮 Customer App 做完的基建</h2>
@@ -407,7 +453,7 @@
 
   <!-- 10 ROADMAP -->
   <section class="slide" id="s-road">
-    <div class="slide-num fr">07</div>
+    <div class="slide-num fr">08</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">路线图 · S0 → S7</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.3rem)">先造最薄纵切,再上 AI codegen</h2>
@@ -429,7 +475,7 @@
 
   <!-- 11 PRINCIPLES -->
   <section class="slide" id="s-principles">
-    <div class="slide-num fr">08</div>
+    <div class="slide-num fr">09</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">架构原则</div>
       <h2>六条不变量</h2>
@@ -461,7 +507,7 @@
 <div class="nav">
   <button class="arrow" id="prev" aria-label="上一页">‹</button>
   <div class="dots" id="dots"></div>
-  <span class="counter" id="counter">01 / 10</span>
+  <span class="counter" id="counter">01 / 11</span>
   <button class="arrow" id="next" aria-label="下一页">›</button>
 </div>
 <div class="hint">← → / 空格翻页 · ⌘P 导出 PDF</div>
