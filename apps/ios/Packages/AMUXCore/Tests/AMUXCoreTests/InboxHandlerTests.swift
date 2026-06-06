@@ -13,7 +13,7 @@ struct InboxHandlerTests {
             payload: payload(#"{"session_id":"sess-1","ts":1700000000}"#),
             expectedUserID: "user-abc"
         )
-        #expect(result == .success(InboxPing(sessionID: "sess-1", ts: 1700000000)))
+        #expect(result == .success(InboxPing(sessionID: "sess-1", type: nil, ts: 1700000000)))
     }
 
     @Test("accepts payload without optional ts")
@@ -23,7 +23,7 @@ struct InboxHandlerTests {
             payload: payload(#"{"session_id":"sess-1"}"#),
             expectedUserID: "user-abc"
         )
-        #expect(result == .success(InboxPing(sessionID: "sess-1", ts: nil)))
+        #expect(result == .success(InboxPing(sessionID: "sess-1", type: nil, ts: nil)))
     }
 
     @Test("rejects topic that is not inbox/")

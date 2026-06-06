@@ -250,6 +250,36 @@ public actor CloudAPIAppOnboardingStore: AppOnboardingStore {
         }
     }
 
+    public func sendUpgradePhoneOTP(phone: String) async throws {
+        await ensureStarted()
+        // GoTrue phone_change: PATCH the user's phone with the current bearer.
+        // This texts a verification code without minting a new user, so the
+        // upgrade keeps the same user_id (mirror of `sendUpgradeEmailOTP`).
+        let token = try await sessionStore.accessToken()
+        // PATCH returns the (still-anonymous) user; we don't adopt it here —
+        // the session only changes after the code is verified.
+        let _: GoTrueSession = try await auth.patch(
+            "/v1/auth/user",
+            body: PhoneUpdate(phone: phone),
+            bearer: token
+        )
+    }
+
+    public func verifyUpgradePhoneOTP(phone: String, token: String) async throws {
+        await ensureStarted()
+        let bearer = try await sessionStore.accessToken()
+        let g: GoTrueSession = try await auth.post(
+            "/v1/auth/verify-otp",
+            body: VerifyPhoneOTPRequest(phone: phone, token: token, type: "phone_change"),
+            bearer: bearer
+        )
+        // verify-otp for phone_change returns the updated session; adopt it
+        // when present so the (now non-anonymous) tokens replace the old ones.
+        if g.accessToken != nil {
+            try await store(g)
+        }
+    }
+
     public func upgradeWithAppleCredential(idToken: String, nonce: String) async throws {
         await ensureStarted()
         // Forwarding the bearer makes GoTrue link the Apple identity to the
@@ -426,6 +456,10 @@ private struct PasswordCredentials: Encodable, Sendable {
 
 private struct EmailUpdate: Encodable, Sendable {
     let email: String
+}
+
+private struct PhoneUpdate: Encodable, Sendable {
+    let phone: String
 }
 
 private struct OTPRequest: Encodable, Sendable {
