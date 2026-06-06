@@ -95,17 +95,7 @@ public enum RuntimeResolver {
     /// MQTT-published Runtime row arrives. Keep these lists in sync with
     /// `daemon/src/runtime/models.rs`.
     static func encodedDefaultModels(for backendType: String?) -> String {
-        let models: [AvailableModel]
-        switch backendType {
-        case "claude":
-            models = [
-                AvailableModel(id: "claude-haiku-4-5", displayName: "Claude Haiku 4.5"),
-                AvailableModel(id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6"),
-                AvailableModel(id: "claude-opus-4-7", displayName: "Claude Opus 4.7"),
-            ]
-        default:
-            models = []
-        }
+        let models = SessionMemberSheetLoader.fallbackModels(forBackendType: backendType)
         guard !models.isEmpty,
               let data = try? JSONEncoder().encode(models),
               let json = String(data: data, encoding: .utf8) else {

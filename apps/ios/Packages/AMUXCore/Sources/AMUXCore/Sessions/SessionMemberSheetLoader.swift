@@ -211,16 +211,32 @@ public struct SessionMemberSheetLoader: Sendable {
     /// published, so iOS only ever saw the STARTING payload (which uses
     /// `Default::default()` and so ships empty available_models).
     /// Keep this in sync with the daemon source on any model add/remove.
-    public static func fallbackModelIDs(forBackendType backendType: String?) -> [String] {
+    public static func fallbackModels(forBackendType backendType: String?) -> [AvailableModel] {
         switch backendType {
         case "claude":
-            return ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7"]
+            return [
+                AvailableModel(id: "claude-haiku-4-5", displayName: "Claude Haiku 4.5"),
+                AvailableModel(id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6"),
+                AvailableModel(id: "claude-opus-4-7", displayName: "Claude Opus 4.7"),
+            ]
         case "opencode":
-            return ["claude-sonnet-4-6", "claude-opus-4-7", "gpt-4o", "gpt-4o-mini"]
+            return [
+                AvailableModel(id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6"),
+                AvailableModel(id: "claude-opus-4-7", displayName: "Claude Opus 4.7"),
+                AvailableModel(id: "gpt-4o", displayName: "GPT-4o"),
+                AvailableModel(id: "gpt-4o-mini", displayName: "GPT-4o Mini"),
+            ]
         case "codex":
-            return ["codex-mini-latest", "o4-mini"]
+            return [
+                AvailableModel(id: "codex-mini-latest", displayName: "Codex Mini"),
+                AvailableModel(id: "o4-mini", displayName: "o4 Mini"),
+            ]
         default:
             return []
         }
+    }
+
+    public static func fallbackModelIDs(forBackendType backendType: String?) -> [String] {
+        fallbackModels(forBackendType: backendType).map(\.id)
     }
 }

@@ -1876,12 +1876,20 @@ public final class SessionDetailViewModel {
                                 sequence: Int,
                                 runtimeID: String? = nil,
                                 turnID: String? = nil,
+                                isHistoryReplay: Bool = false,
                                 modelContext: ModelContext) -> Bool {
-        // Heartbeat: any ACP event arrival means the runtime is busy.
-        // Drives the chip stop icon / streamingAgentIDs across the
-        // whole turn (thinking → tool_use → output) regardless of
-        // whether `runtime.isActive` flipped on the daemon side.
-        markAgentWorking()
+        // Heartbeat: any live ACP event arrival means the runtime is busy.
+        // Skip for history-replay batches (requestTurnHistory responses) —
+        // those events belong to an already-completed turn and must not
+        // flip the agent chip to "running".
+        // Also skip for statusChange: a runtime transitioning to "active"
+        // (daemon spawn ready) does not mean the agent is processing a user
+        // prompt. Only thinking / tool_use / output events indicate real work.
+        if !isHistoryReplay, case .statusChange(_) = acp.event {
+            // lifecycle event — don't mark working
+        } else if !isHistoryReplay {
+            markAgentWorking()
+        }
 
         // Reducer is source of truth for entry mutations. Apply +
         // project. Side effects the reducer doesn't track (runtime
@@ -1976,6 +1984,7 @@ public final class SessionDetailViewModel {
                                   sequence: seq,
                                   runtimeID: envelope.runtimeID,
                                   turnID: envelope.turnID.isEmpty ? nil : envelope.turnID,
+                                  isHistoryReplay: true,
                                   modelContext: modelContext) {
                     anyDirty = true
                 }
