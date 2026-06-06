@@ -106,6 +106,7 @@ public struct IdeasTab: View {
                                 hub: hub,
                                 peerId: "ios-\(pairing.authToken.prefix(6))",
                                 sessionsRepository: sessionsRepository,
+                                connectedAgentsStore: connectedAgentsStore,
                                 navigationPath: $navigationPath
                             )
                         } else {
