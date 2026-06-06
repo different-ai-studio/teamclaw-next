@@ -127,3 +127,134 @@ pub(super) fn empty_to_none(value: &str) -> Option<&str> {
         Some(value)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::BackendError;
+    use reqwest::StatusCode;
+
+    fn envelope(msg: &str) -> CloudErrorEnvelope {
+        CloudErrorEnvelope {
+            error: CloudErrorBody {
+                code: None,
+                message: msg.to_string(),
+            },
+        }
+    }
+
+    fn envelope_with_code(code: &str, msg: &str) -> CloudErrorEnvelope {
+        CloudErrorEnvelope {
+            error: CloudErrorBody {
+                code: Some(code.to_string()),
+                message: msg.to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn decode_error_401_with_envelope() {
+        let err = decode_error(StatusCode::UNAUTHORIZED, Some(envelope("bad token")));
+        assert!(matches!(err, BackendError::Auth(msg) if msg == "bad token"));
+    }
+
+    #[test]
+    fn decode_error_401_without_envelope() {
+        let err = decode_error(StatusCode::UNAUTHORIZED, None);
+        assert!(matches!(err, BackendError::Auth(msg) if msg.contains("unauthorized")));
+    }
+
+    #[test]
+    fn decode_error_404_with_envelope() {
+        let err = decode_error(StatusCode::NOT_FOUND, Some(envelope("session not found")));
+        assert!(matches!(err, BackendError::NotFound(msg) if msg == "session not found"));
+    }
+
+    #[test]
+    fn decode_error_404_without_envelope() {
+        let err = decode_error(StatusCode::NOT_FOUND, None);
+        assert!(matches!(err, BackendError::NotFound(_)));
+    }
+
+    #[test]
+    fn decode_error_500_with_code() {
+        let err = decode_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Some(envelope_with_code("ERR_DB", "database error")),
+        );
+        match err {
+            BackendError::Provider { provider, code, message } => {
+                assert_eq!(provider, "cloud_api");
+                assert_eq!(code.as_deref(), Some("ERR_DB"));
+                assert_eq!(message, "database error");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_error_500_no_envelope() {
+        let err = decode_error(StatusCode::INTERNAL_SERVER_ERROR, None);
+        match err {
+            BackendError::Provider { message, .. } => {
+                assert!(message.contains("500"));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn empty_to_none_empty_string() {
+        assert_eq!(empty_to_none(""), None);
+        assert_eq!(empty_to_none("  "), None);
+    }
+
+    #[test]
+    fn empty_to_none_nonempty_string() {
+        assert_eq!(empty_to_none("hello"), Some("hello"));
+    }
+
+    #[test]
+    fn cloud_url_trims_trailing_slash() {
+        let cfg = crate::provider_config::CloudApiConfig {
+            url: "https://cloud.ucar.cc/".to_string(),
+            refresh_token: String::new(),
+            team_id: "t".to_string(),
+            actor_id: "a".to_string(),
+        };
+        assert_eq!(cloud_url(&cfg, "/v1/foo"), "https://cloud.ucar.cc/v1/foo");
+    }
+
+    #[test]
+    fn cloud_url_adds_leading_slash() {
+        let cfg = crate::provider_config::CloudApiConfig {
+            url: "https://cloud.ucar.cc".to_string(),
+            refresh_token: String::new(),
+            team_id: "t".to_string(),
+            actor_id: "a".to_string(),
+        };
+        assert_eq!(cloud_url(&cfg, "v1/foo"), "https://cloud.ucar.cc/v1/foo");
+    }
+
+    #[test]
+    fn refresh_failure_message_extracts_error_description() {
+        let body = r#"{"error_description":"token expired"}"#;
+        assert_eq!(refresh_failure_message(body), "token expired");
+    }
+
+    #[test]
+    fn refresh_failure_message_fallback_on_garbage() {
+        let body = "not json";
+        assert_eq!(
+            refresh_failure_message(body),
+            "failed to refresh access token"
+        );
+    }
+
+    #[test]
+    fn request_id_is_32_hex_chars() {
+        let id = request_id();
+        assert_eq!(id.len(), 32);
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+}

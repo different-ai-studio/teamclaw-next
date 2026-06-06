@@ -1,12 +1,11 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Inbox, AtSign, Keyboard, Pin } from 'lucide-react'
+import { Inbox, Lightbulb, Keyboard, Pin } from 'lucide-react'
 import { useUIStore } from '@/stores/ui'
 import { useSessionStore } from '@/stores/session'
 import { useCronStore } from '@/stores/cron'
 import { createQuickDaemonSession } from '@/lib/quick-daemon-session'
 import { useQuickChatReadiness } from '@/hooks/use-quick-chat-readiness'
-import { IdeasSection } from '@/components/sidebar/IdeasSection'
 import { ActorsSection } from '@/components/sidebar/ActorsSection'
 import { NewChatSplitButton } from '@/components/sidebar/NewChatSplitButton'
 import { cn } from '@/lib/utils'
@@ -120,15 +119,16 @@ export function NavRail() {
           onClick={() => setFilter({ kind: 'all' })}
         />
         <TopEntry
-          label={t('sidebar.mentions', '@Mentions')}
-          icon={AtSign}
-          onClick={handleComingSoon}
-        />
-        <TopEntry
           label={t('sidebar.pinned', 'Pinned')}
           icon={Pin}
           active={filter.kind === 'pinned'}
           onClick={() => setFilter({ kind: 'pinned' })}
+        />
+        <TopEntry
+          label={t('sidebar.ideas', 'Ideas')}
+          icon={Lightbulb}
+          active={filter.kind === 'ideas'}
+          onClick={() => setFilter({ kind: 'ideas' })}
         />
         <TopEntry
           label={t('common.shortcuts', 'Shortcuts')}
@@ -138,7 +138,6 @@ export function NavRail() {
         />
       </div>
 
-      <IdeasSection />
       <ActorsSection />
     </div>
   )
