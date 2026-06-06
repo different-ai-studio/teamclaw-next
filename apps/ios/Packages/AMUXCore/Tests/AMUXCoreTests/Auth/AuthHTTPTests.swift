@@ -45,6 +45,37 @@ final class AuthHTTPTests: XCTestCase {
             XCTAssertEqual(status, 401); XCTAssertEqual(code, "missing_auth")
         } catch { XCTFail("wrong error: \(error)") }
     }
+
+    func testDetailsErrorCodePreferredOverCollapsedCode() async {
+        // FC collapses GoTrue 422s to code:"validation_failed" and tucks the
+        // real machine code under details.error_code. AuthHTTP should surface
+        // the specific one so callers can classify the failure.
+        let body = #"{"error":{"code":"validation_failed","message":"auth.updateUser: Email address already registered","details":{"error_code":"email_exists","msg":"Email address already registered","code":422}}}"#
+        let send: CloudAPISend = { req in
+            let resp = HTTPURLResponse(url: req.url!, statusCode: 422, httpVersion: nil, headerFields: nil)!
+            return (body.data(using: .utf8)!, resp)
+        }
+        let http = AuthHTTP(baseURL: URL(string: "https://cloud.example")!, send: send)
+        struct Out: Decodable { let ok: Bool }
+        do { let _: Out = try await http.patch("/v1/auth/user", body: EmptyBody(), bearer: "T"); XCTFail("expected throw") }
+        catch let CloudAPIError.requestFailed(status, code, _) {
+            XCTAssertEqual(status, 422); XCTAssertEqual(code, "email_exists")
+        } catch { XCTFail("wrong error: \(error)") }
+    }
+
+    func testMissingDetailsFallsBackToCollapsedCode() async {
+        let body = #"{"error":{"code":"validation_failed","message":"Password is too weak"}}"#
+        let send: CloudAPISend = { req in
+            let resp = HTTPURLResponse(url: req.url!, statusCode: 422, httpVersion: nil, headerFields: nil)!
+            return (body.data(using: .utf8)!, resp)
+        }
+        let http = AuthHTTP(baseURL: URL(string: "https://cloud.example")!, send: send)
+        struct Out: Decodable { let ok: Bool }
+        do { let _: Out = try await http.patch("/v1/auth/user", body: EmptyBody(), bearer: "T"); XCTFail("expected throw") }
+        catch let CloudAPIError.requestFailed(status, code, _) {
+            XCTAssertEqual(status, 422); XCTAssertEqual(code, "validation_failed")
+        } catch { XCTFail("wrong error: \(error)") }
+    }
 }
 
 // Test helper: a minimal thread-safe box (avoids data races in @Sendable closures).

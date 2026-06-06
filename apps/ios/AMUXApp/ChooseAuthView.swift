@@ -69,7 +69,15 @@ struct ChooseAuthView: View {
             LoginView(coordinator: coordinator)
         }
         .sheet(isPresented: $showInviteSheet) {
-            InviteJoinSheet(coordinator: coordinator)
+            InviteJoinSheet(coordinator: coordinator) { token in
+                // "I already have an account": stash the token and route to
+                // sign-in. After the user signs in, `bootstrap()` claims the
+                // token as that account, so an existing user joins the team
+                // (keeping their other teams) instead of being forced into a
+                // throwaway anonymous identity.
+                coordinator.pendingInviteToken = token
+                showLogin = true
+            }
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
         }
@@ -145,14 +153,19 @@ struct ChooseAuthView: View {
 // MARK: - InviteJoinSheet
 
 /// Lets the user paste a `teamclaw://invite?token=…` link (or a bare token)
-/// before they have a session. Stashes the parsed token on the coordinator
-/// and starts anonymous sign-in. RootTabView replays the token through the
-/// usual claim-invite pipeline once it mounts.
+/// before they have a session. Two paths: "Continue" joins anonymously (then
+/// RootTabView replays the token through the usual claim pipeline), or "I
+/// already have an account" routes to sign-in with the token stashed so an
+/// existing user joins the team under their real identity.
 private struct InviteJoinSheet: View {
     @Bindable var coordinator: AppOnboardingCoordinator
     @Environment(\.dismiss) private var dismiss
     @State private var raw: String = ""
     @State private var localError: String?
+
+    /// Called with the parsed token when the user chooses to sign in to an
+    /// existing account instead of joining anonymously.
+    let onUseExistingAccount: (String) -> Void
 
     var body: some View {
         NavigationStack {
@@ -160,7 +173,7 @@ private struct InviteJoinSheet: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Join with invite link")
                         .font(.title2.bold())
-                    Text("Paste the link your teammate shared. Teamclaw will sign you in and add you to their team.")
+                    Text("Paste the link your teammate shared. Continue as a guest, or sign in to an account you already have.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -211,6 +224,20 @@ private struct InviteJoinSheet: View {
                 .disabled(coordinator.isBusy ||
                           raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
+                Button {
+                    useExistingAccount()
+                } label: {
+                    Text("I already have an account")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.amux.cinnabar)
+                .disabled(coordinator.isBusy ||
+                          raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("invite.useExistingAccountButton")
+
                 Spacer(minLength: 0)
             }
             .padding(20)
@@ -248,6 +275,17 @@ private struct InviteJoinSheet: View {
                 }
             }
         }
+    }
+
+    private func useExistingAccount() {
+        guard let token = parseToken(raw) else {
+            localError = "Couldn't read a token from that link."
+            return
+        }
+        localError = nil
+        coordinator.errorMessage = nil
+        dismiss()
+        onUseExistingAccount(token)
     }
 
     /// Accepts both `teamclaw://invite?token=XYZ` and bare `XYZ`. Trims whitespace.

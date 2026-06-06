@@ -47,9 +47,15 @@ public struct AuthHTTP: Sendable {
         let (data, response) = try await send(req)
         guard (200..<300).contains(response.statusCode) else {
             let env = try? JSONDecoder().decode(AuthErrorEnvelope.self, from: data)
+            // FC collapses every GoTrue 422 to `code: "validation_failed"` and
+            // tucks the real machine code under `details.error_code`
+            // (e.g. "email_exists" / "phone_exists"). Prefer that specific code
+            // so callers can classify the failure precisely instead of parsing
+            // the human-facing message.
+            let code = env?.error.details?.errorCode ?? env?.error.code
             throw CloudAPIError.requestFailed(
                 status: response.statusCode,
-                code: env?.error.code,
+                code: code,
                 message: env?.error.message ?? HTTPURLResponse.localizedString(forStatusCode: response.statusCode)
             )
         }
@@ -58,4 +64,12 @@ public struct AuthHTTP: Sendable {
 }
 
 private struct AuthErrorEnvelope: Decodable { let error: AuthErrorBody }
-private struct AuthErrorBody: Decodable { let code: String; let message: String }
+private struct AuthErrorBody: Decodable {
+    let code: String?
+    let message: String?
+    let details: AuthErrorDetails?
+}
+private struct AuthErrorDetails: Decodable {
+    let errorCode: String?
+    enum CodingKeys: String, CodingKey { case errorCode = "error_code" }
+}

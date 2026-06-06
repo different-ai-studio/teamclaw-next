@@ -49,6 +49,8 @@ struct UpgradeAccountSheet: View {
                         }
                     }
 
+                    collisionBanner
+
                     if let err = coordinator.errorMessage {
                         Text(err).font(.footnote).foregroundStyle(Color.amux.cinnabarDeep)
                     }
@@ -204,6 +206,60 @@ struct UpgradeAccountSheet: View {
         .frame(maxWidth: .infinity)
     }
 
+    // MARK: - Identifier-already-in-use collision
+
+    /// Shown when the upgrade hit an email/phone that already belongs to another
+    /// account. Offers the clean path — sign in to that account — instead of a
+    /// raw GoTrue error. We don't try to carry the anonymous workspace's team
+    /// over (that invite is already spent); the user rejoins via a fresh link.
+    @ViewBuilder private var collisionBanner: some View {
+        if let collision = coordinator.upgradeCollision {
+            let isPhone = collision == .phoneAlreadyInUse
+            VStack(alignment: .leading, spacing: 12) {
+                Label(isPhone ? "This phone number already has an account"
+                              : "This email already has an account",
+                      systemImage: "person.crop.circle.badge.exclamationmark")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.amux.onyx)
+
+                Text("Sign in to that account to continue. This workspace's anonymous data won't carry over — after signing in, use an invite link to rejoin the team.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    Task {
+                        resetPending()
+                        coordinator.upgradeCollision = nil
+                        dismiss()
+                        await coordinator.signOut()
+                    }
+                } label: {
+                    Text("Sign in to that account")
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .glassProminentButtonStyle()
+                .disabled(coordinator.isBusy)
+                .accessibilityIdentifier("upgrade.collisionSignInButton")
+
+                Button(isPhone ? "Use a different number" : "Use a different email") {
+                    coordinator.upgradeCollision = nil
+                    code = ""
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.amux.cinnabar.opacity(0.08))
+            )
+        }
+    }
+
     // MARK: - Apple option
 
     @ViewBuilder private var appleUpgradeSection: some View {
@@ -233,5 +289,6 @@ struct UpgradeAccountSheet: View {
     private func resetPending() {
         coordinator.resetPendingEmailOTP()
         coordinator.resetPendingPhoneOTP()
+        coordinator.upgradeCollision = nil
     }
 }
