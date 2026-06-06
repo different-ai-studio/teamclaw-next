@@ -1094,13 +1094,16 @@ private func parseCloudDate(_ value: String?) -> Date? {
 }
 
 private extension ISO8601DateFormatter {
-    static let cloudWithFractionalSeconds: ISO8601DateFormatter = {
+    // `nonisolated(unsafe)`: ISO8601DateFormatter is a Foundation class (can't
+    // add a Sendable conformance) but is configured once and used read-only via
+    // `date(from:)`, which Foundation documents as safe for concurrent use.
+    nonisolated(unsafe) static let cloudWithFractionalSeconds: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
 
-    static let cloud: ISO8601DateFormatter = {
+    nonisolated(unsafe) static let cloud: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter

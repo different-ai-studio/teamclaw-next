@@ -74,9 +74,12 @@ public class AttachmentUploadManager: NSObject, @unchecked Sendable {
             throw UploadError.uploadFailed("Failed to create upload record: \(error.localizedDescription)")
         }
 
-        // Start async upload (fire-and-forget with state updates)
+        // Start async upload (fire-and-forget with state updates). Capture the
+        // Sendable id string, not the `upload` @Model — a PersistentModel isn't
+        // Sendable and would make the Task closure non-Sendable.
+        let uploadID = upload.attachmentID
         Task {
-            await self.performUpload(fileData: fileData, teamID: teamID, uploadID: upload.attachmentID)
+            await self.performUpload(fileData: fileData, teamID: teamID, uploadID: uploadID)
         }
 
         return upload
@@ -98,13 +101,21 @@ public class AttachmentUploadManager: NSObject, @unchecked Sendable {
         }
 
         do {
-            // Fetch upload details for path construction (must happen on main thread)
-            let upload = await MainActor.run { self.fetchUpload(byID: uploadID) }
-            guard let upload = upload else {
+            // Fetch upload details for path construction (must happen on the
+            // main thread). `AttachmentUpload` is a SwiftData @Model and is
+            // main-actor-confined / not Sendable, so extract the Sendable
+            // string fields inside the hop instead of returning the model
+            // across the actor boundary.
+            let pathInfo: (sessionID: String, attachmentID: String, fileName: String)? =
+                await MainActor.run {
+                    guard let upload = self.fetchUpload(byID: uploadID) else { return nil }
+                    return (upload.sessionID, upload.attachmentID, upload.fileName)
+                }
+            guard let pathInfo else {
                 return
             }
 
-            let uploadPath = "\(teamID)/\(upload.sessionID)/\(upload.attachmentID)/\(upload.fileName)"
+            let uploadPath = "\(teamID)/\(pathInfo.sessionID)/\(pathInfo.attachmentID)/\(pathInfo.fileName)"
 
             // Upload raw bytes to the Cloud API attachments store (off main
             // thread). The bucket is public, so the returned URL renders
@@ -113,7 +124,7 @@ public class AttachmentUploadManager: NSObject, @unchecked Sendable {
             let result: AttachmentUploadResult = try await client.postRaw(
                 "/v1/attachments?path=\(encodedPath)&bucket=attachments",
                 bytes: fileData,
-                contentType: mimeType(for: upload.fileName)
+                contentType: mimeType(for: pathInfo.fileName)
             )
 
             // Mark complete on main thread

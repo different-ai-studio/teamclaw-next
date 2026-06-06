@@ -2,6 +2,20 @@ import XCTest
 import SwiftData
 @testable import AMUXCore
 
+/// Thread-safe accumulator for MQTT publishes captured from the `@Sendable`
+/// `publishHook`. Swift 6 forbids mutating a captured `var` from inside the
+/// hook closure; this locked box lets the closure record publishes while tests
+/// read them back with the same `count` / subscript API as a plain array.
+private final class PublishLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [(String, Data, Bool)] = []
+    func append(_ item: (String, Data, Bool)) { lock.lock(); items.append(item); lock.unlock() }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return items.count }
+    subscript(_ index: Int) -> (String, Data, Bool) {
+        lock.lock(); defer { lock.unlock() }; return items[index]
+    }
+}
+
 @MainActor
 final class TeamclawServiceSubscriptionTests: XCTestCase {
 
@@ -244,7 +258,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
     }
 
     func testSendMessagePublishesLiveEventTopic() async throws {
-        var published: [(String, Data, Bool)] = []
+        let published = PublishLog()
         let mqtt = MQTTService(
             subscribeHook: { _ in },
             unsubscribeHook: { _ in },
@@ -281,7 +295,7 @@ final class TeamclawServiceSubscriptionTests: XCTestCase {
     /// same session and verify both publishes hit MQTT with the expected
     /// topic — no localMemberId reset, no stale state, no swallowed errors.
     func testSendMessageTwiceInSameSessionPublishesTwice() async throws {
-        var published: [(String, Data, Bool)] = []
+        let published = PublishLog()
         let mqtt = MQTTService(
             subscribeHook: { _ in },
             unsubscribeHook: { _ in },

@@ -38,7 +38,11 @@ public struct RuntimeCommandSender: Sendable {
         runtimeID: String,
         actorID: String,
         currentHumanActorID: String?,
-        makeCommand: (inout Amux_AcpCommand) -> Void
+        // `sending`: the closure is consumed synchronously (line below) before
+        // any suspension, so ownership can transfer into this nonisolated async
+        // method without a data race even though it captures non-Sendable
+        // protobuf builders from a @MainActor caller.
+        makeCommand: sending (inout Amux_AcpCommand) -> Void
     ) async throws {
         guard !runtimeID.isEmpty else { throw SendCommandError.runtimeIdEmpty }
         guard !actorID.isEmpty else { throw SendCommandError.routeActorIdUnresolved }

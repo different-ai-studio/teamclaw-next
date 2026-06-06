@@ -85,7 +85,11 @@ public final class MQTTService: NSObject, @unchecked Sendable {
         // reconnect does nothing, only kill+relaunch recovers.
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
-                try await self.waitForConnectAck(mqtt: mqtt)
+                // Read `self.mqtt` (set above) inside the task rather than
+                // capturing the non-Sendable `CocoaMQTT` local — capturing it
+                // would make this `sending` closure share a non-Sendable value
+                // with the enclosing scope (Swift 6 data-race diagnostic).
+                try await self.waitForConnectAck()
             }
             group.addTask {
                 try await Task.sleep(for: .seconds(15))
@@ -102,12 +106,21 @@ public final class MQTTService: NSObject, @unchecked Sendable {
         }
     }
 
-    private func waitForConnectAck(mqtt: CocoaMQTT) async throws {
+    private func waitForConnectAck() async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             // Publish the continuation to state BEFORE calling connect() so
             // a fast CONNACK on the delegate thread finds it installed.
             stateQueue.sync {
                 self.connectContinuation = continuation
+            }
+            // `self.mqtt` was assigned the freshly-built client in connect()
+            // before this task was spawned. If a concurrent disconnect() has
+            // since cleared it, fail the connect rather than hang.
+            guard let mqtt = self.mqtt else {
+                if let pending = takeConnectContinuation() {
+                    pending.resume(throwing: MQTTConnectionError.connectFailed)
+                }
+                return
             }
             let ok = mqtt.connect()
             if !ok {
@@ -141,10 +154,10 @@ public final class MQTTService: NSObject, @unchecked Sendable {
             }
             return
         }
-        guard let mqtt, connectionState == .connected else {
+        guard self.mqtt != nil, connectionState == .connected else {
             throw MQTTConnectionError.notConnected
         }
-        try await waitForSubscribeAck(topic: topic, mqtt: mqtt)
+        try await waitForSubscribeAck(topic: topic)
         if recordTopicOperations {
             subscribedTopics.append(topic)
         }
@@ -209,14 +222,19 @@ public final class MQTTService: NSObject, @unchecked Sendable {
             self.continuations[id] = continuation
         }
         continuation.onTermination = { [weak self] _ in
-            // Dispatch async so the cancelling thread (often the main actor
-            // during a view-dismiss Task cancellation) never blocks waiting
-            // on the queue.
-            self?.stateQueue.async {
-                self?.continuations.removeValue(forKey: id)
-            }
+            self?.dropContinuation(id: id)
         }
         return stream
+    }
+
+    /// Remove a finished `messages()` continuation. Dispatched **async** (never
+    /// `sync`) onto `stateQueue` so the cancelling thread — often the main actor
+    /// during a view-dismiss Task cancellation — never blocks on the queue (the
+    /// reentrancy deadlock guarded against in `stateQueue`'s declaration).
+    private func dropContinuation(id: UUID) {
+        stateQueue.async { [weak self] in
+            self?.continuations.removeValue(forKey: id)
+        }
     }
 
     private func broadcast(_ msg: MQTTIncoming) {
@@ -247,14 +265,18 @@ public final class MQTTService: NSObject, @unchecked Sendable {
         }
     }
 
-    private func waitForSubscribeAck(topic: String, mqtt: CocoaMQTT) async throws {
+    private func waitForSubscribeAck(topic: String) async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     self.stateQueue.sync {
                         self.subscribeContinuations[topic, default: []].append(continuation)
                     }
-                    mqtt.subscribe(topic, qos: .qos1)
+                    // Read `self.mqtt` inside the task instead of capturing the
+                    // non-Sendable CocoaMQTT param (Swift 6 `sending` closure).
+                    // A nil here (concurrent disconnect) simply lets the 5s
+                    // timeout arm below fail the subscribe.
+                    self.mqtt?.subscribe(topic, qos: .qos1)
                 }
             }
             group.addTask {
@@ -265,9 +287,10 @@ public final class MQTTService: NSObject, @unchecked Sendable {
                 throw MQTTConnectionError.subscribeTimeout(topic)
             }
 
-            let result = try await group.next()
+            // Await whichever arm finishes first (subscribe ack or timeout),
+            // then cancel the other.
+            _ = try await group.next()
             group.cancelAll()
-            _ = result
         }
     }
 

@@ -33,14 +33,13 @@ let package = Package(
                 .product(name: "Markdown", package: "swift-markdown"),
             ],
             resources: [.process("Resources")],
-            // Pinned to Swift 5 mode: MQTTService is not yet Sendable-clean for Swift 6 strict concurrency. Migrate after audit.
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "AMUXCoreTests",
             dependencies: ["AMUXCore"],
             resources: [.process("Resources")],
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]
 )
