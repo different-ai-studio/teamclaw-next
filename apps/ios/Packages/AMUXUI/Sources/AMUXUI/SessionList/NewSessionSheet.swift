@@ -180,6 +180,7 @@ public struct NewSessionSheet: View {
             }
             .task { await connectedAgentsStore?.reload() }
         }
+        .task { await connectedAgentsStore?.reload() }
         .onAppear {
             isInputFocused = true
             if selectedIdeaId == nil, let preselectedIdeaId {
