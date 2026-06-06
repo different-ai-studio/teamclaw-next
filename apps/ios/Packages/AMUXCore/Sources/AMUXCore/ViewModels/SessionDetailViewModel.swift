@@ -1440,6 +1440,7 @@ public final class SessionDetailViewModel {
 
         recomputeGroups()
         hasLoadedInitialFeed = true
+        restoreStreamingAgentSetFromIncompleteOutput()
 
         // Single subscription path: session/{sid}/live. iOS only ever
         // resolves a session-backed detail view — bare-runtime navigation
@@ -2279,6 +2280,14 @@ public final class SessionDetailViewModel {
 
     private func markAgentDone() {
         isAgentWorking = false
+        streamingAgentSet.removeAll()
+        streamingTextByAgent.removeAll()
+        streamingModelByAgent.removeAll()
+        streamingTurnIDByAgent.removeAll()
+        timelineState.streamingAgentSet = []
+        timelineState.streamingTextByAgent = [:]
+        timelineState.streamingModelByAgent = [:]
+        timelineState.streamingTurnIDByAgent = [:]
         recomputeGroups()
         agentWorkingResetTask?.cancel()
         agentWorkingResetTask = nil
@@ -2379,6 +2388,28 @@ public final class SessionDetailViewModel {
         timelineState.streamingAgentSet = []
         timelineState.streamingTurnIDByAgent = [:]
     }
+
+    /// After a stop()/start() cycle (e.g. NavigationStack push/pop), check if
+    /// any persisted incomplete-output events exist in `events`. If so, the
+    /// agent was mid-stream when stop() flushed its buffer; restore the
+    /// streaming set so the active-stream card reappears immediately instead
+    /// of waiting for the next MQTT delta.
+    private func restoreStreamingAgentSetFromIncompleteOutput() {
+        for event in events where event.eventType == "output" && event.isComplete == false {
+            let agentID = event.senderActorID ?? eventScopeKey
+            guard let text = event.text, !text.isEmpty else { continue }
+            streamingTextByAgent[agentID] = text
+            if let model = event.model { streamingModelByAgent[agentID] = model }
+            streamingAgentSet.insert(agentID)
+            timelineState.streamingAgentSet.insert(agentID)
+            timelineState.streamingTextByAgent[agentID] = text
+            if let model = event.model { timelineState.streamingModelByAgent[agentID] = model }
+        }
+        if !streamingAgentSet.isEmpty {
+            recomputeGroups()
+        }
+    }
+
     public func grantPermission(
         requestId: String,
         agentActorID: String? = nil,
@@ -2498,6 +2529,61 @@ extension SessionDetailViewModel {
         streamingAgentSet = timelineState.streamingAgentSet
         streamingTextByAgent = timelineState.streamingTextByAgent
         streamingModelByAgent = timelineState.streamingModelByAgent
+    }
+
+    public func _test_markAgentDone() {
+        markAgentDone()
+    }
+
+    public func _test_markAgentWorking() {
+        markAgentWorking()
+    }
+
+    public func _test_makeInMemoryContainer() -> ModelContainer {
+        (try? ModelContainer(
+            for: AgentEvent.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        ))!
+    }
+
+    /// Simulates stop(): flushes streaming buffers to incomplete events in
+    /// `modelContext`, then clears all streaming state. Bypasses the
+    /// `runtime != nil` guard so unit tests without a live runtime can exercise
+    /// the flush path.
+    public func _test_stop(modelContext: ModelContext) {
+        startModelContext = modelContext
+        var seq = (events.last?.sequence ?? 0) + 1
+        for agentID in streamingAgentSet {
+            guard let text = streamingTextByAgent[agentID], !text.isEmpty else { continue }
+            let event = AgentEvent(agentId: eventScopeKey, sequence: seq, eventType: "output")
+            event.senderActorID = agentID
+            event.text = text
+            event.isComplete = false
+            event.model = streamingModelByAgent[agentID]
+            modelContext.insert(event)
+            appendEvent(event)
+            seq += 1
+        }
+        try? modelContext.save()
+        streamingAgentSet.removeAll()
+        streamingTextByAgent.removeAll()
+        streamingModelByAgent.removeAll()
+        streamingTurnIDByAgent.removeAll()
+        recomputeGroups()
+    }
+
+    /// Simulates start(): reloads events from `modelContext` and restores
+    /// streaming state from any persisted incomplete output events.
+    public func _test_start(modelContext: ModelContext) {
+        startModelContext = modelContext
+        let scope = eventScopeKey
+        let descriptor = FetchDescriptor<AgentEvent>(
+            predicate: #Predicate { $0.agentId == scope },
+            sortBy: [SortDescriptor(\.timestamp), SortDescriptor(\.sequence)]
+        )
+        events = (try? modelContext.fetch(descriptor)) ?? []
+        rehydrateTimelineStateFromEvents()
+        restoreStreamingAgentSetFromIncompleteOutput()
     }
 }
 
