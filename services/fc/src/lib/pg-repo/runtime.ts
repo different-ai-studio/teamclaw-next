@@ -16,6 +16,10 @@ import { ApiError } from "../http-utils.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DbLike = PgDatabase<any, any>;
 
+interface RuntimeCtx {
+  callerActorId?: string;
+}
+
 const iso = (d: Date | string | null | undefined): string | null =>
   d ? new Date(d).toISOString() : null;
 
@@ -38,7 +42,7 @@ function mapRow(row: typeof agentRuntimes.$inferSelect) {
   };
 }
 
-export function makeRuntimeRepo(db: DbLike) {
+export function makeRuntimeRepo(db: DbLike, ctx: RuntimeCtx = {}) {
   return {
     /**
      * Upserts an agent runtime row. Derives teamId from the agent actor row
@@ -363,11 +367,18 @@ export function makeRuntimeRepo(db: DbLike) {
     },
 
     /**
-     * Connectivity probe — SELECT 1 against a real table.
-     * Errors propagate so the FC handler can return 5xx.
+     * Connectivity probe + actor presence update.
+     * Stamps last_active_at for the calling actor so iOS/clients see the
+     * daemon as online (isOnline = lastActiveAt within 120 s).
      */
     async heartbeat() {
       await db.select({ one: teams.id }).from(teams).limit(1);
+      if (ctx.callerActorId) {
+        await (db as any)
+          .update(actors)
+          .set({ lastActiveAt: new Date(), updatedAt: new Date() })
+          .where(eq(actors.id, ctx.callerActorId));
+      }
     },
   };
 }

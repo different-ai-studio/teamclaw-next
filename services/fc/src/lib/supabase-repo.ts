@@ -1794,14 +1794,8 @@ export function createSupabaseBusinessRepository(options) {
     // --- Runtime liveness ---
 
     async heartbeat() {
-      // Lightweight no-op probe: confirms the caller's JWT can still talk to
-      // PostgREST. We query a row count from `teams` (RLS-scoped to the
-      // caller) and ignore the result. Errors propagate so the FC handler
-      // can return 5xx if the upstream is down.
-      const { error } = await supabase
-        .from("teams")
-        .select("id", { head: true, count: "exact" })
-        .limit(1);
+      // Probe + update last_active_at so clients see the daemon as online.
+      const { error } = await supabase.rpc("update_actor_last_active");
       if (error) throw error;
     },
 

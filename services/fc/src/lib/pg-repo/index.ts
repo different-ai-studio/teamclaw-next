@@ -32,7 +32,7 @@ export function createPgBusinessRepository({ db, accessToken, userId, callerActo
   const shortcutsRepo = makeShortcutsRepo(db, ctx);
   const actorsRepo = makeActorsRepo(db, ctx);
   const agentsRepo = makeAgentsRepo(db, ctx);
-  const runtimeRepo = makeRuntimeRepo(db);
+  const runtimeRepo = makeRuntimeRepo(db, ctx);
   const notificationsRepo = makeNotificationsRepo(db, ctx);
   const telemetryRepo = makeTelemetryRepo(db, ctx);
   return {
