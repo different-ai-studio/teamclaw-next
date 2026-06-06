@@ -39,6 +39,50 @@ impl std::fmt::Display for OpenCodeSettingsError {
 
 impl std::error::Error for OpenCodeSettingsError {}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_binary_missing() {
+        let e = OpenCodeSettingsError::OpencodeBinaryMissing("opencode".into());
+        let s = e.to_string();
+        assert!(s.contains("opencode binary not found"));
+        assert!(s.contains("opencode"));
+    }
+
+    #[test]
+    fn display_spawn_failed() {
+        let e = OpenCodeSettingsError::SpawnFailed("permission denied".into());
+        let s = e.to_string();
+        assert!(s.contains("failed to start opencode serve"));
+        assert!(s.contains("permission denied"));
+    }
+
+    #[test]
+    fn display_start_timeout() {
+        let s = OpenCodeSettingsError::StartTimeout.to_string();
+        assert!(s.contains("ready"));
+    }
+
+    #[test]
+    fn display_http_error() {
+        let e = OpenCodeSettingsError::Http("connection refused".into());
+        assert!(e.to_string().contains("connection refused"));
+    }
+
+    #[test]
+    fn display_api_error() {
+        let e = OpenCodeSettingsError::Api {
+            status: 422,
+            detail: "invalid provider".into(),
+        };
+        let s = e.to_string();
+        assert!(s.contains("422"));
+        assert!(s.contains("invalid provider"));
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct OAuthAuthorizeResult {
     pub url: String,
