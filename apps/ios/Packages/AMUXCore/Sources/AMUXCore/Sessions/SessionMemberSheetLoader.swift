@@ -215,6 +215,10 @@ public struct SessionMemberSheetLoader: Sendable {
         switch backendType {
         case "claude":
             return ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7"]
+        case "opencode":
+            return ["claude-sonnet-4-6", "claude-opus-4-7", "gpt-4o", "gpt-4o-mini"]
+        case "codex":
+            return ["codex-mini-latest", "o4-mini"]
         default:
             return []
         }
