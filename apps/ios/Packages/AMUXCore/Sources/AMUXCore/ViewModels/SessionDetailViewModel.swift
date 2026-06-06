@@ -191,6 +191,7 @@ public final class SessionDetailViewModel {
     /// clears on `statusChange:.idle` or after 10s of silence.
     public private(set) var isAgentWorking: Bool = false
     private var agentWorkingResetTask: Task<Void, Never>?
+    private var inFlightPermissionRequestIDs: Set<String> = []
     // `nonisolated(unsafe)` required: mutable stored property on an @Observable
     // type, where plain `nonisolated` is rejected by the compiler.
     nonisolated(unsafe) private var spawningPollTask: Task<Void, Never>?
@@ -1086,12 +1087,16 @@ public final class SessionDetailViewModel {
                 print("[RuntimeDetailVM] setModel: skipping — no route actor id for actor=\(actorID)")
                 return
             }
+            // Apply optimistic update immediately so the UI reflects the choice
+            // without waiting for the full RPC + refreshMemberSheet round-trip.
+            let previousModel = self.applyOptimisticModelPatch(agentID: actorID, model: model)
             let (ok, err) = await teamclawService.setModelRpc(
                 targetActorID: routeActor,
                 runtimeID: runtimeID,
                 modelID: model)
             if !ok {
                 print("[RuntimeDetailVM] setModel RPC failed: \(err)")
+                self.rollbackOptimisticModelPatch(agentID: actorID, previousModel: previousModel)
                 return
             }
             // refreshMemberSheet re-reads Supabase, which the daemon writes
@@ -1110,6 +1115,33 @@ public final class SessionDetailViewModel {
                 )
             }
         }
+    }
+
+    @discardableResult
+    private func applyOptimisticModelPatch(agentID actorID: String, model: String) -> String? {
+        guard let idx = memberSheetAgents.firstIndex(where: { $0.id == actorID }) else { return nil }
+        let previous = memberSheetAgents[idx].currentModel
+        let cur = memberSheetAgents[idx]
+        memberSheetAgents[idx] = MemberSheetAgent(
+            id: cur.id, displayName: cur.displayName,
+            workspacePath: cur.workspacePath, agentType: cur.agentType,
+            runtimeState: cur.runtimeState, availableModels: cur.availableModels,
+            currentModel: model,
+            runtimeID: cur.runtimeID, workspaceID: cur.workspaceID, backendType: cur.backendType
+        )
+        return previous
+    }
+
+    private func rollbackOptimisticModelPatch(agentID actorID: String, previousModel: String?) {
+        guard let idx = memberSheetAgents.firstIndex(where: { $0.id == actorID }) else { return }
+        let cur = memberSheetAgents[idx]
+        memberSheetAgents[idx] = MemberSheetAgent(
+            id: cur.id, displayName: cur.displayName,
+            workspacePath: cur.workspacePath, agentType: cur.agentType,
+            runtimeState: cur.runtimeState, availableModels: cur.availableModels,
+            currentModel: previousModel,
+            runtimeID: cur.runtimeID, workspaceID: cur.workspaceID, backendType: cur.backendType
+        )
     }
 
     /// Removes an agent participant from this session.
@@ -2432,12 +2464,16 @@ public final class SessionDetailViewModel {
         agentActorID: String? = nil,
         optionID: String = ""
     ) async throws {
+        guard inFlightPermissionRequestIDs.insert(requestId).inserted else { return }
+        defer { inFlightPermissionRequestIDs.remove(requestId) }
         var g = Amux_AcpGrantPermission()
         g.requestID = requestId
         g.optionID = optionID
         try await sendCommand(agentActorID: agentActorID) { $0.command = .grantPermission(g) }
     }
     public func denyPermission(requestId: String, agentActorID: String? = nil) async throws {
+        guard inFlightPermissionRequestIDs.insert(requestId).inserted else { return }
+        defer { inFlightPermissionRequestIDs.remove(requestId) }
         var d = Amux_AcpDenyPermission(); d.requestID = requestId
         try await sendCommand(agentActorID: agentActorID) { $0.command = .denyPermission(d) }
     }
@@ -2520,6 +2556,31 @@ extension SessionDetailViewModel {
 
     public func _test_setMemberSheetAgents(_ agents: [MemberSheetAgent]) {
         memberSheetAgents = agents
+    }
+
+    public func _test_applyOptimisticModelPatch(agentID: String, model: String) {
+        applyOptimisticModelPatch(agentID: agentID, model: model)
+    }
+
+    public func _test_rollbackOptimisticModelPatch(agentID: String, previousModel: String?) {
+        rollbackOptimisticModelPatch(agentID: agentID, previousModel: previousModel)
+    }
+
+    public func _test_markPermissionInFlight(_ id: String) {
+        inFlightPermissionRequestIDs.insert(id)
+    }
+
+    public func _test_removePermissionInFlight(_ id: String) {
+        inFlightPermissionRequestIDs.remove(id)
+    }
+
+    public func _test_isPermissionInFlight(_ id: String) -> Bool {
+        inFlightPermissionRequestIDs.contains(id)
+    }
+
+    /// Returns true if the id was NOT already in flight (i.e. the call should proceed).
+    public func _test_tryMarkInFlight(_ id: String) -> Bool {
+        inFlightPermissionRequestIDs.insert(id).inserted
     }
 
     /// Returns whether the current member sheet state would cause
