@@ -2443,7 +2443,15 @@ public final class SessionDetailViewModel {
     /// agent was mid-stream when stop() flushed its buffer; restore the
     /// streaming set so the active-stream card reappears immediately instead
     /// of waiting for the next MQTT delta.
+    ///
+    /// IMPORTANT: output events in SwiftData are never marked isComplete=true.
+    /// Without the runtime-status guard below, every completed historical turn
+    /// would incorrectly re-trigger the loading card on re-entry into the view.
+    /// Only restore when the bound runtime is still actively running.
     private func restoreStreamingAgentSetFromIncompleteOutput() {
+        // Runtime status ints: 1=Starting 2=Active 3=Idle 4=Error 5=Stopped.
+        // Only restore when the agent is still actively running (1 or 2).
+        guard let runtimeStatus = runtime?.status, runtimeStatus == 1 || runtimeStatus == 2 else { return }
         for event in events where event.eventType == "output" && event.isComplete == false {
             let agentID = event.senderActorID ?? eventScopeKey
             guard let text = event.text, !text.isEmpty else { continue }
