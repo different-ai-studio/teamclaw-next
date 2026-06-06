@@ -159,6 +159,12 @@ public final class AppOnboardingCoordinator {
     /// existing `amuxInviteTokenReceived` pipeline after sign-in.
     public var pendingInviteToken: String?
 
+    /// Set when an anonymous-account upgrade collided with an identifier that
+    /// already belongs to another account. The upgrade UI reads this to offer a
+    /// "sign in to that account instead" path rather than showing GoTrue's raw
+    /// error. Cleared at the start of each upgrade attempt.
+    public var upgradeCollision: UpgradeOutcome?
+
     /// Email address of the current auth user. Nil for anonymous sessions
     /// and Apple accounts without an email address. Set during bootstrap.
     public var currentUserEmail: String?
@@ -170,9 +176,41 @@ public final class AppOnboardingCoordinator {
     public private(set) var teamRuntimeContext: TeamRuntimeContext?
 
     public let store: AppOnboardingStore
+    private let defaults: UserDefaults
 
-    public init(store: AppOnboardingStore) {
+    public init(store: AppOnboardingStore, defaults: UserDefaults = .standard) {
         self.store = store
+        self.defaults = defaults
+    }
+
+    // MARK: - Active team persistence
+
+    /// Last team the user actively viewed. Persisted so a multi-team user lands
+    /// back on the same team across launches instead of an arbitrary
+    /// `teams.first`. Only a hint — bootstrap validates it against the user's
+    /// current memberships before honoring it.
+    private static let activeTeamIDKey = "teamclaw.activeTeamID"
+
+    private var persistedActiveTeamID: String? {
+        defaults.string(forKey: Self.activeTeamIDKey)
+    }
+
+    private func persistActiveTeam(_ teamID: String?) {
+        if let teamID {
+            defaults.set(teamID, forKey: Self.activeTeamIDKey)
+        } else {
+            defaults.removeObject(forKey: Self.activeTeamIDKey)
+        }
+    }
+
+    /// Set the active context and remember the team for next launch. A nil
+    /// context only clears in-memory state; the persisted preference survives a
+    /// transient bootstrap failure (cleared explicitly on sign-out).
+    private func setCurrentContext(_ context: AppContext?) {
+        currentContext = context
+        if let teamID = context?.team.id {
+            persistActiveTeam(teamID)
+        }
     }
 
     // MARK: - Team-scoped runtime lifecycle
@@ -383,27 +421,39 @@ public final class AppOnboardingCoordinator {
                         try await store.loadBootstrap()
                     }
                 } catch {
-                    // Claim failed (expired/consumed token, network blip,
-                    // etc.). The user explicitly asked to join via invite —
-                    // falling through to the anonymous auto-create branch
-                    // would silently strand them in a fresh orphan team
-                    // alongside an ambiguous error. Roll back the just-
-                    // created anonymous session and bounce back to needsAuth
-                    // with the error message so they can paste a new token.
                     pendingInviteToken = nil
-                    errorMessage = error.localizedDescription
-                    try? await store.signOut()
-                    currentContext = nil
-                    isAnonymous = false
-                    route = .needsAuth
-                    return
+                    if isAnonymous {
+                        // The session is a throwaway anonymous user created just
+                        // to join via this invite. Falling through to the
+                        // auto-create branch would strand them in a fresh orphan
+                        // team. Roll back and bounce to needsAuth so they can
+                        // paste a fresh token (expired/consumed/network blip).
+                        errorMessage = error.localizedDescription
+                        try? await store.signOut()
+                        persistActiveTeam(nil)
+                        currentContext = nil
+                        isAnonymous = false
+                        route = .needsAuth
+                        return
+                    }
+                    // A real signed-in user (the sign-in-then-join path) tried to
+                    // claim into the team. Never sign them out over a failed
+                    // claim — they have a legitimate account and (possibly other)
+                    // teams. "Already a member" is benign; surface other failures
+                    // as a note but still land them on their existing teams.
+                    if !AuthErrorClassifier.isAlreadyTeamMember(error) {
+                        errorMessage = error.localizedDescription
+                    }
+                    // fall through to the normal team pick below.
                 }
             }
 
-            // Pick the active team: when a preferred team is requested (e.g.
-            // right after claimInvite) and the user actually belongs to it,
-            // honor the request so the UI lands on that team instead of the
-            // arbitrary first one. Fall back to the first team otherwise.
+            // Pick the active team: prefer (1) an explicit request, (2) the team
+            // just claimed via invite, then (3) the last team this user viewed —
+            // so a multi-team user lands where they expect instead of an
+            // arbitrary first team. Validate against current memberships; if the
+            // remembered team is gone, fall back to the first team.
+            preferred = preferred ?? persistedActiveTeamID
             let pickedTeam: TeamSummary? = {
                 if let preferred,
                    let match = bootstrap.teams.first(where: { $0.id == preferred }) {
@@ -417,7 +467,7 @@ public final class AppOnboardingCoordinator {
             }()
 
             if let team = pickedTeam, let memberActorID = pickedActorID {
-                currentContext = AppContext(team: team, memberActorID: memberActorID)
+                setCurrentContext(AppContext(team: team, memberActorID: memberActorID))
                 route = .ready
                 return
             }
@@ -430,7 +480,7 @@ public final class AppOnboardingCoordinator {
                 try await store.createTeam(named: name)
             }
             pendingCreatedTeam = created
-            currentContext = AppContext(team: created.team, memberActorID: created.memberActorID)
+            setCurrentContext(AppContext(team: created.team, memberActorID: created.memberActorID))
             route = .ready
         } catch is AuthRequired {
             currentContext = nil
@@ -460,7 +510,7 @@ public final class AppOnboardingCoordinator {
         do {
             let created = try await store.createTeam(named: name)
             pendingCreatedTeam = created
-            currentContext = AppContext(team: created.team, memberActorID: created.memberActorID)
+            setCurrentContext(AppContext(team: created.team, memberActorID: created.memberActorID))
             route = .ready
         } catch {
             route = .createTeam
@@ -651,10 +701,13 @@ public final class AppOnboardingCoordinator {
         guard !isBusy else { return }
         isBusy = true
         errorMessage = nil
+        upgradeCollision = nil
         defer { isBusy = false }
         do {
             try await store.sendUpgradeEmailOTP(email: email)
             pendingEmailOTPEmail = email
+        } catch let outcome as UpgradeOutcome {
+            upgradeCollision = outcome
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -673,10 +726,13 @@ public final class AppOnboardingCoordinator {
         guard !isBusy else { return }
         isBusy = true
         errorMessage = nil
+        upgradeCollision = nil
         defer { isBusy = false }
         do {
             try await store.sendUpgradePhoneOTP(phone: phone)
             pendingPhoneOTPPhone = phone
+        } catch let outcome as UpgradeOutcome {
+            upgradeCollision = outcome
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -712,9 +768,11 @@ public final class AppOnboardingCoordinator {
             errorMessage = error.localizedDescription
         }
         currentContext = nil
+        persistActiveTeam(nil)
         teamRuntimeContext = nil
         pendingCreatedTeam = nil
         pendingEmailOTPEmail = nil
+        upgradeCollision = nil
         isAnonymous = false
         currentUserEmail = nil
         route = .needsAuth
@@ -742,10 +800,17 @@ public final class AppOnboardingCoordinator {
         guard !isBusy else { return }
         isBusy = true
         errorMessage = nil
+        upgradeCollision = nil
         do {
             try await action()
             isBusy = false
             await bootstrap()
+        } catch let outcome as UpgradeOutcome {
+            // Anonymous upgrade hit an email/phone already owned by another
+            // account. Surface it as a typed collision (not a raw error) so the
+            // upgrade UI can offer the "sign in instead" path.
+            isBusy = false
+            upgradeCollision = outcome
         } catch {
             isBusy = false
             errorMessage = error.localizedDescription

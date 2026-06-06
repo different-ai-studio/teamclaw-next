@@ -204,14 +204,30 @@ public actor CloudAPIAppOnboardingStore: AppOnboardingStore {
 
     // MARK: - Anonymous → permanent account upgrade
 
+    /// Re-raise an "identifier already belongs to another account" GoTrue
+    /// rejection as a typed `UpgradeOutcome` so the coordinator/UI can offer a
+    /// "sign in to that account instead" path. Other errors pass through.
+    private func mapUpgradeCollision<T>(phone: Bool, _ work: () async throws -> T) async throws -> T {
+        do {
+            return try await work()
+        } catch {
+            if AuthErrorClassifier.isIdentifierAlreadyInUse(error) {
+                throw phone ? UpgradeOutcome.phoneAlreadyInUse : UpgradeOutcome.emailAlreadyInUse
+            }
+            throw error
+        }
+    }
+
     public func upgradeWithPassword(email: String, password: String) async throws {
         await ensureStarted()
         let token = try await sessionStore.accessToken()
-        let g: GoTrueSession = try await auth.patch(
-            "/v1/auth/user",
-            body: PasswordCredentials(email: email, password: password),
-            bearer: token
-        )
+        let g: GoTrueSession = try await mapUpgradeCollision(phone: false) {
+            try await auth.patch(
+                "/v1/auth/user",
+                body: PasswordCredentials(email: email, password: password),
+                bearer: token
+            )
+        }
         // PATCH /auth/v1/user returns the updated user, not necessarily a new
         // session. Only adopt it when it actually carries fresh tokens;
         // otherwise the existing session (same user_id) remains valid.
@@ -228,11 +244,13 @@ public actor CloudAPIAppOnboardingStore: AppOnboardingStore {
         let token = try await sessionStore.accessToken()
         // PATCH returns the (still-anonymous) user; we don't adopt it here —
         // the session only changes after the code is verified.
-        let _: GoTrueSession = try await auth.patch(
-            "/v1/auth/user",
-            body: EmailUpdate(email: email),
-            bearer: token
-        )
+        let _: GoTrueSession = try await mapUpgradeCollision(phone: false) {
+            try await auth.patch(
+                "/v1/auth/user",
+                body: EmailUpdate(email: email),
+                bearer: token
+            )
+        }
     }
 
     public func verifyUpgradeEmailOTP(email: String, token: String) async throws {
@@ -258,11 +276,13 @@ public actor CloudAPIAppOnboardingStore: AppOnboardingStore {
         let token = try await sessionStore.accessToken()
         // PATCH returns the (still-anonymous) user; we don't adopt it here —
         // the session only changes after the code is verified.
-        let _: GoTrueSession = try await auth.patch(
-            "/v1/auth/user",
-            body: PhoneUpdate(phone: phone),
-            bearer: token
-        )
+        let _: GoTrueSession = try await mapUpgradeCollision(phone: true) {
+            try await auth.patch(
+                "/v1/auth/user",
+                body: PhoneUpdate(phone: phone),
+                bearer: token
+            )
+        }
     }
 
     public func verifyUpgradePhoneOTP(phone: String, token: String) async throws {
