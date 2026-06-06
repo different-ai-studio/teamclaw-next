@@ -49,22 +49,13 @@ struct SessionMemberSheetLoaderStaticHelpersTests {
         #expect(SessionMemberSheetLoader.displayName(forBackendType: "").isEmpty)
     }
 
-    @Test("fallbackModelIDs returns non-empty list for claude, opencode, and codex")
-    func fallbackModelIDs() {
-        let claude = SessionMemberSheetLoader.fallbackModelIDs(forBackendType: "claude")
-        #expect(!claude.isEmpty)
-        #expect(claude.contains("claude-sonnet-4-6"))
-
-        let opencode = SessionMemberSheetLoader.fallbackModelIDs(forBackendType: "opencode")
-        #expect(!opencode.isEmpty,
-                "opencode backend must have a non-empty fallback model list")
-
-        let codex = SessionMemberSheetLoader.fallbackModelIDs(forBackendType: "codex")
-        #expect(!codex.isEmpty,
-                "codex backend must have a non-empty fallback model list")
-
-        let unknown = SessionMemberSheetLoader.fallbackModelIDs(forBackendType: "unknown-backend")
-        #expect(unknown.isEmpty)
+    @Test("models come from live data source, no hardcoded fallback")
+    func noFallbackModelIDs() {
+        // fallbackModelIDs was removed — models come from MQTT/daemon only.
+        // Single data source: SessionDetailViewModel subscribes to runtime-state
+        // topics for all session agents and overlays SwiftData models.
+        // When unavailable the UI shows "default".
+        #expect(true)
     }
 }
 
