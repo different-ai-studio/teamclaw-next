@@ -33,6 +33,12 @@ const iso = (d: Date | string | null | undefined): string | null =>
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DbLike = PgDatabase<any, any>;
 
+export interface SessionsRepoDeps {
+  /** Called after a successful markSessionViewed DB write. Best-effort: errors are
+   *  logged and swallowed so the mark-viewed outcome is never affected. */
+  publishReadEvent?: (args: { userId: string; sessionId: string }) => Promise<void>;
+}
+
 interface SessionsCtx {
   userId?: string;
 }
@@ -113,7 +119,7 @@ function mapSessionParticipantSyncRow(r: any) {
   };
 }
 
-export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
+export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}, deps: SessionsRepoDeps = {}) {
   // Resolve every actor id that belongs to the authenticated user (one per team).
   // Mirrors `app.current_actor_id()` semantics but across ALL the user's actors
   // rather than just the globally-oldest one — fixing the multi-team blind spot.
@@ -175,7 +181,7 @@ export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
 
       // Read markers for any of the user's actors (to compute hasUnread).
       const readMarkerSubq = sql`(
-            SELECT MIN(srm.last_read_at) FROM session_read_markers srm
+            SELECT MAX(srm.last_read_at) FROM session_read_markers srm
             WHERE srm.session_id = sessions.id
               AND srm.actor_id IN (${sql.join(actorIds, sql`, `)})
           )`;
@@ -373,6 +379,12 @@ export function makeSessionsRepo(db: DbLike, ctx: SessionsCtx = {}) {
             updatedAt: new Date(),
           },
         });
+
+      if (deps.publishReadEvent && ctx.userId) {
+        deps.publishReadEvent({ userId: ctx.userId, sessionId }).catch((err: unknown) => {
+          console.error("[markSessionViewed] publishReadEvent failed (best-effort):", err);
+        });
+      }
     },
 
     /**

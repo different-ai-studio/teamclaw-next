@@ -2,16 +2,18 @@ import Foundation
 
 // MARK: - Wire payload
 
-/// Lightweight ping published by FC to `inbox/<user_id>` after any message
-/// INSERT in a session the user belongs to. Carries just enough for the
-/// client to know "session X may have new state — go check". Server is
-/// the source of truth for `has_unread`; see SupabaseSessionsRepository.
+/// Lightweight ping published by FC to `inbox/<user_id>` after a message
+/// INSERT or a mark-viewed write. The `type` field disambiguates:
+///   - nil / "message": a new message arrived — session is unread.
+///   - "read": another device marked this session read — clear the badge.
 public struct InboxPing: Equatable, Decodable, Sendable {
     public let sessionID: String
+    public let type: String?
     public let ts: Int64?
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
+        case type
         case ts
     }
 }

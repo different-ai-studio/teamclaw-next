@@ -81,6 +81,12 @@ export function makeBusinessRepoFactory(
         // push_idempotency_claim and list_session_push_targets are now served
         // by Drizzle queries via buildPgPushDeps() — no Supabase service-role.
         dispatchPush: async (record) => { await dispatchPush(record, pgPushDeps()); },
+        publishReadEvent: async ({ userId, sessionId }) => {
+          const { mqtt } = pgPushDeps();
+          if (!mqtt) return;
+          const payload = JSON.stringify({ type: "read", session_id: sessionId, ts: Date.now() });
+          await mqtt.publish(`inbox/${userId}`, payload);
+        },
       });
     };
   }
