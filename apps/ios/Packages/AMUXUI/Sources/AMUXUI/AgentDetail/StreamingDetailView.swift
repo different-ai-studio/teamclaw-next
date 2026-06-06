@@ -84,18 +84,24 @@ public struct StreamingDetailView: View {
         // Capture turn-relevant item count + total runtime event count so
         // a new tool_use inside an active stream is detected even though
         // the number of FeedItems is unchanged.
+        // Also capture lastEventID so that requestTurnHistory insertions
+        // that change event ordering (same count, different last event)
+        // are detected and resolvedSnapshot is properly invalidated.
         var turnEventCount = 0
+        var lastEventID = ""
         for item in items {
             switch item {
             case .activeStream(_, let agentID, let runtime) where agentID == route.agentID:
                 turnEventCount = runtime.count
-            case .completedTurn(let id, _, _, let runtime)
+                lastEventID = runtime.last?.id ?? ""
+            case .completedTurn(let id, _, let finalEvent, let runtime)
                     where id == route.frozenTurnID || route.frozenTurnID == nil:
                 turnEventCount = runtime.count
+                lastEventID = finalEvent.id
             default: break
             }
         }
-        return "\(items.count)-\(turnEventCount)"
+        return "\(items.count)-\(turnEventCount)-\(lastEventID)"
     }
 
     /// Compute resolved turn data fresh from feedItems. The result is sorted
