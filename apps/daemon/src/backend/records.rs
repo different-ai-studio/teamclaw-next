@@ -111,3 +111,83 @@ pub struct BackendSessionAndParticipants {
     pub session: BackendSessionRow,
     pub participants: Vec<BackendParticipantRow>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_runtime_row_serde_defaults() {
+        let json = r#"{"id":"row-1"}"#;
+        let row: AgentRuntimeRow = serde_json::from_str(json).unwrap();
+        assert_eq!(row.id, "row-1");
+        assert_eq!(row.backend_type, "");
+        assert!(row.workspace_id.is_none());
+        assert!(row.backend_session_id.is_none());
+        assert_eq!(row.status, "");
+        assert!(row.last_processed_message_id.is_none());
+    }
+
+    #[test]
+    fn agent_runtime_row_full() {
+        let json = r#"{
+            "id": "row-2",
+            "workspace_id": "ws-1",
+            "backend_type": "cloud_api",
+            "backend_session_id": "sess-abc",
+            "status": "active",
+            "last_processed_message_id": "msg-99"
+        }"#;
+        let row: AgentRuntimeRow = serde_json::from_str(json).unwrap();
+        assert_eq!(row.backend_type, "cloud_api");
+        assert_eq!(row.status, "active");
+        assert_eq!(row.last_processed_message_id.as_deref(), Some("msg-99"));
+    }
+
+    #[test]
+    fn backend_session_row_defaults_for_optional_fields() {
+        let json = r#"{
+            "id": "sess-1",
+            "team_id": "team-1",
+            "created_at": "2024-01-01T00:00:00Z"
+        }"#;
+        let row: BackendSessionRow = serde_json::from_str(json).unwrap();
+        assert_eq!(row.id, "sess-1");
+        assert!(row.created_by_actor_id.is_none());
+        assert!(row.primary_agent_id.is_none());
+        assert_eq!(row.mode, "");
+        assert_eq!(row.title, "");
+        assert_eq!(row.summary, "");
+        assert!(row.idea_id.is_none());
+    }
+
+    #[test]
+    fn claim_result_optional_refresh_token() {
+        let json = r#"{
+            "actor_id": "a1",
+            "team_id": "t1",
+            "actor_type": "agent",
+            "display_name": "Bot"
+        }"#;
+        let r: ClaimResult = serde_json::from_str(json).unwrap();
+        assert!(r.refresh_token.is_none());
+    }
+
+    #[test]
+    fn workspace_row_deserializes() {
+        let json = r#"{"id":"ws-abc"}"#;
+        let row: WorkspaceRow = serde_json::from_str(json).unwrap();
+        assert_eq!(row.id, "ws-abc");
+    }
+
+    #[test]
+    fn backend_participant_row_default_role() {
+        let json = r#"{
+            "session_id": "s1",
+            "actor_id": "a1",
+            "joined_at": "2024-01-01T00:00:00Z"
+        }"#;
+        let row: BackendParticipantRow = serde_json::from_str(json).unwrap();
+        assert!(row.role.is_none());
+    }
+}
