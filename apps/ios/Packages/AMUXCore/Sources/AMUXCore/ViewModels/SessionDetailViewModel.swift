@@ -139,6 +139,10 @@ public final class SessionDetailViewModel {
     // property on an @Observable type, where plain `nonisolated` is rejected.
     // The deinit read is safe in practice (see the note above).
     nonisolated(unsafe) private var task: Task<Void, Never>?
+    /// Actor IDs for which this session-detail view has added an MQTT
+    /// runtime-state subscription (beyond what SessionListViewModel manages
+    /// for ConnectedAgentsStore agents). Tracked so we can unsubscribe on stop().
+    private var sessionAgentSubscribedActorIDs: Set<String> = []
 
     // MARK: - Chip-bar state
     /// Agent actors currently selected in the chip bar. Empty = no specific
@@ -620,6 +624,11 @@ public final class SessionDetailViewModel {
         // SessionListVM after MQTT arrived isn't missed.
         overlayMQTTRuntimeState()
 
+        // Ensure MQTT subscriptions exist for every session agent so that
+        // retained runtime/state messages (carrying availableModels) are
+        // delivered even for agents not in ConnectedAgentsStore.
+        subscribeToSessionAgentRuntimeStates()
+
         // While any agent is still spawning OR has no Supabase runtime row
         // yet (just-spawned, row not written), keep polling so the sheet
         // self-updates once state settles — covers the SwiftData onChange
@@ -746,6 +755,52 @@ public final class SessionDetailViewModel {
                 await self?.refreshMemberSheet()
             }
         }
+    }
+
+    /// Ensures MQTT runtime-state subscriptions exist for every agent in the
+    /// current session, not just those already in ConnectedAgentsStore.
+    /// SessionListViewModel covers ConnectedAgentsStore agents; this method
+    /// patches the gap for agents owned by other daemons / team members.
+    ///
+    /// Call this after `memberSheetAgents` is populated. When a new retained
+    /// runtime/state message arrives, SessionListViewModel's hub predicate
+    /// picks it up and writes models into SwiftData, and the subsequent
+    /// `refreshMemberSheet` call from `scheduleSpawningRefreshIfNeeded`
+    /// surfaces them via `overlayMQTTRuntimeState`.
+    private func subscribeToSessionAgentRuntimeStates() {
+        guard let ctx = startModelContext, !teamID.isEmpty else { return }
+        var toSubscribe: Set<String> = []
+        for agent in memberSheetAgents {
+            guard let rid = agent.runtimeID, !rid.isEmpty else { continue }
+            // Look up the routeActorID from the SwiftData Runtime row.
+            let r = rid
+            let desc = FetchDescriptor<Runtime>(predicate: #Predicate { $0.runtimeId == r })
+            guard let routeActorID = (try? ctx.fetch(desc))?.first?.routeActorID,
+                  !routeActorID.isEmpty else { continue }
+            guard !sessionAgentSubscribedActorIDs.contains(routeActorID) else { continue }
+            toSubscribe.insert(routeActorID)
+        }
+        guard !toSubscribe.isEmpty else { return }
+        let mqtt = self.mqtt
+        let teamID = self.teamID
+        Task { [weak self] in
+            for actorID in toSubscribe {
+                let topic = MQTTTopics.runtimeStateWildcard(teamID: teamID, actorID: actorID)
+                try? await mqtt.subscribe(topic)
+                NSLog("[SessionDetailVM] subscribed runtime state for extra actor=%@", actorID)
+            }
+            await self?.onExtraRuntimeSubscriptionsAdded()
+        }
+        sessionAgentSubscribedActorIDs.formUnion(toSubscribe)
+    }
+
+    /// Called after extra MQTT subscriptions are set up. Retained messages
+    /// arrive within milliseconds; a short yield lets SessionListViewModel
+    /// write to SwiftData before we re-overlay.
+    @MainActor
+    private func onExtraRuntimeSubscriptionsAdded() async {
+        try? await Task.sleep(for: .milliseconds(300))
+        overlayMQTTRuntimeState()
     }
 
     private func scheduleSpawningRefreshIfNeeded() {
@@ -1591,6 +1646,21 @@ public final class SessionDetailViewModel {
     public func stop() {
         task?.cancel(); task = nil
         spawningPollTask?.cancel(); spawningPollTask = nil
+        // Unsubscribe from extra runtime-state topics added for session agents
+        // that aren't in ConnectedAgentsStore. SessionListViewModel manages its
+        // own set; we only clean up the ones we added here.
+        if !sessionAgentSubscribedActorIDs.isEmpty {
+            let toUnsub = sessionAgentSubscribedActorIDs
+            let mqtt = self.mqtt
+            let teamID = self.teamID
+            Task {
+                for actorID in toUnsub {
+                    let topic = MQTTTopics.runtimeStateWildcard(teamID: teamID, actorID: actorID)
+                    try? await mqtt.unsubscribe(topic)
+                }
+            }
+            sessionAgentSubscribedActorIDs.removeAll()
+        }
 
         // Flush every in-progress per-agent streaming buffer to a
         // persisted incomplete event so it's visible when the user returns.
@@ -1876,12 +1946,20 @@ public final class SessionDetailViewModel {
                                 sequence: Int,
                                 runtimeID: String? = nil,
                                 turnID: String? = nil,
+                                isHistoryReplay: Bool = false,
                                 modelContext: ModelContext) -> Bool {
-        // Heartbeat: any ACP event arrival means the runtime is busy.
-        // Drives the chip stop icon / streamingAgentIDs across the
-        // whole turn (thinking → tool_use → output) regardless of
-        // whether `runtime.isActive` flipped on the daemon side.
-        markAgentWorking()
+        // Heartbeat: any live ACP event arrival means the runtime is busy.
+        // Skip for history-replay batches (requestTurnHistory responses) —
+        // those events belong to an already-completed turn and must not
+        // flip the agent chip to "running".
+        // Also skip for statusChange: a runtime transitioning to "active"
+        // (daemon spawn ready) does not mean the agent is processing a user
+        // prompt. Only thinking / tool_use / output events indicate real work.
+        if !isHistoryReplay, case .statusChange(_) = acp.event {
+            // lifecycle event — don't mark working
+        } else if !isHistoryReplay {
+            markAgentWorking()
+        }
 
         // Reducer is source of truth for entry mutations. Apply +
         // project. Side effects the reducer doesn't track (runtime
@@ -1976,6 +2054,7 @@ public final class SessionDetailViewModel {
                                   sequence: seq,
                                   runtimeID: envelope.runtimeID,
                                   turnID: envelope.turnID.isEmpty ? nil : envelope.turnID,
+                                  isHistoryReplay: true,
                                   modelContext: modelContext) {
                     anyDirty = true
                 }
