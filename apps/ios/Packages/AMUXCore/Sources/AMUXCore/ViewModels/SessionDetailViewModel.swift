@@ -1440,6 +1440,9 @@ public final class SessionDetailViewModel {
 
         recomputeGroups()
         hasLoadedInitialFeed = true
+        // Note: the inline incomplete-output hydration above (incompleteOutputIndex path)
+        // deletes the event from `events` before restoreStreamingAgentSetFromIncompleteOutput()
+        // runs, so the two paths never double-restore the same agent.
         restoreStreamingAgentSetFromIncompleteOutput()
 
         // Single subscription path: session/{sid}/live. iOS only ever

@@ -50,4 +50,21 @@ final class SessionDetailLoadingStateTests: XCTestCase {
         XCTAssertFalse(vm.streamingAgentSet.contains("agent-a"),
             "clean finish: streamingAgentSet must NOT be restored after stop/start")
     }
+
+    func test_stop_doesNotPersistEvent_whenSetNonEmptyButTextIsEmpty() {
+        let vm = SessionDetailViewModel.testInstance()
+        // Agent started (set is non-empty) but no text sent yet (empty buffer)
+        vm._test_seedStreamingBuffer(bucket: "agent-a", text: "", model: nil)
+        XCTAssertTrue(vm.streamingAgentSet.contains("agent-a"))
+
+        let container = vm._test_makeInMemoryContainer()
+        vm._test_stop(modelContext: container.mainContext)
+
+        // stop() should skip agents with empty text (no event written)
+        // So after start(), streamingAgentSet should be empty
+        vm._test_start(modelContext: container.mainContext)
+
+        XCTAssertFalse(vm.streamingAgentSet.contains("agent-a"),
+            "agent with empty text buffer must NOT be restored after stop/start — no incomplete event was persisted")
+    }
 }
