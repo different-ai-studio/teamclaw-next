@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - "ios-v*"
+    branches:
+      - main
+    paths:
+      - "apps/ios/**"
   workflow_dispatch:
 
 concurrency:
@@ -29,6 +33,14 @@ jobs:
       FASTLANE_XCODEBUILD_SETTINGS_RETRIES: 6
 
     steps:
+      # Debounce: wait before starting the real build so that a burst of
+      # iOS PRs merged in quick succession collapses into a single release.
+      # Each new push cancels the in-progress run (concurrency above) and
+      # restarts this timer. Tag pushes and workflow_dispatch skip the wait.
+      - name: Debounce (batch consecutive iOS merges)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: sleep 300
+
       - uses: actions/checkout@v6
 
       - name: Set up Ruby
