@@ -1,13 +1,13 @@
 // packages/app/src/lib/inbox-handler.ts
 //
 // Handles incoming MQTT pings on `inbox/<user_id>` (published by FC fan-out
-// after each message INSERT). The payload is intentionally minimal —
-// `{ session_id, ts }` — because `has_unread` is recomputed server-side
-// from `session_read_markers` + `sessions.last_message_at`. The client just
-// needs to know "something changed for this session" and update the UI.
+// after each message INSERT or mark-viewed). The payload shape:
+//   { type?: "message" | "read", session_id, ts }
+// `type` is optional for backward compatibility — absent means "message".
 
 export interface InboxPing {
   session_id: string;
+  type?: "message" | "read";
   ts?: number;
 }
 
@@ -54,6 +54,13 @@ export function handleInboxEnvelope(
     return;
   }
 
+  if (payload.type === "read") {
+    // Another device marked this session read — clear the unread dot locally.
+    store.patchRow(payload.session_id, { has_unread: false });
+    return;
+  }
+
+  // type === "message" or absent (legacy) — mark session unread.
   const found = store.rows.some((r) => r.id === payload.session_id);
   if (found) {
     // Cheap optimistic update. The next list refresh confirms server state.

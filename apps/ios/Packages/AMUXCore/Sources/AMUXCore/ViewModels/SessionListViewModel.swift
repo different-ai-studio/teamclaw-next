@@ -215,6 +215,18 @@ public final class SessionListViewModel {
     private func applyInboxPing(_ ping: InboxPing, sessionsRepo: SessionsRepository?, modelContext: ModelContext) async {
         let sid = ping.sessionID
         let descriptor = FetchDescriptor<Session>(predicate: #Predicate { $0.sessionId == sid })
+
+        if ping.type == "read" {
+            // Another device marked this session read — clear the badge locally.
+            if let session = try? modelContext.fetch(descriptor).first, session.hasUnread {
+                session.hasUnread = false
+                try? modelContext.save()
+                reloadSessions(modelContext: modelContext)
+            }
+            return
+        }
+
+        // type == "message" or nil (legacy) — a new message arrived.
         if let session = try? modelContext.fetch(descriptor).first {
             // Optimistic local update — server already knows the truth, the
             // next applyUnreadFlags() will confirm it. Skipping the no-op
