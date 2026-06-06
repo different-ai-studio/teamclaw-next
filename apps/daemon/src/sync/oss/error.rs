@@ -54,3 +54,51 @@ impl From<std::io::Error> for SyncError {
         SyncError::Io(e.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sync::oss::path_validator::PathValidationError;
+
+    #[test]
+    fn from_path_validation_error() {
+        let pve = PathValidationError("bad path".to_string());
+        let err = SyncError::from(pve);
+        assert!(matches!(err, SyncError::InvalidPath(msg) if msg == "bad path"));
+    }
+
+    #[test]
+    fn from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let err = SyncError::from(io_err);
+        assert!(matches!(err, SyncError::Io(msg) if msg.contains("file missing")));
+    }
+
+    #[test]
+    fn error_display_conflict() {
+        let err = SyncError::Conflict {
+            remote_version: Some(3),
+            remote_cipher_hash: Some("abc".to_string()),
+        };
+        let s = err.to_string();
+        assert!(s.contains("conflict"));
+        assert!(s.contains("3"));
+    }
+
+    #[test]
+    fn error_display_hash_mismatch() {
+        let err = SyncError::HashMismatch {
+            expected: "aaa".to_string(),
+            actual: "bbb".to_string(),
+        };
+        let s = err.to_string();
+        assert!(s.contains("aaa"));
+        assert!(s.contains("bbb"));
+    }
+
+    #[test]
+    fn error_display_batch_unsupported() {
+        let s = SyncError::BatchUnsupported.to_string();
+        assert!(s.contains("404"));
+    }
+}
