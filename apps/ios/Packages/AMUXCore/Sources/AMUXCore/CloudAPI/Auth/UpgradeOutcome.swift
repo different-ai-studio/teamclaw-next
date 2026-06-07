@@ -39,6 +39,23 @@ public enum AuthErrorClassifier {
         messageContains(error, "already consumed")
     }
 
+    /// True when the session's user no longer exists server-side (e.g. an
+    /// anonymous account was deleted) so the locally-stored JWT is permanently
+    /// unusable. The token can still look valid locally (unexpired), so this
+    /// only surfaces when an authenticated call rejects it — e.g. PostgREST /
+    /// GoTrue "User from sub claim in JWT does not exist". The session must be
+    /// cleared; retrying with the same token loops forever.
+    public static func isInvalidSession(_ error: Error) -> Bool {
+        guard let api = error as? CloudAPIError,
+              case let .requestFailed(status, code, message) = api,
+              status == 401 || status == 403 else { return false }
+        if let code, ["user_not_found", "session_not_found", "session_expired", "bad_jwt"].contains(code) {
+            return true
+        }
+        let m = message.lowercased()
+        return m.contains("sub claim") || (m.contains("jwt") && m.contains("does not exist"))
+    }
+
     // MARK: - Helpers
 
     static func messageIndicatesAlreadyInUse(_ message: String) -> Bool {

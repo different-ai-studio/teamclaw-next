@@ -262,6 +262,29 @@ struct AppOnboardingCoordinatorTests {
         // Token consumed exactly once — must not replay on the next launch.
         #expect(defaults.string(forKey: InviteDeepLink.pendingTokenDefaultsKey) == nil)
     }
+
+    @MainActor
+    @Test("a deleted session user (invalid JWT) clears the session and routes to auth, not a Setup-Failed dead-end")
+    func invalidSessionUserRecoversToAuth() async throws {
+        // The stored anonymous user was deleted server-side, so an authenticated
+        // call rejects the still-locally-valid JWT. This must NOT dead-end on the
+        // Setup-Failed/Retry screen (Retry loops the same dead token) — clear the
+        // session and route to needsAuth so a fresh session can be minted.
+        let store = InMemoryOnboardingStore(
+            bootstrap: AppBootstrap(memberActorID: nil, teams: []),
+            isAnonymous: true,
+            loadBootstrapError: CloudAPIError.requestFailed(
+                status: 403, code: nil, message: "User from sub claim in JWT does not exist")
+        )
+        let coordinator = AppOnboardingCoordinator(store: store, defaults: ephemeralDefaults())
+
+        await coordinator.bootstrap()
+
+        #expect(coordinator.route == .needsAuth)              // NOT .failed
+        #expect(coordinator.currentContext == nil)
+        #expect(await store.recordedSignOutCallCount() == 1)  // dead session cleared
+        #expect(await store.recordedCreatedTeamNames().isEmpty)
+    }
 }
 
 private actor InMemoryOnboardingStore: AppOnboardingStore {
@@ -271,6 +294,7 @@ private actor InMemoryOnboardingStore: AppOnboardingStore {
     let anonymous: Bool
     let claimResult: ClaimResult?
     let claimError: Error?
+    let loadBootstrapError: Error?
     var ensureSessionCallCount = 0
     var createdTeamNames: [String] = []
     var signOutCallCount = 0
@@ -281,13 +305,15 @@ private actor InMemoryOnboardingStore: AppOnboardingStore {
          isAnonymous: Bool = false,
          claimResult: ClaimResult? = nil,
          claimError: Error? = nil,
-         bootstrapAfterClaim: AppBootstrap? = nil) {
+         bootstrapAfterClaim: AppBootstrap? = nil,
+         loadBootstrapError: Error? = nil) {
         self.bootstrapResult = bootstrap
         self.createdTeamResult = createdTeam
         self.anonymous = isAnonymous
         self.claimResult = claimResult
         self.claimError = claimError
         self.bootstrapAfterClaimResult = bootstrapAfterClaim
+        self.loadBootstrapError = loadBootstrapError
     }
 
     func ensureSession() async throws {
@@ -295,6 +321,7 @@ private actor InMemoryOnboardingStore: AppOnboardingStore {
     }
 
     func loadBootstrap() async throws -> AppBootstrap {
+        if let loadBootstrapError { throw loadBootstrapError }
         if didClaim, let after = bootstrapAfterClaimResult { return after }
         return bootstrapResult
     }

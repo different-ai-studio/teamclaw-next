@@ -501,6 +501,22 @@ public final class AppOnboardingCoordinator {
             isAnonymous = false
             route = .needsAuth
         } catch {
+            // A session whose user no longer exists server-side (e.g. an
+            // anonymous account that was deleted) keeps a locally-valid-looking
+            // JWT, so it slips past ensureSession and only fails when an
+            // authenticated call rejects it ("User from sub claim in JWT does
+            // not exist"). Dead-ending on the Setup-Failed/Retry screen loops
+            // forever because the stored token is permanently useless. Clear the
+            // session and bounce to auth so a fresh (anonymous) session can be
+            // minted instead.
+            if AuthErrorClassifier.isInvalidSession(error) {
+                try? await store.signOut()
+                persistActiveTeam(nil)
+                currentContext = nil
+                isAnonymous = false
+                route = .needsAuth
+                return
+            }
             currentContext = nil
             isAnonymous = false
             route = .failed
