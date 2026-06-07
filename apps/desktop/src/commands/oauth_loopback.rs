@@ -101,7 +101,7 @@ async fn accept_one(listener: TcpListener) -> Result<String, String> {
     };
     let resp = format!(
         "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.as_bytes().len()
+        body.len()
     );
     let _ = socket.write_all(resp.as_bytes()).await;
     let _ = socket.flush().await;
