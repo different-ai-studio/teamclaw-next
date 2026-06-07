@@ -430,6 +430,18 @@ public final class AppOnboardingCoordinator {
                         try await store.claimInvite(token: token)
                     }
                     pendingInviteToken = nil
+                    // Agent and member re-invites (target_actor_id set) rotate
+                    // credentials onto an EXISTING actor and return a refresh
+                    // token bound to that actor's user. We must adopt that
+                    // session before reloading — otherwise we stay signed in as
+                    // the throwaway anonymous user that opened the link, find it
+                    // has no team, and auto-create a junk team instead of joining
+                    // the invited one. Mirrors RootTabView.claimAndSwitch.
+                    if let rt = result.refreshToken, !rt.isEmpty {
+                        try await store.setSession(refreshToken: rt)
+                        isAnonymous = await store.isAnonymous()
+                        currentUserEmail = await store.currentUserEmail()
+                    }
                     preferred = preferred ?? result.teamID
                     bootstrap = try await measureOnboarding("loadBootstrap.afterClaim") {
                         try await store.loadBootstrap()

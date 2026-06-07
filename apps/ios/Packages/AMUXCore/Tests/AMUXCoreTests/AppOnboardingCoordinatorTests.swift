@@ -264,6 +264,35 @@ struct AppOnboardingCoordinatorTests {
     }
 
     @MainActor
+    @Test("re-invite deeplink adopts the returned refresh token and joins the invited team")
+    func reinviteDeeplinkAdoptsRefreshTokenSession() async throws {
+        // A member/agent re-invite (target_actor_id set) returns a refresh token
+        // bound to the TARGET actor's user. bootstrap must adopt that session
+        // before reloading — otherwise the device stays on the throwaway
+        // anonymous user that opened the link, finds no team, and auto-creates a
+        // junk team (the "still anonymous + wrong team" bug).
+        let teamY = TeamSummary(id: "team-y", name: "Y", slug: "y", role: "admin")
+        let claim = ClaimResult(actorID: "actor-y", teamID: "team-y",
+                                actorType: "human", displayName: "Me", refreshToken: "rt-target")
+        let store = InMemoryOnboardingStore(
+            bootstrap: AppBootstrap(memberActorID: nil, teams: []),   // throwaway anon, no team
+            isAnonymous: true,
+            claimResult: claim,
+            bootstrapAfterClaim: AppBootstrap(memberActorID: "actor-y", teams: [teamY])
+        )
+        let defaults = ephemeralDefaults()
+        defaults.set("tok", forKey: InviteDeepLink.pendingTokenDefaultsKey)
+        let coordinator = AppOnboardingCoordinator(store: store, defaults: defaults)
+
+        await coordinator.bootstrap()
+
+        #expect(coordinator.route == .ready)
+        #expect(coordinator.currentContext?.team.id == "team-y")          // joined the invited team
+        #expect(await store.recordedSetSessionTokens() == ["rt-target"])  // adopted the target session
+        #expect(await store.recordedCreatedTeamNames().isEmpty)           // did NOT auto-create a junk team
+    }
+
+    @MainActor
     @Test("a deleted session user (invalid JWT) clears the session and routes to auth, not a Setup-Failed dead-end")
     func invalidSessionUserRecoversToAuth() async throws {
         // The stored anonymous user was deleted server-side, so an authenticated
@@ -299,6 +328,7 @@ private actor InMemoryOnboardingStore: AppOnboardingStore {
     var createdTeamNames: [String] = []
     var signOutCallCount = 0
     var didClaim = false
+    var setSessionRefreshTokens: [String] = []
 
     init(bootstrap: AppBootstrap,
          createdTeam: CreatedTeam? = nil,
@@ -432,8 +462,10 @@ private actor InMemoryOnboardingStore: AppOnboardingStore {
     }
 
     func setSession(refreshToken: String) async throws {
-        // no-op
+        setSessionRefreshTokens.append(refreshToken)
     }
+
+    func recordedSetSessionTokens() -> [String] { setSessionRefreshTokens }
 
     nonisolated func tokenRefreshes() -> AsyncStream<Void> {
         AsyncStream { $0.finish() }
