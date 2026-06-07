@@ -239,15 +239,35 @@
   .turn-big{font-family:"Noto Serif SC",serif;font-weight:900;font-size:clamp(2.1rem,4.8vw,3.5rem);color:var(--coral);line-height:1.04;letter-spacing:-.01em;margin:.15rem 0 .7rem;display:flex;align-items:center;gap:.55rem}
   .turn-big .ar{font-family:"Fraunces",serif;font-weight:900;font-size:1.05em;transform:translateY(-.02em)}
 
-  /* ---------- product form (4 deliverables) ---------- */
-  .prodgrid{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem}
-  .prodcard{background:var(--paper-2);border:1px solid var(--line);border-radius:10px;padding:1.3rem 1.5rem;display:grid;grid-template-columns:auto 1fr;gap:1.15rem;align-items:start;position:relative;border-top:3px solid var(--coral)}
-  .prodcard .pico{width:42px;height:42px;color:var(--coral);flex-shrink:0;margin-top:.1rem}
-  .prodcard .pn{position:absolute;top:.9rem;right:1.2rem;font-family:"Fraunces",serif;font-weight:900;font-size:1.5rem;color:var(--line-strong);line-height:1}
-  .prodcard h4{font-family:"Noto Serif SC",serif;font-weight:700;font-size:1.18rem;color:var(--ink);line-height:1.2;padding-right:1.2rem}
-  .prodcard .ps{font-family:"JetBrains Mono",monospace;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;color:var(--coral);margin:.3rem 0 .45rem}
-  .prodcard p{font-size:.85rem;color:var(--ink-soft);font-weight:300;line-height:1.55}
-  .prodcard p b{color:var(--ink);font-weight:600}
+  /* ---------- product form (codex-style window) ---------- */
+  #s-product{padding:clamp(1.3rem,2.8vw,2.4rem) clamp(2rem,4vw,3.5rem)}
+  .codex{background:#14151a;border:1px solid #2b2e38;border-radius:13px;overflow:hidden;box-shadow:0 34px 80px -34px rgba(33,30,26,.6);max-width:1200px;margin:0 auto;width:100%}
+  .cx-bar{display:flex;align-items:center;gap:.5rem;padding:.62rem .9rem;background:#1c1e26;border-bottom:1px solid #2b2e38}
+  .cx-dot{width:11px;height:11px;border-radius:50%}
+  .cx-title{color:#cdd0da;font-family:"JetBrains Mono",monospace;font-size:.74rem;font-weight:600;margin-left:.55rem}
+  .cx-chip{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:.58rem;color:#8a8f9e;border:1px solid #2b2e38;border-radius:99px;padding:.2rem .6rem}
+  .cx-tag{display:inline-flex;align-items:center;gap:.35rem;font-family:"JetBrains Mono",monospace;font-size:.58rem;color:var(--coral);font-weight:700;letter-spacing:.04em;margin-left:.7rem}
+  .cx-n{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--coral);color:#14151a;font-family:"Fraunces",serif;font-weight:900;font-size:.62rem;flex-shrink:0}
+  .cx-body{display:grid;grid-template-columns:210px 1fr 230px;min-height:262px}
+  .cx-col{padding:.85rem .95rem;border-right:1px solid #2b2e38;display:flex;flex-direction:column;gap:.5rem}
+  .cx-col:last-child{border-right:none}
+  .cx-h{display:flex;align-items:center;gap:.4rem;font-family:"JetBrains Mono",monospace;font-size:.56rem;letter-spacing:.1em;text-transform:uppercase;color:#7e8494;font-weight:600}
+  .cx-li{font-family:"JetBrains Mono",monospace;font-size:.68rem;color:#b9bdc9;display:flex;align-items:center;gap:.45rem;line-height:1.5}
+  .cx-li .g{color:#5fb98a}
+  .cx-li .m{color:#6f7689}
+  .cx-user{color:#e8e9ee;font-family:"JetBrains Mono",monospace;font-size:.74rem;line-height:1.4}
+  .cx-user .pr{color:var(--coral)}
+  .cx-run{font-family:"JetBrains Mono",monospace;font-size:.68rem;color:#9aa0b0;line-height:1.7}
+  .cx-run .ok{color:#5fb98a}
+  .cx-code{background:#0f1014;border:1px solid #262932;border-radius:7px;padding:.55rem .7rem;font-family:"JetBrains Mono",monospace;font-size:.62rem;line-height:1.55;color:#8b91a3}
+  .cx-code .k{color:#d98a6a}.cx-code .s{color:#7faf87}.cx-code .p{color:#6f7689}
+  .cx-foot{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.62rem .95rem;background:#1c1e26;border-top:1px solid #2b2e38;font-family:"JetBrains Mono",monospace;font-size:.64rem;color:#b9bdc9}
+  .cx-foot .ok{color:#5fb98a}
+  .cx-foot .sep{color:#3a3d47}
+  .cx-legend{display:flex;justify-content:center;gap:1.5rem;flex-wrap:wrap;margin-top:1rem}
+  .cx-legend span{font-size:.74rem;color:var(--ink-soft);display:flex;align-items:center;gap:.4rem}
+  .cx-legend b{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--coral);color:var(--paper);font-family:"Fraunces",serif;font-weight:900;font-size:.66rem}
+  .cx-legend i{font-style:normal;color:var(--ink);font-weight:600}
 
   /* ---------- finale (vision + team) ---------- */
   .fin-h3{font-family:"Noto Serif SC",serif;font-weight:700;font-size:1.1rem;color:var(--ink);margin-bottom:.85rem;display:flex;align-items:center;gap:.5rem}
@@ -521,31 +541,55 @@
   <!-- PRODUCT FORM -->
   <section class="slide" id="s-product">
     <div class="slide-num fr">08</div>
-    <div class="slide-head" data-r="1">
+    <div class="slide-head" data-r="1" style="margin-bottom:1rem">
       <div class="kicker">产品形态 · 我们交付什么</div>
       <h2>四样东西,合成一个平台</h2>
     </div>
-    <div class="prodgrid">
-      <div class="prodcard" data-r="2">
-        <span class="pn">1</span>
-        <svg class="pico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="m6 8 3 2.5L6 13"/><path d="M11 13h4"/><path d="M8 21h8M12 17v4"/></svg>
-        <div><h4>Betly Desktop</h4><div class="ps">Codex-like Desktop App</div><p>类似 Codex 的桌面 App——商家在这里用<b>对话</b>生成、编辑、预览、部署自己的应用。造软件的入口。</p></div>
+    <div class="codex" data-r="2">
+      <div class="cx-bar">
+        <span class="cx-dot" style="background:#ff5f57"></span>
+        <span class="cx-dot" style="background:#febc2e"></span>
+        <span class="cx-dot" style="background:#28c840"></span>
+        <span class="cx-title">Betly Desktop</span>
+        <span class="cx-tag"><span class="cx-n">1</span> 类 Codex 桌面 App</span>
+        <span class="cx-chip">opus · agent</span>
       </div>
-      <div class="prodcard" data-r="3">
-        <span class="pn">2</span>
-        <svg class="pico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></svg>
-        <div><h4>Core SaaS</h4><div class="ps">统一业务底座</div><p>客户 / 商品 / 销售 / 权限 / 文件 / 消息,统一管理企业核心数据,<b>API 化</b>对外开放。</p></div>
+      <div class="cx-body">
+        <div class="cx-col">
+          <div class="cx-h"><span class="cx-n">4</span> Skills / MCP</div>
+          <div class="cx-li"><span class="g">●</span> 智能客服</div>
+          <div class="cx-li"><span class="g">●</span> 营销文案</div>
+          <div class="cx-li"><span class="g">●</span> 自动对账</div>
+          <div class="cx-li"><span class="m">＋</span><span class="m">自定义 skill</span></div>
+          <div class="cx-h" style="margin-top:auto">企业自己的能力</div>
+        </div>
+        <div class="cx-col">
+          <div class="cx-h"><span class="cx-n">3</span> Codegen · 对话造软件</div>
+          <div class="cx-user"><span class="pr">›</span> 我要一个会员积分 + 预约系统</div>
+          <div class="cx-run">⠿ 生成 TanStack Start + Drizzle 工程…<br><span class="ok">✓</span> routes/　db/　logic/　schema/</div>
+          <div class="cx-code"><span class="p">// app/routes/members.tsx</span><br><span class="k">export const</span> Route = createFileRoute(<span class="s">'/members'</span>)<br><span class="k">const</span> { data } = core.<span class="k">customers</span>.list()</div>
+        </div>
+        <div class="cx-col">
+          <div class="cx-h"><span class="cx-n">2</span> Core SaaS · /v1</div>
+          <div class="cx-li"><span class="g">▸</span> GET /customers</div>
+          <div class="cx-li"><span class="g">▸</span> GET /products</div>
+          <div class="cx-li"><span class="g">▸</span> GET /sales</div>
+          <div class="cx-li"><span class="g">▸</span> /auth · /files · /msg</div>
+          <div class="cx-h" style="margin-top:auto">统一业务底座</div>
+        </div>
       </div>
-      <div class="prodcard" data-r="4">
-        <span class="pn">3</span>
-        <svg class="pico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
-        <div><h4>Codegen 脚手架 + 自动化部署 + 运维</h4><div class="ps">Build → Ship → Operate</div><p>模板与 SDK 把 AI 生成纳入轨道,push 即部署(Dokploy),<b>上线 / 回滚 / 监控全自动</b>——商家不碰运维。</p></div>
+      <div class="cx-foot">
+        <span class="cx-n">3</span> 自动部署 / 运维
+        <span class="sep">|</span> push <span class="ok">→</span> Dokploy 构建 <span class="ok">→</span> 部署 <span class="ok">✓</span>
+        <span class="sep">·</span> schema_merchant <span class="ok">✓</span>
+        <span class="sep">·</span> &lt;merchant&gt;.apps <span class="ok">✓</span>
       </div>
-      <div class="prodcard" data-r="5">
-        <span class="pn">4</span>
-        <svg class="pico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.14 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z"/><path d="M20 3v4M22 5h-4M4 17v2M5 18H3"/></svg>
-        <div><h4>企业自己的 Skills</h4><div class="ps">沉淀专属 AI 能力</div><p>每个企业积累自己的 <b>skills / MCP</b>,跑在平台 AI 网关,可回调自有 API 与 Core SaaS。</p></div>
-      </div>
+    </div>
+    <div class="cx-legend" data-r="3">
+      <span><b>1</b> <i>Betly Desktop</i> 类 Codex 桌面 App</span>
+      <span><b>2</b> <i>Core SaaS</i> 统一业务底座</span>
+      <span><b>3</b> <i>Codegen</i> 脚手架 + 部署 + 运维</span>
+      <span><b>4</b> <i>Skills</i> 企业自己的能力</span>
     </div>
   </section>
 
