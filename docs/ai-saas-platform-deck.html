@@ -268,6 +268,18 @@
   .cx-legend span{font-size:.74rem;color:var(--ink-soft);display:flex;align-items:center;gap:.4rem}
   .cx-legend b{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--coral);color:var(--paper);font-family:"Fraunces",serif;font-weight:900;font-size:.66rem}
   .cx-legend i{font-style:normal;color:var(--ink);font-weight:600}
+  /* center = TeamClaw chat interface */
+  .cx-thread{display:flex;flex-direction:column;gap:.6rem;flex:1;margin-top:.2rem}
+  .msg{display:flex;gap:.5rem;max-width:92%}
+  .msg.user{align-self:flex-end}
+  .msg.user .b{background:var(--coral);color:#14151a;border-radius:11px 11px 3px 11px;padding:.5rem .75rem;font-size:.74rem;font-weight:600;line-height:1.4}
+  .msg.ai{align-self:flex-start}
+  .msg.ai .av{width:24px;height:24px;border-radius:7px;background:#2b2e38;color:var(--coral);font-family:"Fraunces",serif;font-weight:900;font-size:.72rem;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .msg.ai .b{background:#1e2027;border:1px solid #2b2e38;border-radius:11px 11px 11px 3px;padding:.55rem .75rem;font-size:.72rem;color:#cdd0da;line-height:1.5}
+  .msg .steps{margin-top:.4rem;font-family:"JetBrains Mono",monospace;font-size:.64rem;color:#9aa0b0;line-height:1.75}
+  .msg .steps .ok{color:#5fb98a}
+  .cx-input{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:#0f1014;border:1px solid #262932;border-radius:9px;padding:.55rem .7rem;font-family:"JetBrains Mono",monospace;font-size:.68rem;color:#6f7689}
+  .cx-input .send{width:21px;height:21px;border-radius:6px;background:var(--coral);color:#14151a;display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0}
 
   /* ---------- finale (vision + team) ---------- */
   .fin-h3{font-family:"Noto Serif SC",serif;font-weight:700;font-size:1.1rem;color:var(--ink);margin-bottom:.85rem;display:flex;align-items:center;gap:.5rem}
@@ -564,10 +576,13 @@
           <div class="cx-h" style="margin-top:auto">企业自己的能力</div>
         </div>
         <div class="cx-col">
-          <div class="cx-h"><span class="cx-n">3</span> Codegen · 对话造软件</div>
-          <div class="cx-user"><span class="pr">›</span> 我要一个会员积分 + 预约系统</div>
-          <div class="cx-run">⠿ 生成 TanStack Start + Drizzle 工程…<br><span class="ok">✓</span> routes/　db/　logic/　schema/</div>
-          <div class="cx-code"><span class="p">// app/routes/members.tsx</span><br><span class="k">export const</span> Route = createFileRoute(<span class="s">'/members'</span>)<br><span class="k">const</span> { data } = core.<span class="k">customers</span>.list()</div>
+          <div class="cx-h"><span class="cx-n">3</span> TeamClaw · 对话造软件</div>
+          <div class="cx-thread">
+            <div class="msg user"><div class="b">我要一个会员积分 + 预约系统</div></div>
+            <div class="msg ai"><div class="av">B</div><div class="b">好的,正在生成 TanStack Start + Drizzle 工程<div class="steps"><span class="ok">✓</span> routes / db / schema<br><span class="ok">✓</span> 接入 Core SaaS 客户接口<br>⠿ 部署到 Dokploy…</div></div></div>
+            <div class="msg user"><div class="b">会员到期前 3 天自动提醒</div></div>
+          </div>
+          <div class="cx-input"><span>› 继续描述需求…</span><span class="send">↑</span></div>
         </div>
         <div class="cx-col">
           <div class="cx-h"><span class="cx-n">2</span> Core SaaS · /v1</div>
