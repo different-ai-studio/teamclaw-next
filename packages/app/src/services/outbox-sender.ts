@@ -34,6 +34,7 @@ import {
   sessionFlowLog,
   summarizeText,
 } from "@/lib/session-flow-log";
+import { bumpSessionListLastMessage } from "@/lib/session-list-preview";
 
 const TICK_MS = 1000;
 const DELIVERED_GC_MS = 5000;
@@ -136,6 +137,9 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       sessionId: entry.sessionId,
       teamId: entry.teamId,
       duplicateAlreadyInserted,
+    });
+    bumpSessionListLastMessage(entry.sessionId, entry.content, {
+      at: entry.createdAt,
     });
     store.markCloudPersisted(entry.messageId);
 

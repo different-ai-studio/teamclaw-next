@@ -14,6 +14,7 @@ import {
   composerGlassFillClass,
   composerGlassSurfaceClass,
   composerStackFormSlotClass,
+  composerStackRowDividerClass,
   composerStackShellClass,
 } from "./composer-glass";
 import { usePendingPermissionsQueue } from "./use-pending-permissions-queue";
@@ -49,8 +50,9 @@ function ComposerAgentStrip({
   return (
     <div
       className={cn(
-        "box-border flex min-h-9 w-full items-center gap-2.5 border-b border-border-soft px-3.5 py-[7px] last:border-b-0",
+        "box-border flex min-h-9 w-full items-center gap-2.5 px-3.5 py-[7px]",
         embeddedInGlass ? composerGlassChildClass : composerGlassSurfaceClass,
+        composerStackRowDividerClass,
         !embeddedInGlass && roundsTop && "overflow-hidden rounded-t-[14px]",
       )}
       data-testid="streaming-agent-row"
@@ -155,7 +157,7 @@ export function ComposerStack({
               <div data-testid="streaming-agent-shell" className="box-border w-full overflow-hidden">
                 {hasApproval ? (
                   <div
-                    data-testid="composer-approval-glass"
+                    data-testid="composer-approval-chrome"
                     className={cn(
                       "box-border w-full overflow-hidden rounded-t-[14px]",
                       composerGlassFillClass,
@@ -175,14 +177,17 @@ export function ComposerStack({
                             onReplyStart={onReplyStart}
                             onReplyRollback={onReplyRollback}
                             appearance="glass"
-                            className="box-border w-full border-0 border-b border-border-soft px-3.5 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-300"
+                            className={cn(
+                              "box-border w-full px-3.5 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-300",
+                              composerStackRowDividerClass,
+                            )}
                           />
                         ) : null}
                       </div>
                     </div>
 
                     {showApprovalOnly ? null : (
-                      agents.map((agent) => {
+                      agents.map((agent, index) => {
                         const isAnchor = anchorActorId === agent.actorId && currentEntry !== null;
                         return (
                           <ComposerAgentStrip

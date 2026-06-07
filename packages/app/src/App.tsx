@@ -94,6 +94,10 @@ import {
 import { handleAcpPermissionRequest } from "@/lib/teamclaw/handle-acp-permission-request";
 import { handleInboxEnvelope } from "@/lib/inbox-handler";
 import {
+  bumpSessionListLastMessage,
+  messageKindUpdatesSessionPreview,
+} from "@/lib/session-list-preview";
+import {
   persistStreamingPartsForReply,
   syncStreamingToolOutputsFromLocalCache,
 } from "@/lib/streaming-persist";
@@ -830,6 +834,11 @@ function AppContent() {
       useV2StreamingStore.getState().releaseActorAfterPersist(sessionId, actorId, {
         persistedPartsJson,
       });
+      bumpSessionListLastMessage(sessionId, m.content, {
+        at: Number(m.createdAt) > 0
+          ? new Date(Number(m.createdAt) * 1000).toISOString()
+          : now,
+      });
       delete flushTurnAgentReplyInFlightRef.current[streamKey];
     })();
 
@@ -901,11 +910,9 @@ function AppContent() {
         resetSessionLiveSubscriptionState();
         if (cancelled) return;
 
-        // Per-user inbox topic for unread red-dot pings fan'd out by FC after
-        // each message INSERT. Single subscription per user (not per session)
-        // keeps broker topic count bounded. See handleInboxEnvelope below.
+        // FC fans out to inbox/<auth.user_id> (see push-dispatch.ts), not actor_id.
         try {
-          await mqttSubscribe(`inbox/${actorId}`);
+          await mqttSubscribe(`inbox/${userId}`);
         } catch (e) {
           console.warn("[inbox] subscribe failed", e);
         }
@@ -913,7 +920,7 @@ function AppContent() {
 
         unlisten = await listenForEnvelopes((env) => {
           if (env.topic.startsWith("inbox/")) {
-            handleInboxEnvelope(env, actorId, useSessionListStore.getState());
+            handleInboxEnvelope(env, userId, useSessionListStore.getState());
             return;
           }
           const decoded = decodeLiveEvent(new Uint8Array(env.bytes));
@@ -1028,6 +1035,19 @@ function AppContent() {
             } else {
               useSessionMessageStore.getState().appendMessage(sid, decoded.message);
             }
+
+            if (
+              !parkedAgentReply &&
+              messageKindUpdatesSessionPreview(decoded.message.kind)
+            ) {
+              const createdAtSec = Number(decoded.message.createdAt);
+              bumpSessionListLastMessage(sid, decoded.message.content, {
+                at: Number.isFinite(createdAtSec) && createdAtSec > 0
+                  ? new Date(createdAtSec * 1000).toISOString()
+                  : undefined,
+              });
+            }
+
             // Write ALL incoming messages into the unified `message` table
             // (origin="mqtt-live"). This replaces the old agent_runtime_event
             // writes for tool-call/result/thinking kinds.

@@ -4,6 +4,8 @@
 // after each message INSERT or mark-viewed). The payload shape:
 //   { type?: "message" | "read", session_id, ts }
 // `type` is optional for backward compatibility — absent means "message".
+// For message pings the client patches unread optimistically, then debounces
+// a list reload to sync preview text and sort order.
 
 export interface InboxPing {
   session_id: string;
@@ -14,6 +16,27 @@ export interface InboxPing {
 export interface InboxEnvelope {
   topic: string;
   bytes: number[];
+}
+
+/** Debounce window for coalescing burst inbox pings into one list fetch. */
+export const INBOX_LIST_REFRESH_MS = 300;
+
+let inboxListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Test hook — clears pending debounced refresh. */
+export function resetInboxListRefreshForTests(): void {
+  if (inboxListRefreshTimer) {
+    clearTimeout(inboxListRefreshTimer);
+    inboxListRefreshTimer = null;
+  }
+}
+
+function scheduleInboxListRefresh(loadFirstPage: () => Promise<void>): void {
+  if (inboxListRefreshTimer) clearTimeout(inboxListRefreshTimer);
+  inboxListRefreshTimer = setTimeout(() => {
+    inboxListRefreshTimer = null;
+    void loadFirstPage();
+  }, INBOX_LIST_REFRESH_MS);
 }
 
 /**
@@ -63,10 +86,9 @@ export function handleInboxEnvelope(
   // type === "message" or absent (legacy) — mark session unread.
   const found = store.rows.some((r) => r.id === payload.session_id);
   if (found) {
-    // Cheap optimistic update. The next list refresh confirms server state.
+    // Instant unread dot; preview + last_message_at come from debounced reload.
     store.patchRow(payload.session_id, { has_unread: true });
-  } else {
-    // New session not in cached rows — full refresh.
-    void store.loadFirstPage();
   }
+
+  scheduleInboxListRefresh(() => store.loadFirstPage());
 }

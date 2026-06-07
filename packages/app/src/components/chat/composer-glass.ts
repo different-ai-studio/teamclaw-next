@@ -1,24 +1,21 @@
 import { cn } from "@/lib/utils";
 
-/** White frost layer — no side borders; composer shell owns the frame. */
-export const composerGlassFillClass =
-  "bg-[#ffffff]/[0.38] backdrop-blur-2xl backdrop-brightness-110 dark:bg-[#ffffff]/[0.28]";
+/** Opaque chrome fill inside the composer stack (no blur). */
+export const composerGlassFillClass = "bg-paper";
 
-/** Full-width chrome row inside the stack (divider only). */
-export const composerGlassSurfaceClass = cn(
-  composerGlassFillClass,
-  "box-border w-full border-0 border-b border-border-soft",
-);
+/** Bottom edge between stack rows — one mechanism everywhere. */
+export const composerStackRowDividerClass = "border-0 border-b border-border";
 
-/** Row inside a shared glass block (approval + agent). */
+/** Full-width chrome row inside the stack. */
+export const composerGlassSurfaceClass = cn(composerGlassFillClass, "box-border w-full");
+
+/** Row inside a shared chrome block (approval + agent). */
 export const composerGlassChildClass =
-  "box-border w-full border-0 bg-transparent shadow-none backdrop-blur-none";
+  "box-border w-full border-0 bg-paper shadow-none";
 
-export const composerGlassHoverClass =
-  "hover:bg-[#ffffff]/50 dark:hover:bg-[#ffffff]/40";
+export const composerGlassHoverClass = "hover:bg-selected";
 
-export const composerGlassFocusClass =
-  "focus-visible:bg-[#ffffff]/50 dark:focus-visible:bg-[#ffffff]/40";
+export const composerGlassFocusClass = "focus-visible:bg-selected";
 
 /** Single outer card — prototype `.composer-stack`. */
 export const composerStackShellClass =

@@ -15,11 +15,11 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { useProviderStore, type ModelOption } from "@/stores/provider";
 import { useRuntimeStateStore } from "@/stores/runtime-state-store";
 import { useTeamModeStore } from "@/stores/team-mode";
-import { useSuggestionsStore } from "@/stores/suggestions";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { TEAMCLAW_DIR, CONFIG_FILE_NAME, TEAM_REPO_DIR } from "@/lib/build-config";
 import { adaptTeamclawMessages } from "@/lib/v2-message-adapter";
 import { useAuthStore } from "@/stores/auth-store";
+import { bumpSessionListLastMessage } from "@/lib/session-list-preview";
 import { useSessionListStore } from "@/stores/session-list-store";
 import { useEngagedAgentStore } from "@/stores/engaged-agent-store";
 import { useUIStore } from "@/stores/ui";
@@ -35,8 +35,11 @@ import { isAgentActorType } from "@/lib/actor-type";
 import { resolveSessionWorkspaceHintForRuntimeStart } from "@/lib/teamclaw/resolve-runtime-start-workspace";
 import type { PromptInputMessage } from "@/packages/ai/prompt-input";
 import type { AttachedAgent } from "@/packages/ai/prompt-input-insert-hooks";
-import { Suggestions, Suggestion } from "@/packages/ai/suggestion";
 import { Button } from "@/components/ui/button";
+import { LocalAgentWelcomeEmptyState } from "./LocalAgentWelcomeEmptyState";
+import { SessionEmptyThreadState } from "./SessionEmptyThreadState";
+import { createQuickDaemonSession } from "@/lib/quick-daemon-session";
+import { createQuickEmptySession } from "@/lib/quick-empty-session";
 
 import type { Message } from "@/stores/session";
 import { ChatInputArea } from "./ChatInputArea";
@@ -164,14 +167,6 @@ interface ChatPanelProps {
 
 export function ChatPanel({ compact = false }: ChatPanelProps) {
   const { t } = useTranslation();
-
-  const customSuggestions = useSuggestionsStore(s => s.customSuggestions);
-  const builtInSuggestions = [
-    t("chat.suggestions.analyze", "Analyze data"),
-    t("chat.suggestions.report", "Write a report"),
-    t("chat.suggestions.skill", "Add a new skill"),
-  ];
-  const suggestions = [...builtInSuggestions, ...customSuggestions];
 
   // ── UI store selectors ───────────────────────────────────────────────
   const draftPreselectedActor = useUIStore(s => s.draftPreselectedActor);
@@ -546,7 +541,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     };
   }, [activeSessionId, engagedAgents.length]);
 
-  const lastBootedAgentsRef = React.useRef<string>("");
   const sessionRow = useSessionListStore(s => s.rows.find(r => r.id === activeSessionId));
   // Team is workspace-scoped: every session in `rows` shares the same team_id.
   // When activeSessionId is null (brand-new chat), fall back to any row's
@@ -555,38 +549,32 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const fallbackTeamId = useSessionListStore(s => s.rows[0]?.team_id ?? null);
   const sheetTeamId = sessionRow?.team_id ?? fallbackTeamId ?? currentTeamId;
   const [localDaemonAgent, setLocalDaemonAgent] = React.useState<AttachedAgent | null>(null);
+  const [localDaemonAgentLoading, setLocalDaemonAgentLoading] = React.useState(false);
+  const [welcomeSessionStarting, setWelcomeSessionStarting] = React.useState(false);
   React.useEffect(() => {
     if (!sheetTeamId) {
       setLocalDaemonAgent(null);
+      setLocalDaemonAgentLoading(false);
       return;
     }
     let cancelled = false;
+    setLocalDaemonAgentLoading(true);
     void getCurrentDaemonAgent(sheetTeamId).then((row) => {
       if (cancelled) return;
       setLocalDaemonAgent(
         row ? { id: row.id, displayName: row.displayName } : null,
       );
+      setLocalDaemonAgentLoading(false);
+    }).catch(() => {
+      if (cancelled) return;
+      setLocalDaemonAgent(null);
+      setLocalDaemonAgentLoading(false);
     });
     return () => {
       cancelled = true;
     };
   }, [sheetTeamId]);
 
-  // Boot daemon runtimes whenever engaged agents change (e.g. @-mention pill).
-  React.useEffect(() => {
-    if (!activeSessionId || !sheetTeamId || engagedAgents.length === 0) return;
-    const signature = engagedAgents.map((a) => a.id).sort().join(",");
-    if (signature === lastBootedAgentsRef.current) return;
-    lastBootedAgentsRef.current = signature;
-    void import("@/lib/teamclaw/ensure-agent-runtime").then(({ ensureAgentRuntimesForSession }) => {
-      void ensureAgentRuntimesForSession({
-        sessionId: activeSessionId,
-        teamId: sheetTeamId,
-        agentActorIds: engagedAgents.map((a) => a.id),
-        reason: "engaged_agents_effect",
-      });
-    });
-  }, [activeSessionId, sheetTeamId, engagedAgents]);
   const [imageFiles, setImageFiles] = React.useState<File[]>([]);
   const [isRestoringArchived, setIsRestoringArchived] = React.useState(false);
   const isRestoringArchivedRef = React.useRef(false);
@@ -718,7 +706,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       // engagedAgent is per-session now; no need to clear here — the
       // selector returns null for null sessionId automatically.
     }
-    lastBootedAgentsRef.current = "";
   }, [activeSessionId]);
 
   React.useEffect(() => {
@@ -1430,6 +1417,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             messageId,
           });
 
+          bumpSessionListLastMessage(sid, outgoing, { at: new Date().toISOString() });
+
           const noticeText = buildPostSendSessionNotice(engagedUiEntries, t);
           if (noticeText) {
             useSessionNoticeStore.getState().append(sid, noticeText);
@@ -1491,6 +1480,13 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         }
         useUIStore.getState().clearActorDraft();
         await createSessionAndSendFirst(message, picks);
+        return;
+      }
+      if (localDaemonAgent) {
+        await createSessionAndSendFirst(message, {
+          agents: [{ id: localDaemonAgent.id, displayName: localDaemonAgent.displayName }],
+          members: [],
+        });
         return;
       }
       useUIStore.getState().openNewSessionDialog(message.text ?? null);
@@ -1647,7 +1643,6 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       // Fire-and-forget runtime spawn — UI has already moved into the
       // session; status dots update via RuntimeInfo subscriptions.
       if (picks.agents.length > 0) {
-        lastBootedAgentsRef.current = agentIds.slice().sort().join(",");
         sessionFlowLog("session_create.runtime_start.begin", {
           teamId: teamIdForSend,
           sessionId,
@@ -1673,14 +1668,75 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     }
   };
 
-  const handleSuggestionClick = React.useCallback(
-    (suggestion: string) => {
-      // Keep all quick suggestions visually consistent with slash skill selection.
-      setInputValue(`/{${suggestion}} `);
-    },
-    [setInputValue],
-  );
+  const handleStartLocalAgentSession = React.useCallback(async () => {
+    if (welcomeSessionStarting || !localDaemonAgent) return;
+    setWelcomeSessionStarting(true);
+    try {
+      const result = await createQuickDaemonSession();
+      if (!result) {
+        toast.error(t('chat.quickSessionCreateError', '无法与本机 Agent 开始会话'));
+      }
+    } catch (e) {
+      console.error('[ChatPanel] local agent welcome start failed', e);
+      toast.error(t('chat.quickSessionCreateError', '无法与本机 Agent 开始会话'));
+    } finally {
+      setWelcomeSessionStarting(false);
+    }
+  }, [localDaemonAgent, t, welcomeSessionStarting]);
 
+  const handleLocalAgentQuickAction = React.useCallback(async (messageText: string) => {
+    if (welcomeSessionStarting || !localDaemonAgent) return;
+    setWelcomeSessionStarting(true);
+    try {
+      await createSessionAndSendFirst(
+        { text: messageText, mentions: [] },
+        {
+          agents: [{ id: localDaemonAgent.id, displayName: localDaemonAgent.displayName }],
+          members: [],
+        },
+      );
+    } finally {
+      setWelcomeSessionStarting(false);
+    }
+  }, [localDaemonAgent, welcomeSessionStarting]);
+
+  const handleStartDraftSession = React.useCallback(async () => {
+    if (welcomeSessionStarting || !draftPreselectedActor) return;
+    setWelcomeSessionStarting(true);
+    try {
+      const actor = draftPreselectedActor;
+      const created = await createQuickEmptySession({
+        additionalActorIds: [actor.id],
+        titleName: actor.displayName,
+        engagedAgent:
+          actor.kind === 'agent'
+            ? { id: actor.id, displayName: actor.displayName }
+            : null,
+        agentActorIdsForRuntime: actor.kind === 'agent' ? [actor.id] : [],
+        runtimeReason: 'actor_draft_start',
+      });
+      if (!created) {
+        toast.error(t('chat.newSessionPicker.createError', 'Failed to create session'));
+        return;
+      }
+      try {
+        localStorage.removeItem(`teamclaw-actor-draft:${actor.id}`);
+      } catch {
+        /* localStorage disabled */
+      }
+    } catch (e) {
+      console.error('[ChatPanel] actor draft start failed', e);
+      toast.error(t('chat.newSessionPicker.createError', 'Failed to create session'));
+    } finally {
+      setWelcomeSessionStarting(false);
+    }
+  }, [draftPreselectedActor, t, welcomeSessionStarting]);
+
+  const handleOpenAgentSettings = React.useCallback(() => {
+    useUIStore.getState().openSettings('daemonGeneral');
+  }, []);
+
+  // ── Empty state ───────────────────────────────────────────────────────
   const handleCloseArchivedSession = React.useCallback(() => {
     closeArchivedSession();
     setViewingChildSession?.(null);
@@ -1698,14 +1754,23 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     }
   }, [restoreSession, viewingArchivedSessionId]);
 
-  // ── Empty state with suggestions ──────────────────────────────────────
-  // Two variants:
-  //   1. Actor-draft: user tapped an actor row, so the implicit recipient
-  //      is known. Show the actor's name as the heading and skip the
-  //      generic suggestions.
-  //   2. Generic: show "Start a New Chat" + suggestions; first message
-  //      redirects into the NewSessionDialog (with the text pre-filled).
+  const handlePrefillComposer = React.useCallback((text: string) => {
+    setInputValue(text);
+    useUIStore.getState().requestComposerFocus();
+  }, [setInputValue]);
+
   const emptyState = React.useMemo(() => {
+    if (activeSessionId) {
+      if (compact) {
+        return null;
+      }
+      return (
+        <SessionEmptyThreadState
+          sessionId={activeSessionId}
+          onPrefillComposer={handlePrefillComposer}
+        />
+      );
+    }
     if (draftPreselectedActor) {
       return (
         <div
@@ -1729,9 +1794,21 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             )}
           >
             {draftPreselectedActor.kind === 'agent'
-              ? t('chat.draftWithAgentHint', 'Send a message to start a session with this agent')
-              : t('chat.draftWithMemberHint', 'Send a message to start a session with this member')}
+              ? t('chat.draftWithAgentHint', '点击下方开始与该 Agent 的新会话')
+              : t('chat.draftWithMemberHint', '点击下方开始与该成员的新会话')}
           </p>
+          <Button
+            type="button"
+            size="sm"
+            className="mt-4 bg-coral text-white hover:bg-coral/90"
+            disabled={welcomeSessionStarting}
+            onClick={() => void handleStartDraftSession()}
+          >
+            {welcomeSessionStarting ? (
+              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+            ) : null}
+            {t('chat.draftStartConversation', '开始对话')}
+          </Button>
           <SessionContinueBanner
             actorId={draftPreselectedActor.id}
             actorName={draftPreselectedActor.displayName}
@@ -1739,45 +1816,47 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
         </div>
       );
     }
+    if (!compact) {
+      return (
+        <LocalAgentWelcomeEmptyState
+          agent={localDaemonAgent}
+          agentLoading={localDaemonAgentLoading}
+          starting={welcomeSessionStarting}
+          onStartConversation={() => void handleStartLocalAgentSession()}
+          onQuickAction={(message) => void handleLocalAgentQuickAction(message)}
+          onOpenAgentSettings={handleOpenAgentSettings}
+        />
+      );
+    }
     return (
       <div
         className={cn(
           "flex flex-col items-center justify-center text-center",
-          compact ? "py-8 px-2" : "py-20",
+          "py-8 px-2",
         )}
       >
-        <h2
-          className={cn(
-            "mb-1 font-semibold",
-            compact ? "text-sm" : "text-xl",
-          )}
-        >
-          {compact ? t("chat.agent", "Agent") : t("chat.startNewChat", "Start a New Chat")}
+        <h2 className="mb-1 text-sm font-semibold">
+          {localDaemonAgent?.displayName ?? t("chat.agent", "Agent")}
         </h2>
-        <p
-          className={cn(
-            "text-muted-foreground",
-            compact ? "text-xs mb-2" : "text-sm mb-6",
-          )}
-        >
-          {compact
-            ? t("chat.askAboutFile", "Ask questions about the file")
-            : t("chat.askAnything", "Ask me anything, or choose a suggestion below")}
+        <p className="text-xs text-muted-foreground">
+          {t("chat.askAboutFile", "Ask questions about the file")}
         </p>
-        {!compact && (
-          <Suggestions>
-            {suggestions.map((suggestion) => (
-              <Suggestion
-                key={suggestion}
-                suggestion={suggestion}
-                onClick={() => handleSuggestionClick(suggestion)}
-              />
-            ))}
-          </Suggestions>
-        )}
       </div>
     );
-  }, [compact, t, suggestions, handleSuggestionClick, draftPreselectedActor]);
+  }, [
+    compact,
+    t,
+    draftPreselectedActor,
+    localDaemonAgent,
+    localDaemonAgentLoading,
+    welcomeSessionStarting,
+    handleStartDraftSession,
+    handleStartLocalAgentSession,
+    handleLocalAgentQuickAction,
+    handleOpenAgentSettings,
+    activeSessionId,
+    handlePrefillComposer,
+  ]);
 
   const visibleSessionError =
     sessionError?.sessionId && sessionError.sessionId === displaySessionId
@@ -1990,7 +2069,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             {t("chat.restoreArchivedHint", "Restore this session to continue chatting")}
           </div>
         </div>
-      ) : !isViewingChild && (
+      ) : !isViewingChild && activeSessionId && (
         activeInputQuestion ? (
           <QuestionInputDock
             compact={compact}

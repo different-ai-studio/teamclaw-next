@@ -130,6 +130,12 @@ interface State {
   loadMore: (limit?: number) => Promise<void>;
   upsertRows: (rows: SessionListEntry[]) => void;
   patchRow: (sessionId: string, patch: Partial<SessionListEntry>) => void;
+  /** Patch preview fields and re-sort by last_message_at. */
+  bumpLastMessage: (
+    sessionId: string,
+    patch: Pick<SessionListEntry, "last_message_preview" | "last_message_at"> &
+      Partial<Pick<SessionListEntry, "has_unread">>,
+  ) => void;
   removeRow: (sessionId: string) => void;
   markSessionViewed: (sessionId: string, lastReadMessageId?: string | null) => Promise<void>;
   initPinnedSessionIds: (workspacePath?: string | null) => void;
@@ -286,6 +292,14 @@ export const useSessionListStore = create<State>((set, get) => ({
       row.id === sessionId ? { ...row, ...patch } : row,
     ),
   })),
+  bumpLastMessage: (sessionId, patch) =>
+    set((state) => ({
+      rows: sortEntries(
+        state.rows.map((row) =>
+          row.id === sessionId ? { ...row, ...patch } : row,
+        ),
+      ),
+    })),
   removeRow: (sessionId) => set((state) => ({
     rows: state.rows.filter((row) => row.id !== sessionId),
   })),

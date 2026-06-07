@@ -126,6 +126,76 @@
     "newChatMoreOptions": "更多新建选项",
     "newMultiPersonSession": "多人会话",
     "quickSessionCreateError": "无法与本机 Agent 开始会话",
+    "localAgentWelcome": {
+      "fallbackName": "本机 Agent",
+      "metaLoading": "本机 · 检测中…",
+      "metaOnline": "本机 · 在线 · 等待开始",
+      "metaOffline": "本机 · 离线 · 暂不可对话",
+      "divider": "本机 Agent · 待命",
+      "statusLineOnline": "在线 · 本机",
+      "statusLineOffline": "离线 · 本机",
+      "statusLineLoading": "检测中…",
+      "bodyReady": "本机 Agent 已就绪，随时可以开始对话。",
+      "quickStart": "快速开始",
+      "headlineSuffix": "在本机等你开口",
+      "headlineOffline": "本机 Agent 暂不可用",
+      "statusSubOnline": "● online · local · ai",
+      "statusSubOffline": "● offline · local",
+      "statusSubLoading": "● checking…",
+      "continueShort": "继续 ×{{count}}",
+      "bodyOffline": "完成 Agent 配置或启动 daemon 后即可在本机对话。",
+      "startConversation": "开始对话",
+      "quickActionsShort": {
+        "workspace": "workspace",
+        "structure": "结构",
+        "report": "报告"
+      },
+      "quickActions": {
+        "workspaceChanges": "查看 workspace 改动",
+        "projectStructure": "总结项目结构",
+        "writeReport": "写一份报告"
+      },
+      "quickMessages": {
+        "workspaceChanges": "帮我看看当前 workspace 有什么改动",
+        "projectStructure": "总结一下这个项目的技术栈",
+        "writeReport": "/{写报告} "
+      }
+    },
+    "sessionEmptyThread": {
+      "dayDivider": "新会话 · 从一条消息开始",
+      "selfLabel": "你",
+      "nameSeparator": "、",
+      "participantCount_one": "{{count}} 位参与者 · 等待第一条消息",
+      "participantCount_other": "{{count}} 位参与者 · 等待第一条消息",
+      "invite": "邀请",
+      "routingSoloAgent": "仅一位 Agent 在场——直接发送即可，无需 @。",
+      "routingSingleAgent": "向全员发送，或 @{{name}} 指定该 Agent 回复。",
+      "routingMultiAgent": "多位 Agent 在场——请 @名字 指定回复对象。",
+      "quickStart": "快速开始",
+      "starters": {
+        "workspaceChanges": {
+          "label": "查看 workspace 改动",
+          "message": "帮我看看当前 workspace 有什么未提交的改动"
+        },
+        "projectStructure": {
+          "label": "总结项目结构",
+          "message": "用几句话总结这个 repo 的结构"
+        },
+        "askAgentSummary": {
+          "label": "@{{name}} 总结现状",
+          "message": "@{{name}} 用几句话总结当前项目状态"
+        },
+        "askMember": {
+          "label": "@{{name}} 你怎么看？",
+          "message": "@{{name}} 对这个方向有什么想法？"
+        },
+        "broadcast": {
+          "label": "向所有人同步",
+          "message": "各位，对齐一下今天的目标："
+        }
+      }
+    },
+    "draftStartConversation": "开始对话",
     "backToActiveSession": "返回活跃会话",
     "archivedSession": "归档会话",
     "restoreSession": "恢复",
@@ -303,8 +373,8 @@
     "messageCountShort_plural": "{{count}} 条消息",
     "draftContinueBanner": "与 {{name}} 还有 {{count}} 个进行中",
     "draftContinueRecent": "最近会话",
-    "draftWithAgentHint": "发送消息以与该 Agent 开始会话",
-    "draftWithMemberHint": "发送消息以与该成员开始会话",
+    "draftWithAgentHint": "点击下方开始与该 Agent 的新会话",
+    "draftWithMemberHint": "点击下方开始与该成员的新会话",
     "untitledSession": "(未命名)",
     "agentSelector": {
       "noModels": "暂无可用模型",

@@ -194,7 +194,8 @@ export function createLoaderActions(set: SessionSet, get: SessionGet) {
     },
 
     archiveSession: async (id: string) => {
-      const wasActiveSession = get().activeSessionId === id;
+      const wasActiveSession =
+        useSessionSelectionStore.getState().activeSessionId === id;
       try {
         await useSessionListStore.getState().archiveSession(id);
         sessionDataCache.delete(id);

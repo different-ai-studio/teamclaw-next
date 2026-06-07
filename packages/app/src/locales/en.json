@@ -126,6 +126,76 @@
     "newChatMoreOptions": "More new chat options",
     "newMultiPersonSession": "Group Session",
     "quickSessionCreateError": "Could not start a session with your local agent",
+    "localAgentWelcome": {
+      "fallbackName": "Local agent",
+      "metaLoading": "Local · Checking…",
+      "metaOnline": "Local · Online · Ready to start",
+      "metaOffline": "Local · Offline · Unavailable",
+      "divider": "Local agent · Standby",
+      "statusLineOnline": "Online · Local",
+      "statusLineOffline": "Offline · Local",
+      "statusLineLoading": "Checking…",
+      "bodyReady": "Your local agent is ready. Start a conversation anytime.",
+      "quickStart": "Quick start",
+      "headlineSuffix": "is waiting on this device",
+      "headlineOffline": "Local agent unavailable",
+      "statusSubOnline": "● online · local · ai",
+      "statusSubOffline": "● offline · local",
+      "statusSubLoading": "● checking…",
+      "continueShort": "resume ×{{count}}",
+      "bodyOffline": "Finish agent setup or start the daemon to chat on this device.",
+      "startConversation": "Start conversation",
+      "quickActionsShort": {
+        "workspace": "workspace",
+        "structure": "structure",
+        "report": "report"
+      },
+      "quickActions": {
+        "workspaceChanges": "Review workspace changes",
+        "projectStructure": "Summarize project structure",
+        "writeReport": "Write a report"
+      },
+      "quickMessages": {
+        "workspaceChanges": "What changed in the current workspace?",
+        "projectStructure": "Summarize this project's tech stack",
+        "writeReport": "/{Write a report} "
+      }
+    },
+    "sessionEmptyThread": {
+      "dayDivider": "New session · Start with a message",
+      "selfLabel": "You",
+      "nameSeparator": ", ",
+      "participantCount_one": "{{count}} participant · Waiting for the first message",
+      "participantCount_other": "{{count}} participants · Waiting for the first message",
+      "invite": "Invite",
+      "routingSoloAgent": "Only one agent in this session — send directly, no @ needed.",
+      "routingSingleAgent": "Message everyone, or @{{name}} to reach that agent.",
+      "routingMultiAgent": "Multiple agents — @ a name to choose who replies.",
+      "quickStart": "Quick start",
+      "starters": {
+        "workspaceChanges": {
+          "label": "Review workspace changes",
+          "message": "What uncommitted changes are in the current workspace?"
+        },
+        "projectStructure": {
+          "label": "Summarize project structure",
+          "message": "Summarize this repo in a few sentences."
+        },
+        "askAgentSummary": {
+          "label": "@{{name}} Summarize status",
+          "message": "@{{name}} Summarize the current project status in a few sentences."
+        },
+        "askMember": {
+          "label": "@{{name}} Your thoughts?",
+          "message": "@{{name}} What do you think about this direction?"
+        },
+        "broadcast": {
+          "label": "Sync with everyone",
+          "message": "Everyone — let's align on today's goals:"
+        }
+      }
+    },
+    "draftStartConversation": "Start conversation",
     "backToActiveSession": "Back to active session",
     "archivedSession": "Archived session",
     "restoreSession": "Restore",
@@ -303,8 +373,8 @@
     "messageCountShort_plural": "{{count}} msgs",
     "draftContinueBanner": "{{count}} session in progress with {{name}}",
     "draftContinueRecent": "Recent sessions",
-    "draftWithAgentHint": "Send a message to start a session with this agent",
-    "draftWithMemberHint": "Send a message to start a session with this member",
+    "draftWithAgentHint": "Tap below to start a new session with this agent",
+    "draftWithMemberHint": "Tap below to start a new session with this member",
     "untitledSession": "(Untitled)",
     "agentSelector": {
       "noModels": "No models advertised",

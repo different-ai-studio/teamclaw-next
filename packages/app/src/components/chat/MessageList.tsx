@@ -436,6 +436,9 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
       scrollToBottom();
     };
 
+    const showCenteredEmpty =
+      messages.length === 0 && !isLoading && emptyState !== null;
+
     // ── Render ───────────────────────────────────────────────────────────
 
     return (
@@ -445,13 +448,15 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
           ref={scrollRef}
           data-chat-messages
           data-testid="v2-message-list"
-          className="flex-1 overflow-y-auto overflow-x-hidden"
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"
         >
           <div
             ref={messageAreaRef}
             className={cn(
               "w-full",
               compact ? "px-2 py-4" : "mx-auto px-4 py-6 max-w-3xl",
+              showCenteredEmpty &&
+                "flex flex-1 flex-col justify-center",
             )}
             style={{ paddingBottom: `${inputAreaHeight + SAFE_BOTTOM_SPACING}px` }}
           >
@@ -470,7 +475,9 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
                 />
               </div>
             ) : messages.length === 0 ? (
-              emptyState ?? (
+              emptyState === null ? null : (
+              <div className={cn("w-full", !compact && "mx-auto max-w-xl")}>
+              {emptyState ?? (
                 <div
                   className={cn(
                     "flex flex-col items-center justify-center text-center",
@@ -501,6 +508,8 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
                         )}
                   </p>
                 </div>
+              )}
+              </div>
               )
             ) : (
               <div className="space-y-1">
