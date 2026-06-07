@@ -7,6 +7,17 @@ public extension Notification.Name {
     static let amuxAuthCallbackReceived = Notification.Name("amuxAuthCallbackReceived")
 }
 
+public enum InviteDeepLink {
+    /// UserDefaults key under which a cold-launch invite deeplink token is
+    /// stashed. At cold launch the `amuxInviteTokenReceived` NotificationCenter
+    /// listener (RootTabView.onReceive) is not mounted yet — the app is still on
+    /// the `.loading` route running bootstrap — so a posted notification is
+    /// dropped. Persisting the token lets `AppOnboardingCoordinator.bootstrap`
+    /// claim the invite BEFORE its auto-create-team branch, instead of stranding
+    /// the user in a freshly auto-created throwaway team.
+    public static let pendingTokenDefaultsKey = "teamclaw.pendingInviteToken"
+}
+
 @Observable
 @MainActor
 public final class ActorStore {

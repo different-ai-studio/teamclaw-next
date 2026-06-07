@@ -404,6 +404,20 @@ public final class AppOnboardingCoordinator {
             pendingCreatedTeam = nil
             var preferred = preferringTeamID
 
+            // Hydrate a cold-launch invite deeplink token. AMUXApp.handle(url)
+            // stashes it in UserDefaults because at cold launch the
+            // NotificationCenter listener isn't mounted yet (route is still
+            // .loading). Pull it into pendingInviteToken so the claim block below
+            // runs BEFORE the auto-create branch — otherwise we'd strand the user
+            // in a throwaway team next to the one the invite actually targets.
+            // Read-and-remove so it is consumed exactly once.
+            if let stashed = defaults.string(forKey: InviteDeepLink.pendingTokenDefaultsKey) {
+                defaults.removeObject(forKey: InviteDeepLink.pendingTokenDefaultsKey)
+                if (pendingInviteToken?.isEmpty ?? true) && !stashed.isEmpty {
+                    pendingInviteToken = stashed
+                }
+            }
+
             // If a pending invite token is sitting on the coordinator (the
             // user pasted it in ChooseAuthView before sign-in), claim it
             // now — BEFORE the anonymous auto-create branch — so we never

@@ -232,6 +232,36 @@ struct AppOnboardingCoordinatorTests {
         #expect(coordinator.currentContext == nil)
         #expect(await store.recordedSignOutCallCount() == 1)
     }
+
+    @MainActor
+    @Test("cold-launch invite deeplink token claims instead of auto-creating a team")
+    func coldLaunchDeeplinkTokenClaimsBeforeAutoCreate() async throws {
+        // Regression: opening amux://invite?token=… on a fresh anonymous iOS
+        // device used to auto-create a throwaway team because the deeplink token
+        // (delivered via NotificationCenter to a not-yet-mounted listener) never
+        // reached bootstrap's claim-before-auto-create check. AMUXApp.handle(url)
+        // now stashes the token in UserDefaults; bootstrap must pick it up.
+        let teamY = TeamSummary(id: "team-y", name: "Y", slug: "y", role: "member")
+        let claim = ClaimResult(actorID: "actor-y", teamID: "team-y",
+                                actorType: "human", displayName: "Me", refreshToken: nil)
+        let store = InMemoryOnboardingStore(
+            bootstrap: AppBootstrap(memberActorID: nil, teams: []),   // anonymous, no team
+            isAnonymous: true,
+            claimResult: claim,
+            bootstrapAfterClaim: AppBootstrap(memberActorID: "m", teams: [teamY])
+        )
+        let defaults = ephemeralDefaults()
+        defaults.set("tok", forKey: InviteDeepLink.pendingTokenDefaultsKey)
+        let coordinator = AppOnboardingCoordinator(store: store, defaults: defaults)
+
+        await coordinator.bootstrap()
+
+        #expect(coordinator.route == .ready)
+        #expect(coordinator.currentContext?.team.id == "team-y")        // joined the invited team
+        #expect(await store.recordedCreatedTeamNames().isEmpty)         // did NOT auto-create a junk team
+        // Token consumed exactly once — must not replay on the next launch.
+        #expect(defaults.string(forKey: InviteDeepLink.pendingTokenDefaultsKey) == nil)
+    }
 }
 
 private actor InMemoryOnboardingStore: AppOnboardingStore {
