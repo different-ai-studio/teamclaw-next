@@ -22,9 +22,11 @@ const ERROR_HTML: &str =
      <body style=\"font-family:system-ui;text-align:center;padding-top:18vh\">\
      <h2>登录失败 / Sign-in failed</h2><p>请返回 TeamClaw 重试。<br>Please return to TeamClaw and try again.</p></body>";
 
+type Pending = (oneshot::Receiver<Result<String, String>>, tokio::task::AbortHandle);
+
 #[derive(Default)]
 pub struct OAuthLoopbackState {
-    pending: Mutex<Option<oneshot::Receiver<Result<String, String>>>>,
+    pending: Mutex<Option<Pending>>,
 }
 
 #[derive(serde::Serialize)]
@@ -49,10 +51,14 @@ pub async fn oauth_loopback_start(
         .map_err(|e| format!("oauth_addr_failed: {e}"))?
         .port();
     let (tx, rx) = oneshot::channel::<Result<String, String>>();
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         let _ = tx.send(accept_one(listener).await);
     });
-    *state.pending.lock().unwrap() = Some(rx);
+    // Replace any in-flight listener (e.g. a prior cancelled attempt) and abort
+    // its task so we don't leak a parked accept() / bound port across retries.
+    if let Some((_, prev)) = state.pending.lock().unwrap().replace((rx, handle.abort_handle())) {
+        prev.abort();
+    }
     Ok(LoopbackStart { port })
 }
 
@@ -60,7 +66,7 @@ pub async fn oauth_loopback_start(
 pub async fn oauth_loopback_await(
     state: State<'_, OAuthLoopbackState>,
 ) -> Result<LoopbackCode, String> {
-    let rx = {
+    let (rx, abort) = {
         // Drop the guard before awaiting — never hold a std Mutex across .await.
         state
             .pending
@@ -70,7 +76,11 @@ pub async fn oauth_loopback_await(
             .ok_or_else(|| "oauth_no_pending".to_string())?
     };
     match tokio::time::timeout(Duration::from_secs(300), rx).await {
-        Err(_) => Err("oauth_timeout".to_string()),
+        Err(_) => {
+            // Timed out — abort the parked accept() task so the port is freed.
+            abort.abort();
+            Err("oauth_timeout".to_string())
+        }
         Ok(Err(_)) => Err("oauth_cancelled".to_string()),
         Ok(Ok(Err(e))) => Err(e),
         Ok(Ok(Ok(code))) => Ok(LoopbackCode { code }),
