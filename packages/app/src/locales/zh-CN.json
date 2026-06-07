@@ -2636,6 +2636,8 @@
       "agentType": "Agent 类型",
       "supportedAgentTypes": "支持的类型",
       "defaultWorkspace": "默认工作区",
+      "email": "邮箱",
+      "phone": "手机号",
       "joined": "加入时间",
       "lastActiveLabel": "最近活跃",
       "never": "从未",
@@ -2654,7 +2656,14 @@
     "copiedId": "已复制 ID",
     "copyFailed": "复制失败",
     "removed": "已从团队移除",
-    "removeFailed": "移除失败: {{msg}}"
+    "removeFailed": "移除失败: {{msg}}",
+    "reinvite": {
+      "title": "重新邀请",
+      "agentHint": "如果 daemon 已被清空、需要重新配对，请使用此功能。",
+      "memberHint": "如果该用户已退出登录并失去访问权限，请使用此功能。仅适用于匿名账户。",
+      "agentButton": "重新生成邀请链接",
+      "memberButton": "生成重新邀请链接"
+    }
   },
   "ideas": {
     "allTitle": "想法",

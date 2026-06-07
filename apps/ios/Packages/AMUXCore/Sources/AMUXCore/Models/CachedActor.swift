@@ -21,6 +21,10 @@ public final class CachedActor {
     public var agentStatus: String?
     public var defaultWorkspaceId: String?
 
+    // Member contact — nil for agents and anonymous members.
+    public var email: String?
+    public var phone: String?
+
     public init(
         actorId: String, teamId: String, actorType: String,
         userId: String? = nil, invitedByActorId: String? = nil,
@@ -28,7 +32,8 @@ public final class CachedActor {
         createdAt: Date = .now, updatedAt: Date = .now,
         memberStatus: String? = nil, teamRole: String? = nil,
         agentTypes: [String] = [], agentKind: String? = nil, defaultAgentType: String? = nil,
-        agentStatus: String? = nil, defaultWorkspaceId: String? = nil
+        agentStatus: String? = nil, defaultWorkspaceId: String? = nil,
+        email: String? = nil, phone: String? = nil
     ) {
         self.actorId = actorId; self.teamId = teamId; self.actorType = actorType
         self.userId = userId; self.invitedByActorId = invitedByActorId
@@ -37,6 +42,7 @@ public final class CachedActor {
         self.memberStatus = memberStatus; self.teamRole = teamRole
         self.agentTypes = agentTypes; self.agentKind = agentKind; self.defaultAgentType = defaultAgentType
         self.agentStatus = agentStatus; self.defaultWorkspaceId = defaultWorkspaceId
+        self.email = email; self.phone = phone
     }
 
     public var isMember: Bool { actorType == "member" }

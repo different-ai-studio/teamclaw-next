@@ -518,6 +518,14 @@ struct ActorDetailView: View {
                     if actor.isMember {
                         LabeledContent("Role",   value: actor.roleLabel)
                         LabeledContent("Status", value: actor.memberStatus?.capitalized ?? "—")
+                        if let email = actor.email, !email.isEmpty {
+                            LabeledContent("Email", value: email)
+                                .textSelection(.enabled)
+                        }
+                        if let phone = actor.phone, !phone.isEmpty {
+                            LabeledContent("Phone", value: phone)
+                                .textSelection(.enabled)
+                        }
                     } else {
                         LabeledContent("Agent type", value: actor.defaultAgentType ?? actor.agentTypes.first ?? "—")
                         LabeledContent("Status",     value: actor.agentStatus?.capitalized ?? "—")

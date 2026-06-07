@@ -787,6 +787,8 @@ private struct CloudActor: Decodable, Sendable {
     let agentKind: String?
     let defaultAgentType: String?
     let defaultWorkspaceId: String?
+    let email: String?
+    let phone: String?
     let lastActiveAt: String?
     let createdAt: String?
     let updatedAt: String?
@@ -809,7 +811,9 @@ private struct CloudActor: Decodable, Sendable {
             agentKind: agentKind,
             defaultAgentType: defaultAgentType,
             agentStatus: agentStatus,
-            defaultWorkspaceID: defaultWorkspaceId
+            defaultWorkspaceID: defaultWorkspaceId,
+            email: email,
+            phone: phone
         )
     }
 }

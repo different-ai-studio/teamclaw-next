@@ -3834,6 +3834,21 @@ components:
             - string
             - "null"
           enum: [team, personal, null]
+        email:
+          description: >-
+            Member's account email. Null for agents/external and for anonymous
+            members. Only returned to fellow team members.
+          type:
+            - string
+            - "null"
+        phone:
+          description: >-
+            Member's account phone number. Null for agents/external and for
+            members who signed up without a phone. Only returned to fellow team
+            members.
+          type:
+            - string
+            - "null"
         metadata:
           type:
             - object

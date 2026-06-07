@@ -2028,7 +2028,7 @@ const SESSION_FULL_COLUMNS =
   "id, team_id, title, mode, idea_id, primary_agent_id, created_by_actor_id, summary, last_message_preview, last_message_at, acp_session_id, binding, created_at, updated_at";
 
 const ACTOR_DIRECTORY_COLUMNS =
-  "id, team_id, actor_type, user_id, invited_by_actor_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, agent_visibility, last_active_at, created_at, updated_at";
+  "id, team_id, actor_type, user_id, invited_by_actor_id, display_name, avatar_url, team_role, member_status, agent_status, agent_types, default_agent_type, default_workspace_id, agent_visibility, last_active_at, created_at, updated_at, user_email, user_phone";
 
 function mapSessionFull(row) {
   return {
@@ -2070,6 +2070,11 @@ function mapDirectoryActor(row) {
     lastActiveAt: row?.last_active_at ?? null,
     createdAt: row?.created_at ?? null,
     updatedAt: row?.updated_at ?? null,
+    // Member contact (null for agents/external and for anonymous accounts that
+    // never set an email/phone). Surfaced via the actor_directory view's
+    // SECURITY DEFINER contact join — only teammates ever receive these.
+    email: row?.user_email ?? null,
+    phone: row?.user_phone ?? null,
   };
 }
 
