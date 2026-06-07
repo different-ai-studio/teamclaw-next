@@ -296,6 +296,7 @@ pub fn run() {
         })
         .manage(commands::window_chrome::MainWindowState::default())
         .manage(commands::shared_secrets::SharedSecretsState::default())
+        .manage(commands::oauth_loopback::OAuthLoopbackState::default())
         .manage::<crate::mqtt::MqttBus>(std::sync::Arc::new(crate::mqtt::MqttBusInner::new()))
         .manage(std::sync::Arc::new(crate::terminal::Registry::new()))
         .invoke_handler(tauri::generate_handler![
@@ -337,6 +338,8 @@ pub fn run() {
             commands::mqtt_bus::mqtt_unsubscribe,
             commands::mqtt_bus::mqtt_publish,
             commands::mqtt_bus::mqtt_status,
+            commands::oauth_loopback::oauth_loopback_start,
+            commands::oauth_loopback::oauth_loopback_await,
             commands::server_config::get_server_config,
             commands::server_config::save_server_config,
             commands::filewatcher::watch_directory,
