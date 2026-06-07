@@ -392,9 +392,20 @@ public actor CloudAPIAppOnboardingStore: AppOnboardingStore {
 
     public func claimInvite(token: String) async throws -> ClaimResult {
         await ensureStarted()
-        let row: CloudClaimInviteResult = try await api.post(
+        // The claim endpoint works UNAUTHENTICATED for agent/member re-invites
+        // (the server returns a refresh token for the target user). Route it
+        // through AuthHTTP and attach the current bearer only when a session
+        // exists — fresh-member invites bind to auth.uid — but never REQUIRE
+        // one. Going through the authenticated `api` client instead would throw
+        // locally whenever there's no session (e.g. claimInviteSmart calls
+        // signOut() first to "try unauthenticated"), so the re-invite claim
+        // never reached the server and always fell back to the anon-then-claim
+        // path, which strands the user on a throwaway anonymous identity.
+        let bearer = try? await sessionStore.accessToken()
+        let row: CloudClaimInviteResult = try await auth.post(
             "/v1/invites/claim",
-            body: ClaimInviteRequest(token: token)
+            body: ClaimInviteRequest(token: token),
+            bearer: bearer
         )
         return ClaimResult(
             actorID: row.actorId,

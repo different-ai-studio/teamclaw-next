@@ -652,6 +652,10 @@ public final class AppOnboardingCoordinator {
         isBusy = true
         errorMessage = nil
 
+        // Claiming explicitly — drop any cold-launch deeplink stash so the
+        // bootstrap() call after a successful claim doesn't re-claim it.
+        defaults.removeObject(forKey: InviteDeepLink.pendingTokenDefaultsKey)
+
         do {
             try await store.signInAnonymously()
         } catch {
@@ -662,6 +666,13 @@ public final class AppOnboardingCoordinator {
 
         do {
             let result = try await store.claimInvite(token: token)
+            // Agent/member re-invites return a refresh token bound to the TARGET
+            // actor's user. Adopt it before bootstrapping — otherwise we stay
+            // signed in as the throwaway anonymous user we just created, find it
+            // has no team, and auto-create a junk team instead of joining.
+            if let rt = result.refreshToken, !rt.isEmpty {
+                try await store.setSession(refreshToken: rt)
+            }
             // Success → run bootstrap with the joined team preferred. The
             // transient `.loading` flicker here is fine because the sheet
             // is about to be dismissed by the caller anyway.
@@ -688,6 +699,12 @@ public final class AppOnboardingCoordinator {
         guard !isBusy else { return }
         isBusy = true
         errorMessage = nil
+
+        // We're claiming this token explicitly now, so drop any cold-launch
+        // deeplink stash for it — otherwise the bootstrap() call below would
+        // re-claim the (now consumed) token, fail, and sign out the session we
+        // just adopted.
+        defaults.removeObject(forKey: InviteDeepLink.pendingTokenDefaultsKey)
 
         // Make sure no stale session lingers — re-invite should land us on
         // the target's user_id, not whoever was signed in before.

@@ -293,6 +293,38 @@ struct AppOnboardingCoordinatorTests {
     }
 
     @MainActor
+    @Test("claimInviteSmart clears the deeplink stash so bootstrap does not double-claim and sign out")
+    func claimInviteSmartClearsStashNoDoubleClaim() async throws {
+        // Regression: a cold-launch deeplink stashes the token in UserDefaults.
+        // When the user then claims via the Continue-to-join sheet
+        // (claimInviteSmart), the claim succeeds and adopts the target session —
+        // but the trailing bootstrap() would re-read the stash, re-claim the now
+        // consumed token, fail "already consumed", and (being anonymous) SIGN OUT
+        // the good session, dumping the user back to Welcome. claimInviteSmart
+        // must clear the stash so bootstrap claims at most once.
+        let teamY = TeamSummary(id: "team-y", name: "Y", slug: "y", role: "admin")
+        let claim = ClaimResult(actorID: "actor-y", teamID: "team-y",
+                                actorType: "human", displayName: "Me", refreshToken: "rt-target")
+        let store = InMemoryOnboardingStore(
+            bootstrap: AppBootstrap(memberActorID: nil, teams: []),
+            isAnonymous: true,
+            claimResult: claim,
+            bootstrapAfterClaim: AppBootstrap(memberActorID: "actor-y", teams: [teamY])
+        )
+        let defaults = ephemeralDefaults()
+        defaults.set("tok", forKey: InviteDeepLink.pendingTokenDefaultsKey)
+        let coordinator = AppOnboardingCoordinator(store: store, defaults: defaults)
+
+        await coordinator.claimInviteSmart(token: "tok")
+
+        #expect(coordinator.route == .ready)
+        #expect(coordinator.currentContext?.team.id == "team-y")
+        #expect(await store.recordedClaimCallCount() == 1)   // claimed once, not twice
+        #expect(await store.recordedSignOutCallCount() == 1)  // only the intentional pre-claim signOut
+        #expect(defaults.string(forKey: InviteDeepLink.pendingTokenDefaultsKey) == nil)
+    }
+
+    @MainActor
     @Test("a deleted session user (invalid JWT) clears the session and routes to auth, not a Setup-Failed dead-end")
     func invalidSessionUserRecoversToAuth() async throws {
         // The stored anonymous user was deleted server-side, so an authenticated
@@ -452,7 +484,16 @@ private actor InMemoryOnboardingStore: AppOnboardingStore {
         // no-op
     }
 
+    var claimCallCount = 0
+    func recordedClaimCallCount() -> Int { claimCallCount }
+
     func claimInvite(token: String) async throws -> ClaimResult {
+        claimCallCount += 1
+        // A token can only be claimed once. A second claim of the same token
+        // (the double-claim bug) realistically fails "already consumed".
+        if claimCallCount > 1 {
+            throw CloudAPIError.requestFailed(status: 410, code: nil, message: "invite already consumed")
+        }
         if let claimError { throw claimError }
         if let claimResult {
             didClaim = true
