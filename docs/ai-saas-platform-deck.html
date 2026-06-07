@@ -298,29 +298,49 @@
   <!-- 2 PROBLEM -->
   <section class="slide" id="s-problem">
     <div class="slide-num fr">02</div>
-    <div class="slide-head" data-r="1">
-      <div class="kicker">为什么</div>
-      <h2>传统 SaaS 的天花板</h2>
+    <div class="slide-head" data-r="1" style="margin-bottom:1.3rem">
+      <div class="kicker">背景 · 为什么是现在</div>
+      <h2 style="max-width:26ch">LLM 已经强到,<em>普通人也能造出复杂的软件</em>。</h2>
+      <p class="lead" style="margin-top:.9rem">软件创造的门槛,正从「会编程」塌缩到「会表达」——这是过去三十年没有过的拐点。</p>
     </div>
     <div class="two">
       <div class="panel" data-r="2">
-        <h3>🧱 标准软件的困境</h3>
-        <p>一套标准功能,试图满足所有商家。结果是:<strong>大商家嫌不够、小商家嫌太重</strong>,定制要排期、要外包,演进缓慢且昂贵。每一种独特的经营方式,都被标准化磨平。</p>
+        <h3>🧱 传统 SaaS 的天花板</h3>
+        <p style="margin-bottom:.65rem"><strong>标准之困</strong>:一套标准软件试图满足所有商家——大商家嫌不够、小商家嫌太重,定制要排期、要外包,演进慢且贵,每种经营方式都被磨平。</p>
+        <p><strong>实施与支持之重</strong>:真正贵的是落地——员工不懂系统、人员不断流动,每换一拨人就得重新培训;要让软件一直被用起来,就得不停地支持和维护。</p>
       </div>
       <div class="panel coral" data-r="3">
-        <h3>✦ TeamClaw 的主张</h3>
-        <p>平台提供标准化的<strong>核心能力</strong>(客户/商品/销售/权限),再用 <em>AI 驱动的应用生成</em> 让每个商家基于自身场景<strong>自主创造、持续演进</strong>专属业务应用。</p>
+        <h3>✦ 我们的主张</h3>
+        <p>平台提供标准化的<strong>核心能力</strong>(客户/商品/销售/权限),再用 <em>AI 驱动的应用生成</em> 让每个商家基于自身场景<strong>自主创造、持续演进</strong>属于自己的经营系统。门槛交给 AI,创造力还给商家。</p>
       </div>
     </div>
-    <div class="lead" data-r="4" style="margin-top:1.8rem">
-      AI 负责<em>降低应用创造的门槛</em>,而不是限制应用创造的能力。<br>
-      每个商家都拥有创造、部署、持续演进自身业务应用的能力。
+    <div class="lead" data-r="4" style="margin-top:1.4rem;font-size:1rem">
+      可是 —— 把“人人都能造软件”直接丢进企业级的<em>数据、权限与集成</em>里,它真能自己长对吗?
     </div>
   </section>
 
-  <!-- 3 TWO-LAYER -->
-  <section class="slide" id="s-arch2">
+  <!-- 3 HARNESS -->
+  <section class="slide" id="s-harness">
     <div class="slide-num fr">03</div>
+    <div class="slide-head" data-r="1">
+      <div class="kicker">但是 · 企业级的复杂</div>
+      <h2>光有 LLM 不够,要有一套 <em>Harness</em></h2>
+    </div>
+    <p class="lead" data-r="2" style="margin-bottom:1.4rem">让“人人都能造软件”在企业里落地,难点不在写代码,而在<strong>写对、写安全、能集成、能演进</strong>。需要一套护栏与轨道,把 AI 的自由度收在“能跑且可靠”的范围内。</p>
+    <div class="dgrid">
+      <div class="dcard" data-r="3"><h4>🔒 数据与安全</h4><p>多租户隔离、权限 RLS、密钥不外泄——不能让每个人各自裸写,撞一次就是事故。</p></div>
+      <div class="dcard" data-r="4"><h4>🔗 与核心系统集成</h4><p>客户 / 商品 / 销售要有统一底座,各 app 共享同一份真相,而非数据各自为政。</p></div>
+      <div class="dcard" data-r="5"><h4>🚀 部署与可维护</h4><p>上线、回滚、监控、升级——商家不该碰运维,平台替它兜住。</p></div>
+      <div class="dcard" data-r="6"><h4>🛡 稳定的轨道</h4><p>模板 + SDK + 约束,让 AI 生成的应用天然正确、可集成、可演进。</p></div>
+    </div>
+    <div class="lead" data-r="7" style="margin-top:1.4rem">
+      这套 harness = <em>Core SaaS(稳定能力)+ 平台 batteries + codegen 护栏</em>。<strong>TeamClaw 就是这套 harness</strong> —— 下面讲它怎么搭。
+    </div>
+  </section>
+
+  <!-- 4 TWO-LAYER -->
+  <section class="slide" id="s-arch2">
+    <div class="slide-num fr">04</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">总体架构</div>
       <h2>Core SaaS + Customer App 双层</h2>
@@ -346,7 +366,7 @@
 
   <!-- 4 DECISIONS -->
   <section class="slide" id="s-decisions">
-    <div class="slide-num fr">04</div>
+    <div class="slide-num fr">05</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">已锁定</div>
       <h2>四个架构决策</h2>
@@ -361,7 +381,7 @@
 
   <!-- 4 ARCHITECTURE MAP -->
   <section class="slide" id="s-map" style="padding-top:clamp(1.6rem,3.5vw,3rem);padding-bottom:clamp(1.3rem,3vw,2.4rem)">
-    <div class="slide-num fr">05</div>
+    <div class="slide-num fr">06</div>
     <div class="slide-head" data-r="1" style="margin-bottom:1rem">
       <div class="kicker">架构全景 · 端 / 云 / Core / Customer</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.4rem)">一图看清四层关系</h2>
@@ -407,7 +427,7 @@
 
   <!-- 5 CUSTOMER FLOW -->
   <section class="slide" id="s-flow">
-    <div class="slide-num fr">06</div>
+    <div class="slide-num fr">07</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">用户旅程 · 商家如何造一个自己的 App</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.4rem)">从一句话到上线,六步</h2>
@@ -425,7 +445,7 @@
 
   <!-- 9 BATTERIES -->
   <section class="slide" id="s-batteries">
-    <div class="slide-num fr">07</div>
+    <div class="slide-num fr">08</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">护城河 · 平台 Batteries</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.3rem)">平台帮 Customer App 做完的基建</h2>
@@ -453,7 +473,7 @@
 
   <!-- 10 ROADMAP -->
   <section class="slide" id="s-road">
-    <div class="slide-num fr">08</div>
+    <div class="slide-num fr">09</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">路线图 · S0 → S7</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.3rem)">先造最薄纵切,再上 AI codegen</h2>
@@ -475,7 +495,7 @@
 
   <!-- 11 PRINCIPLES -->
   <section class="slide" id="s-principles">
-    <div class="slide-num fr">09</div>
+    <div class="slide-num fr">10</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">架构原则</div>
       <h2>六条不变量</h2>
@@ -507,7 +527,7 @@
 <div class="nav">
   <button class="arrow" id="prev" aria-label="上一页">‹</button>
   <div class="dots" id="dots"></div>
-  <span class="counter" id="counter">01 / 11</span>
+  <span class="counter" id="counter">01 / 12</span>
   <button class="arrow" id="next" aria-label="下一页">›</button>
 </div>
 <div class="hint">← → / 空格翻页 · ⌘P 导出 PDF</div>
