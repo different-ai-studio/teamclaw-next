@@ -57,11 +57,8 @@ struct CreateIdeaSheet: View {
     @Bindable var ideaStore: IdeaStore
     let onCreated: () -> Void
 
-    @Query(sort: \Workspace.displayName) private var workspaces: [Workspace]
-
     @State private var title = ""
     @State private var description = ""
-    @State private var workspaceID: String = ""
     @State private var isSaving = false
     @State private var imageAttachments: [URL] = []
     @State private var imageUploads: [String: AttachmentUpload] = [:]
@@ -78,11 +75,6 @@ struct CreateIdeaSheet: View {
             && !isSaving
             && !hasUploadingImageAttachments
             && !hasFailedImageAttachments
-    }
-
-    private var workspaceLabel: String {
-        if workspaceID.isEmpty { return "None" }
-        return workspaces.first(where: { $0.workspaceId == workspaceID })?.displayName ?? "—"
     }
 
     private var teamName: String {
@@ -113,7 +105,6 @@ struct CreateIdeaSheet: View {
                 VStack(spacing: 16) {
                     composerCard
                     imageSection
-                    workspaceSection
                     if let errorMessage = ideaStore.errorMessage {
                         Text(errorMessage)
                             .font(.footnote)
@@ -251,31 +242,6 @@ struct CreateIdeaSheet: View {
         .padding(.horizontal, 16)
     }
 
-    private var workspaceSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HaiSectionLabel("Workspace")
-            HaiPaperCard {
-                Menu {
-                    Button("None") { workspaceID = "" }
-                    if !workspaces.isEmpty {
-                        Divider()
-                        ForEach(workspaces, id: \.workspaceId) { ws in
-                            Button(ws.displayName) { workspaceID = ws.workspaceId }
-                        }
-                    }
-                } label: {
-                    HaiSheetRow(
-                        label: "Repository",
-                        value: workspaceLabel,
-                        valueIsMonospaced: !workspaceID.isEmpty,
-                        showsChevron: true
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
     private var footerCaption: some View {
         Text(.init(
             "Posted to **Team · \(teamName)**. Anyone can submit progress."
@@ -295,7 +261,7 @@ struct CreateIdeaSheet: View {
             let ok = await ideaStore.createIdea(
                 title: title,
                 description: description,
-                workspaceID: workspaceID
+                workspaceID: ""
             )
             if ok, !uploadedImageURLs.isEmpty {
                 let created = ideaStore.ideas.first { !knownIdeaIDs.contains($0.id) } ?? ideaStore.ideas.first
