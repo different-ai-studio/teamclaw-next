@@ -31,7 +31,8 @@
       "kook": true,
       "wecom": true,
       "wechat": true
-    }
+    },
+    "auth": { "google": false, "wechat": false }
   },
   "s3": {
     "teamEndpoint": "https://localhost",

@@ -37,6 +37,10 @@ export interface BuildConfig {
     teamMode: boolean
     updater: boolean
     channels: boolean | ChannelsFeatureConfig
+    auth?: {
+      google?: boolean
+      wechat?: boolean
+    }
   }
   s3?: {
     teamEndpoint: string
@@ -81,7 +85,7 @@ const fallback: BuildConfig = {
     lockLlmConfig: false,
   },
   app: { name: 'TeamClaw', shortName: 'teamclaw' },
-  features: { teamMode: true, updater: true, channels: { ...allChannelsEnabled } },
+  features: { teamMode: true, updater: true, channels: { ...allChannelsEnabled }, auth: { google: false, wechat: false } },
   defaults: { locale: 'zh-CN', theme: 'system' },
 }
 
