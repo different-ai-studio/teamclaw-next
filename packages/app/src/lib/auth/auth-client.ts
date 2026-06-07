@@ -21,6 +21,8 @@ export type AuthClient = {
   signOut(): Promise<void>;
   updateUser(attrs: Record<string, unknown>): Promise<{ user?: unknown } | null>;
   refresh(): Promise<Session>;
+  oauthAuthorizeUrl(provider: string, redirect: string, codeChallenge: string): string;
+  exchangeOAuthCode(code: string, codeVerifier: string): Promise<Session>;
 };
 
 function joinUrl(base: string, path: string): string {
@@ -167,6 +169,17 @@ export function createAuthClient(opts: AuthClientOptions): AuthClient {
           setSession({ ...cur, user: { ...cur.user, ...(data.user as Record<string, unknown>) } } as Session, "USER_UPDATED");
         }
       }
+      return data;
+    },
+    oauthAuthorizeUrl(provider, redirect, codeChallenge) {
+      const u = new URL(url(`/v1/auth/oauth/${encodeURIComponent(provider)}/authorize`));
+      u.searchParams.set("redirect", redirect);
+      u.searchParams.set("code_challenge", codeChallenge);
+      return u.toString();
+    },
+    async exchangeOAuthCode(code, codeVerifier): Promise<Session> {
+      const data = (await post("/v1/auth/oauth/exchange", { code, codeVerifier })) as Session;
+      setSession(data, "SIGNED_IN");
       return data;
     },
     refresh,

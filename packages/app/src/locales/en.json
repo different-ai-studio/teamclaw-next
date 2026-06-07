@@ -65,6 +65,9 @@
     "verifying": "Verifying…",
     "useDifferentEmail": "Use a different email",
     "serverConfigRequired": "Supabase is not configured. Go back and choose self-hosted server before signing in.",
+    "orContinueWith": "or continue with",
+    "signInWithGoogle": "Sign in with Google",
+    "signInWithWechat": "Sign in with WeChat",
     "upgrade": {
       "title": "Upgrade account",
       "desc": "Verify your email to upgrade your anonymous session.",

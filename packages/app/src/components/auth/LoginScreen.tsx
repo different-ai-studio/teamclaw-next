@@ -6,6 +6,46 @@ import { hasBackendConfig } from "@/lib/backend";
 import { useAppVersion } from "@/lib/version";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { isTauri } from "@/lib/utils";
+import { GoogleIcon, WechatIcon } from "./oauth-icons";
+import type { OAuthProvider } from "@/lib/auth";
+
+export function OAuthButtons() {
+  const { t } = useTranslation();
+  const { signInWithOAuth, loading } = useAuthStore();
+  const auth = buildConfig.features?.auth;
+  const showGoogle = isTauri() && Boolean(auth?.google);
+  const showWechat = isTauri() && Boolean(auth?.wechat);
+  if (!showGoogle && !showWechat) return null;
+
+  const Btn = ({ provider, icon, label }: { provider: OAuthProvider; icon: React.ReactNode; label: string }) => (
+    <button
+      type="button"
+      disabled={loading}
+      onClick={() => void signInWithOAuth(provider)}
+      className="flex h-10 w-full items-center justify-center gap-2 rounded-[8px] border border-border bg-paper text-[13px] font-medium text-foreground transition-colors hover:bg-selected/45 disabled:opacity-50"
+    >
+      {icon}
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-[11px] text-faint">
+        <span className="h-px flex-1 bg-border" />
+        {t("auth.orContinueWith", "or continue with")}
+        <span className="h-px flex-1 bg-border" />
+      </div>
+      {showWechat && (
+        <Btn provider="wechat" icon={<WechatIcon className="h-4 w-4" />} label={t("auth.signInWithWechat", "Sign in with WeChat")} />
+      )}
+      {showGoogle && (
+        <Btn provider="google" icon={<GoogleIcon className="h-4 w-4" />} label={t("auth.signInWithGoogle", "Sign in with Google")} />
+      )}
+    </div>
+  );
+}
 
 interface LoginScreenProps {
   embedded?: boolean;
@@ -176,6 +216,7 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
               ? t("auth.onboarding.startingTrial", "Preparing…")
               : t("auth.onboarding.quickTrial", "Try anonymously")}
           </button>
+          <OAuthButtons />
         </form>
       )}
 

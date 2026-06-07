@@ -65,6 +65,9 @@
     "verifying": "验证中…",
     "useDifferentEmail": "换一个邮箱",
     "serverConfigRequired": "Supabase 尚未配置。请返回并选择「使用自建 server」后再登录。",
+    "orContinueWith": "或使用以下方式",
+    "signInWithGoogle": "使用 Google 登录",
+    "signInWithWechat": "使用微信登录",
     "upgrade": {
       "title": "升级账号",
       "desc": "验证邮箱以升级匿名会话。",

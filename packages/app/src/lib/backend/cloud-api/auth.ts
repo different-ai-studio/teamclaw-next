@@ -7,8 +7,10 @@ import type { CloudApiClient } from "./http";
 import {
   createAuthClient,
   getSession as getStoreSession,
+  runDesktopOAuth,
   subscribe as subscribeStore,
   type AuthClient,
+  type OAuthProvider,
   type Session,
 } from "@/lib/auth";
 
@@ -53,6 +55,10 @@ export function createAuthModule(
     },
     async signInAnonymously(): Promise<AuthSession | null> {
       const next = await authClient.signInAnonymously();
+      return mapSession(next);
+    },
+    async signInWithOAuth(provider: OAuthProvider): Promise<AuthSession | null> {
+      const next = await runDesktopOAuth(authClient, provider);
       return mapSession(next);
     },
     async signOut(): Promise<void> {

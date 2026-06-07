@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { OAuthProvider } from "@/lib/auth";
 import {
   BACKEND_CONFIG_MISSING_MESSAGE,
   getBackend,
@@ -35,6 +36,7 @@ interface AuthState {
   verifyOtp: (code: string) => Promise<void>;
   resetOtp: () => void;
   signInAnonymously: () => Promise<boolean>;
+  signInWithOAuth: (provider: OAuthProvider) => Promise<boolean>;
   claimInvite: (token: string) => Promise<AuthClaimResult | null>;
   claimInviteAfterAnonymousSignIn: (token: string) => Promise<AuthClaimResult | null>;
   sendUpgradeEmailOtp: (email: string) => Promise<boolean>;
@@ -132,6 +134,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ loading: true, authFlow: "idle", errorMessage: null });
     try {
       const session = await getBackend().auth.signInAnonymously();
+      set({ session: storeSession(session), loading: false, otpEmail: null });
+    } catch (error) {
+      set({ loading: false, errorMessage: errorMessageFor(error) });
+      return false;
+    }
+    return true;
+  },
+  signInWithOAuth: async (provider) => {
+    if (!hasBackendConfig()) {
+      set({ loading: false, errorMessage: BACKEND_CONFIG_MISSING_MESSAGE });
+      return false;
+    }
+    set({ loading: true, authFlow: "idle", errorMessage: null });
+    try {
+      const session = await getBackend().auth.signInWithOAuth(provider);
       set({ session: storeSession(session), loading: false, otpEmail: null });
     } catch (error) {
       set({ loading: false, errorMessage: errorMessageFor(error) });

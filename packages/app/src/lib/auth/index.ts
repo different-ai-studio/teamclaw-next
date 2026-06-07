@@ -17,3 +17,5 @@ export {
   __resetSessionStoreForTests,
 } from "./session-store";
 export { createAuthClient, type AuthClient } from "./auth-client";
+export { runDesktopOAuth, type OAuthProvider } from "./desktop-oauth";
+export { generatePkce, type PkcePair } from "./oauth-pkce";
