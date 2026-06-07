@@ -214,16 +214,26 @@
   .sf-explain .close{font-family:"Noto Serif SC",serif;font-weight:600;color:#032D60;font-size:1.12rem;line-height:1.55;border-left:3px solid #1B96FF;padding-left:.9rem;margin-top:.3rem}
   .sf-src{font-family:"JetBrains Mono",monospace;font-size:.66rem;color:var(--ink-soft);opacity:.7;margin-top:1.1rem}
 
-  /* ---------- china dilemma (spectrum) ---------- */
-  .spectrum{position:relative;display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:.6rem 0 1.5rem;padding:0 .2rem}
-  .spectrum::before{content:"";position:absolute;left:2%;right:2%;top:50%;height:6px;transform:translateY(-50%);border-radius:99px;background:linear-gradient(90deg,var(--sage),var(--line-strong) 50%,var(--coral));opacity:.5}
-  .pole{position:relative;z-index:1;background:var(--paper);border:2px solid var(--line);border-radius:99px;padding:.55rem 1.2rem;font-family:"Noto Serif SC",serif;font-weight:700;font-size:1rem;color:var(--ink)}
-  .pole.l{border-color:var(--sage)}
-  .pole.r{border-color:var(--coral)}
-  .spectrum .mid{position:relative;z-index:1;background:var(--ink);color:var(--paper);border-radius:99px;padding:.45rem 1rem;font-size:.82rem;font-weight:500}
-  .concl{background:#F7E6DF;border:1px solid rgba(223,75,46,.3);border-radius:6px;padding:1.05rem 1.3rem;margin-top:1.3rem;display:grid;grid-template-columns:1fr 1fr;gap:1.4rem}
-  .concl div{font-size:.92rem;color:var(--ink-soft);font-weight:300;line-height:1.6}
-  .concl b{color:var(--coral-deep);font-weight:700;font-family:"Noto Serif SC",serif;display:block;margin-bottom:.25rem;font-size:.98rem}
+  /* ---------- china dilemma ---------- */
+  .china-stage{display:grid;grid-template-columns:1fr auto 1fr;gap:1.5rem;align-items:stretch;margin:.5rem 0 1.3rem}
+  .ext{border:1px solid var(--line);border-radius:12px;padding:1.5rem 1.6rem;display:flex;flex-direction:column;gap:.5rem;position:relative}
+  .ext.l{background:var(--paper-2);border-top:4px solid var(--sage)}
+  .ext.r{background:#F7E6DF;border-top:4px solid var(--coral)}
+  .ext .ico{width:48px;height:48px;color:var(--sage);margin-bottom:.2rem}
+  .ext.r .ico{color:var(--coral)}
+  .ext .et{font-family:"Noto Serif SC",serif;font-weight:900;font-size:1.6rem;color:var(--ink);line-height:1.05}
+  .ext .es{font-family:"JetBrains Mono",monospace;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft)}
+  .ext .fail{font-size:.97rem;color:var(--ink-soft);font-weight:300;line-height:1.6;margin-top:.35rem}
+  .ext .fail b{color:var(--ink);font-weight:700}
+  .china-vs{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.55rem;min-width:96px}
+  .china-vs .vsi{width:58px;height:58px;color:var(--coral);transform:rotate(-9deg)}
+  .china-vs .vt{font-family:"Noto Serif SC",serif;font-weight:700;font-size:.84rem;color:var(--ink);text-align:center;line-height:1.25}
+  .china-loss{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem}
+  .lossc{background:var(--ink);color:var(--paper);border-radius:12px;padding:1.25rem 1.6rem;display:flex;align-items:center;gap:1.2rem}
+  .lossc .big{font-family:"Fraunces",serif;font-weight:900;font-size:3.4rem;line-height:.8;color:var(--coral);flex-shrink:0}
+  .lossc .lt{font-family:"JetBrains Mono",monospace;font-size:.64rem;letter-spacing:.16em;text-transform:uppercase;color:rgba(244,239,228,.55);margin-bottom:.3rem}
+  .lossc .ld{font-family:"Noto Serif SC",serif;font-weight:900;font-size:1.25rem;line-height:1.25}
+  .lossc .ld small{display:block;font-family:"Noto Sans SC",sans-serif;font-weight:300;font-size:.78rem;color:rgba(244,239,228,.72);margin-top:.35rem;line-height:1.5}
 
   /* ---------- nav / chrome ---------- */
   .progress{position:fixed;top:0;left:0;height:3px;background:var(--coral);z-index:100;transition:width .4s ease}
@@ -311,26 +321,35 @@
     <div class="slide-num fr">02</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">困局 · 中国 SaaS</div>
-      <h2>标准化与定制化,<em>两头都不讨好</em></h2>
+      <h2>标准化 ⇄ 定制化,<em>一道解不开的两难</em></h2>
     </div>
-    <div class="spectrum" data-r="2">
-      <div class="pole l">完全标准化 · 不可定制</div>
-      <div class="mid">想平衡 → 平衡不了</div>
-      <div class="pole r">完全定制化 · 外包项目制</div>
-    </div>
-    <div class="two">
-      <div class="panel" data-r="3" style="border-top:3px solid var(--sage)">
-        <h3>← 一头:完全标准化</h3>
-        <p>一套产品不可定制,套不进真实业务流程。商家被迫<strong>削足适履</strong>,要么将就、要么干脆弃用——买了等于没买。</p>
+    <div class="china-stage">
+      <div class="ext l" data-r="2">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg>
+        <div class="et">完全标准化</div>
+        <div class="es">Rigid · 不可定制</div>
+        <div class="fail">套不进真实业务流程,商家被迫<b>削足适履</b>——要么将就、要么弃用,买了等于没买。</div>
       </div>
-      <div class="panel coral" data-r="4" style="border-top:3px solid var(--coral)">
-        <h3>另一头:完全定制化 →</h3>
-        <p>本质是<strong>外包 / 项目制</strong>:人月堆砌,贵、慢、难维护,做完一家的逻辑无法复用到下一家。每一单都重头来。</p>
+      <div class="china-vs" data-r="3">
+        <svg class="vsi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M7 21h10"/><path d="M12 6 5 8l2.6 4.5a3 3 0 0 1-5.2 0L5 8"/><path d="M12 6l7 2-2.6 4.5a3 3 0 0 0 5.2 0L19 8"/></svg>
+        <div class="vt">平衡点<br>不存在</div>
+      </div>
+      <div class="ext r" data-r="4">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.9 6.91a2.12 2.12 0 0 1-3-3l6.91-6.9a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+        <div class="et">完全定制化</div>
+        <div class="es">外包 · 项目制</div>
+        <div class="fail">本质是人月堆砌,<b>贵、慢、难维护</b>——做完一家的逻辑无法复用,每一单都重头来。</div>
       </div>
     </div>
-    <div class="concl" data-r="5">
-      <div><b>客户:付出 ≠ 得到</b>花了大钱,要么不合身,要么掉进填不完的定制坑;投入与价值长期不成正比。</div>
-      <div><b>SaaS 公司:难以盈利</b>标准化卖不上价、定制化不可规模化——两头都赚不到钱,陷在项目泥潭里长不大。</div>
+    <div class="china-loss">
+      <div class="lossc" data-r="5">
+        <div class="big">≠</div>
+        <div><div class="lt">客户</div><div class="ld">付出 ≠ 得到<small>花了大钱,要么不合身,要么掉进填不完的定制坑。</small></div></div>
+      </div>
+      <div class="lossc" data-r="6">
+        <div class="big">↘</div>
+        <div><div class="lt">SaaS 公司</div><div class="ld">两头都不赚钱<small>标准化卖不上价、定制化不可规模化,陷在项目泥潭。</small></div></div>
+      </div>
     </div>
   </section>
 
