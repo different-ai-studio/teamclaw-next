@@ -249,6 +249,18 @@
   .prodcard p{font-size:.85rem;color:var(--ink-soft);font-weight:300;line-height:1.55}
   .prodcard p b{color:var(--ink);font-weight:600}
 
+  /* ---------- finale (vision + team) ---------- */
+  .fin-h3{font-family:"Noto Serif SC",serif;font-weight:700;font-size:1.1rem;color:var(--ink);margin-bottom:.85rem;display:flex;align-items:center;gap:.5rem}
+  .fin-h3::before{content:"";width:8px;height:8px;border-radius:99px;background:var(--coral)}
+  .horizon{display:flex;gap:.85rem;margin-bottom:.75rem}
+  .horizon .ht{font-family:"JetBrains Mono",monospace;font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;color:var(--coral);font-weight:700;min-width:54px;padding-top:.2rem}
+  .horizon p{font-size:.86rem;color:var(--ink-soft);font-weight:300;line-height:1.55}
+  .horizon p b{color:var(--ink);font-weight:600}
+  .teamreq{list-style:none}
+  .teamreq li{font-size:.86rem;color:var(--ink-soft);font-weight:300;line-height:1.5;margin-bottom:.6rem;padding-left:1.35rem;position:relative}
+  .teamreq li::before{content:"→";position:absolute;left:0;color:var(--coral);font-weight:700}
+  .teamreq li b{color:var(--ink);font-weight:600}
+
   /* ---------- nav / chrome ---------- */
   .progress{position:fixed;top:0;left:0;height:3px;background:var(--coral);z-index:100;transition:width .4s ease}
   .nav{position:fixed;bottom:1.4rem;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:1rem;z-index:100;
@@ -617,12 +629,26 @@
   <!-- 12 END -->
   <section class="slide" id="s-end">
     <div class="bigmark" style="opacity:.05">★</div>
-    <div class="kicker" data-r="1" style="position:relative;z-index:1">下一步</div>
-    <h1 data-r="2" style="position:relative;z-index:1">把 <em>S4</em> spec 推进到 plan,<br>同时启动 <em>S1 认证联邦</em>。</h1>
-    <div class="end-line" data-r="3" style="position:relative;z-index:1">让每一种经营方式成为可能。</div>
-    <div data-r="4" class="mono" style="margin-top:2.5rem;font-size:.74rem;color:var(--ink-soft);position:relative;z-index:1;line-height:2">
-      spec → docs/superpowers/specs/2026-06-05-deploy-provider-and-platform-batteries-design.md<br>
-      deck → docs/ai-saas-platform-deck.html · Betly · 2026-06-05
+    <div class="kicker" data-r="1" style="position:relative;z-index:1">最后 · 团队 &amp; 愿景</div>
+    <h1 data-r="2" style="position:relative;z-index:1;font-size:clamp(2rem,5vw,4rem);max-width:22ch">成为中小商家的<br><em>AI 应用操作系统</em></h1>
+    <div class="end-line" data-r="3" style="position:relative;z-index:1;margin-top:.9rem">让每一种经营方式,都能长出自己的软件。</div>
+    <div class="two" data-r="4" style="margin-top:1.9rem;position:relative;z-index:1">
+      <div>
+        <div class="fin-h3">未来的愿景</div>
+        <div class="horizon"><span class="ht">近期</span><p>跑通 <b>dogfood 闭环</b>——攀岩重建为第一个 Customer App,验证"对话造软件 + 自动部署 + 调 Core"。</p></div>
+        <div class="horizon"><span class="ht">中期</span><p>开放给中小商家;沉淀<b>行业模板与 Skills</b>,可复用、越用越快。</p></div>
+        <div class="horizon"><span class="ht">远期</span><p>成为<b>商家应用的操作系统</b>——每个商家都拥有可持续演进的专属经营系统。</p></div>
+      </div>
+      <div>
+        <div class="fin-h3">团队的要求</div>
+        <ul class="teamreq">
+          <li><b>AI-native</b>:把 AI 当默认生产力,既会用 agent 写代码,也会为 AI 设计系统(harness / SDK / 模板)。</li>
+          <li><b>全栈跨界</b>:前端 / 后端 / 基建都能碰,不困在单一技术栈。</li>
+          <li><b>产品第一性</b>:从最终商家视角思考,"降门槛"是默认目标。</li>
+          <li><b>小步快跑</b>:敢上线、吃自己狗粮,用真实反馈迭代。</li>
+          <li><b>端到端负责</b>:对数据、安全、体验有洁癖,从生成到运维一管到底。</li>
+        </ul>
+      </div>
     </div>
   </section>
 
