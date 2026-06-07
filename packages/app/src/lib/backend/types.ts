@@ -1,3 +1,5 @@
+import type { OAuthProvider } from "@/lib/auth";
+
 export type BackendKind = "cloud_api";
 
 export interface AuthUser {
@@ -31,6 +33,7 @@ export interface AuthBackend {
   sendOtp(email: string): Promise<void>;
   verifyOtp(email: string, code: string): Promise<AuthSession | null>;
   signInAnonymously(): Promise<AuthSession | null>;
+  signInWithOAuth(provider: OAuthProvider): Promise<AuthSession | null>;
   signOut(): Promise<void>;
   claimInvite(token: string): Promise<AuthClaimResult>;
   /** Attach an email identity to the current (anonymous) user. Triggers an OTP. */
