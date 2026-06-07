@@ -2067,6 +2067,11 @@ export function publishableKeyFromEnv(env = process.env) {
 export function createSupabaseAuthRepository(options) {
   const {
     supabaseUrl,
+    // Browser-facing GoTrue base for OAuth redirects. Falls back to supabaseUrl.
+    // Must be publicly reachable: supabaseUrl is often an internal/VPC address
+    // (fast for server-to-server calls) that a user's browser cannot reach, so
+    // the OAuth `authorize` redirect needs a public URL instead.
+    supabasePublicUrl = supabaseUrl,
     publishableKey,
     fetchImpl = globalThis.fetch,
     createClient = defaultCreateClient,
@@ -2265,7 +2270,8 @@ export function createSupabaseAuthRepository(options) {
     },
 
     oauthAuthorizeUrl({ provider, redirect, codeChallenge }) {
-      const u = new URL(`${supabaseUrl}/auth/v1/authorize`);
+      // Use the public base — this URL is opened in the user's browser.
+      const u = new URL(`${supabasePublicUrl}/auth/v1/authorize`);
       u.searchParams.set("provider", provider);
       u.searchParams.set("redirect_to", redirect);
       u.searchParams.set("code_challenge", codeChallenge);
