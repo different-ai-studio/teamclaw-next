@@ -214,6 +214,17 @@
   .sf-explain .close{font-family:"Noto Serif SC",serif;font-weight:600;color:#032D60;font-size:1.12rem;line-height:1.55;border-left:3px solid #1B96FF;padding-left:.9rem;margin-top:.3rem}
   .sf-src{font-family:"JetBrains Mono",monospace;font-size:.66rem;color:var(--ink-soft);opacity:.7;margin-top:1.1rem}
 
+  /* ---------- china dilemma (spectrum) ---------- */
+  .spectrum{position:relative;display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:.6rem 0 1.5rem;padding:0 .2rem}
+  .spectrum::before{content:"";position:absolute;left:2%;right:2%;top:50%;height:6px;transform:translateY(-50%);border-radius:99px;background:linear-gradient(90deg,var(--sage),var(--line-strong) 50%,var(--coral));opacity:.5}
+  .pole{position:relative;z-index:1;background:var(--paper);border:2px solid var(--line);border-radius:99px;padding:.55rem 1.2rem;font-family:"Noto Serif SC",serif;font-weight:700;font-size:1rem;color:var(--ink)}
+  .pole.l{border-color:var(--sage)}
+  .pole.r{border-color:var(--coral)}
+  .spectrum .mid{position:relative;z-index:1;background:var(--ink);color:var(--paper);border-radius:99px;padding:.45rem 1rem;font-size:.82rem;font-weight:500}
+  .concl{background:#F7E6DF;border:1px solid rgba(223,75,46,.3);border-radius:6px;padding:1.05rem 1.3rem;margin-top:1.3rem;display:grid;grid-template-columns:1fr 1fr;gap:1.4rem}
+  .concl div{font-size:.92rem;color:var(--ink-soft);font-weight:300;line-height:1.6}
+  .concl b{color:var(--coral-deep);font-weight:700;font-family:"Noto Serif SC",serif;display:block;margin-bottom:.25rem;font-size:.98rem}
+
   /* ---------- nav / chrome ---------- */
   .progress{position:fixed;top:0;left:0;height:3px;background:var(--coral);z-index:100;transition:width .4s ease}
   .nav{position:fixed;bottom:1.4rem;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:1rem;z-index:100;
@@ -295,9 +306,37 @@
     </div>
   </section>
 
-  <!-- 2 PROBLEM -->
-  <section class="slide" id="s-problem">
+  <!-- 2 CHINA DILEMMA -->
+  <section class="slide" id="s-china">
     <div class="slide-num fr">02</div>
+    <div class="slide-head" data-r="1">
+      <div class="kicker">困局 · 中国 SaaS</div>
+      <h2>标准化与定制化,<em>两头都不讨好</em></h2>
+    </div>
+    <div class="spectrum" data-r="2">
+      <div class="pole l">完全标准化 · 不可定制</div>
+      <div class="mid">想平衡 → 平衡不了</div>
+      <div class="pole r">完全定制化 · 外包项目制</div>
+    </div>
+    <div class="two">
+      <div class="panel" data-r="3" style="border-top:3px solid var(--sage)">
+        <h3>← 一头:完全标准化</h3>
+        <p>一套产品不可定制,套不进真实业务流程。商家被迫<strong>削足适履</strong>,要么将就、要么干脆弃用——买了等于没买。</p>
+      </div>
+      <div class="panel coral" data-r="4" style="border-top:3px solid var(--coral)">
+        <h3>另一头:完全定制化 →</h3>
+        <p>本质是<strong>外包 / 项目制</strong>:人月堆砌,贵、慢、难维护,做完一家的逻辑无法复用到下一家。每一单都重头来。</p>
+      </div>
+    </div>
+    <div class="concl" data-r="5">
+      <div><b>客户:付出 ≠ 得到</b>花了大钱,要么不合身,要么掉进填不完的定制坑;投入与价值长期不成正比。</div>
+      <div><b>SaaS 公司:难以盈利</b>标准化卖不上价、定制化不可规模化——两头都赚不到钱,陷在项目泥潭里长不大。</div>
+    </div>
+  </section>
+
+  <!-- 3 PROBLEM -->
+  <section class="slide" id="s-problem">
+    <div class="slide-num fr">03</div>
     <div class="slide-head" data-r="1" style="margin-bottom:1.3rem">
       <div class="kicker">背景 · 为什么是现在</div>
       <h2 style="max-width:26ch">LLM 已经强到,<em>普通人也能造出复杂的软件</em>。</h2>
@@ -321,7 +360,7 @@
 
   <!-- 3 HARNESS -->
   <section class="slide" id="s-harness">
-    <div class="slide-num fr">03</div>
+    <div class="slide-num fr">04</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">但是 · 企业级的复杂</div>
       <h2>光有 LLM 不够,要有一套 <em>Harness</em></h2>
@@ -340,7 +379,7 @@
 
   <!-- 4 TWO-LAYER -->
   <section class="slide" id="s-arch2">
-    <div class="slide-num fr">04</div>
+    <div class="slide-num fr">05</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">总体架构</div>
       <h2>Core SaaS + Customer App 双层</h2>
@@ -366,7 +405,7 @@
 
   <!-- 4 DECISIONS -->
   <section class="slide" id="s-decisions">
-    <div class="slide-num fr">05</div>
+    <div class="slide-num fr">06</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">已锁定</div>
       <h2>四个架构决策</h2>
@@ -381,7 +420,7 @@
 
   <!-- 4 ARCHITECTURE MAP -->
   <section class="slide" id="s-map" style="padding-top:clamp(1.6rem,3.5vw,3rem);padding-bottom:clamp(1.3rem,3vw,2.4rem)">
-    <div class="slide-num fr">06</div>
+    <div class="slide-num fr">07</div>
     <div class="slide-head" data-r="1" style="margin-bottom:1rem">
       <div class="kicker">架构全景 · 端 / 云 / Core / Customer</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.4rem)">一图看清四层关系</h2>
@@ -427,7 +466,7 @@
 
   <!-- 5 CUSTOMER FLOW -->
   <section class="slide" id="s-flow">
-    <div class="slide-num fr">07</div>
+    <div class="slide-num fr">08</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">用户旅程 · 商家如何造一个自己的 App</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.4rem)">从一句话到上线,六步</h2>
@@ -445,7 +484,7 @@
 
   <!-- 9 BATTERIES -->
   <section class="slide" id="s-batteries">
-    <div class="slide-num fr">08</div>
+    <div class="slide-num fr">09</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">护城河 · 平台 Batteries</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.3rem)">平台帮 Customer App 做完的基建</h2>
@@ -473,7 +512,7 @@
 
   <!-- 10 ROADMAP -->
   <section class="slide" id="s-road">
-    <div class="slide-num fr">09</div>
+    <div class="slide-num fr">10</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">路线图 · S0 → S7</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.3rem)">先造最薄纵切,再上 AI codegen</h2>
@@ -495,7 +534,7 @@
 
   <!-- 11 PRINCIPLES -->
   <section class="slide" id="s-principles">
-    <div class="slide-num fr">10</div>
+    <div class="slide-num fr">11</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">架构原则</div>
       <h2>六条不变量</h2>
@@ -527,7 +566,7 @@
 <div class="nav">
   <button class="arrow" id="prev" aria-label="上一页">‹</button>
   <div class="dots" id="dots"></div>
-  <span class="counter" id="counter">01 / 12</span>
+  <span class="counter" id="counter">01 / 13</span>
   <button class="arrow" id="next" aria-label="下一页">›</button>
 </div>
 <div class="hint">← → / 空格翻页 · ⌘P 导出 PDF</div>
