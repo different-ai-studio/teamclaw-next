@@ -239,6 +239,16 @@
   .turn-big{font-family:"Noto Serif SC",serif;font-weight:900;font-size:clamp(2.1rem,4.8vw,3.5rem);color:var(--coral);line-height:1.04;letter-spacing:-.01em;margin:.15rem 0 .7rem;display:flex;align-items:center;gap:.55rem}
   .turn-big .ar{font-family:"Fraunces",serif;font-weight:900;font-size:1.05em;transform:translateY(-.02em)}
 
+  /* ---------- product form (4 deliverables) ---------- */
+  .prodgrid{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem}
+  .prodcard{background:var(--paper-2);border:1px solid var(--line);border-radius:10px;padding:1.3rem 1.5rem;display:grid;grid-template-columns:auto 1fr;gap:1.15rem;align-items:start;position:relative;border-top:3px solid var(--coral)}
+  .prodcard .pico{width:42px;height:42px;color:var(--coral);flex-shrink:0;margin-top:.1rem}
+  .prodcard .pn{position:absolute;top:.9rem;right:1.2rem;font-family:"Fraunces",serif;font-weight:900;font-size:1.5rem;color:var(--line-strong);line-height:1}
+  .prodcard h4{font-family:"Noto Serif SC",serif;font-weight:700;font-size:1.18rem;color:var(--ink);line-height:1.2;padding-right:1.2rem}
+  .prodcard .ps{font-family:"JetBrains Mono",monospace;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;color:var(--coral);margin:.3rem 0 .45rem}
+  .prodcard p{font-size:.85rem;color:var(--ink-soft);font-weight:300;line-height:1.55}
+  .prodcard p b{color:var(--ink);font-weight:600}
+
   /* ---------- nav / chrome ---------- */
   .progress{position:fixed;top:0;left:0;height:3px;background:var(--coral);z-index:100;transition:width .4s ease}
   .nav{position:fixed;bottom:1.4rem;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:1rem;z-index:100;
@@ -488,9 +498,40 @@
     </div>
   </section>
 
+  <!-- PRODUCT FORM -->
+  <section class="slide" id="s-product">
+    <div class="slide-num fr">08</div>
+    <div class="slide-head" data-r="1">
+      <div class="kicker">产品形态 · 我们交付什么</div>
+      <h2>四样东西,合成一个平台</h2>
+    </div>
+    <div class="prodgrid">
+      <div class="prodcard" data-r="2">
+        <span class="pn">1</span>
+        <svg class="pico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="m6 8 3 2.5L6 13"/><path d="M11 13h4"/><path d="M8 21h8M12 17v4"/></svg>
+        <div><h4>Betly Desktop</h4><div class="ps">Codex-like Desktop App</div><p>类似 Codex 的桌面 App——商家在这里用<b>对话</b>生成、编辑、预览、部署自己的应用。造软件的入口。</p></div>
+      </div>
+      <div class="prodcard" data-r="3">
+        <span class="pn">2</span>
+        <svg class="pico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></svg>
+        <div><h4>Core SaaS</h4><div class="ps">统一业务底座</div><p>客户 / 商品 / 销售 / 权限 / 文件 / 消息,统一管理企业核心数据,<b>API 化</b>对外开放。</p></div>
+      </div>
+      <div class="prodcard" data-r="4">
+        <span class="pn">3</span>
+        <svg class="pico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+        <div><h4>Codegen 脚手架 + 自动化部署 + 运维</h4><div class="ps">Build → Ship → Operate</div><p>模板与 SDK 把 AI 生成纳入轨道,push 即部署(Dokploy),<b>上线 / 回滚 / 监控全自动</b>——商家不碰运维。</p></div>
+      </div>
+      <div class="prodcard" data-r="5">
+        <span class="pn">4</span>
+        <svg class="pico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.14 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z"/><path d="M20 3v4M22 5h-4M4 17v2M5 18H3"/></svg>
+        <div><h4>企业自己的 Skills</h4><div class="ps">沉淀专属 AI 能力</div><p>每个企业积累自己的 <b>skills / MCP</b>,跑在平台 AI 网关,可回调自有 API 与 Core SaaS。</p></div>
+      </div>
+    </div>
+  </section>
+
   <!-- 5 CUSTOMER FLOW -->
   <section class="slide" id="s-flow">
-    <div class="slide-num fr">08</div>
+    <div class="slide-num fr">09</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">用户旅程 · 商家如何造一个自己的 App</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.4rem)">从一句话到上线,六步</h2>
@@ -508,7 +549,7 @@
 
   <!-- 9 BATTERIES -->
   <section class="slide" id="s-batteries">
-    <div class="slide-num fr">09</div>
+    <div class="slide-num fr">10</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">护城河 · 平台 Batteries</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.3rem)">平台帮 Customer App 做完的基建</h2>
@@ -536,7 +577,7 @@
 
   <!-- 10 ROADMAP -->
   <section class="slide" id="s-road">
-    <div class="slide-num fr">10</div>
+    <div class="slide-num fr">11</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">路线图 · S0 → S7</div>
       <h2 style="font-size:clamp(1.5rem,3vw,2.3rem)">先造最薄纵切,再上 AI codegen</h2>
@@ -558,7 +599,7 @@
 
   <!-- 11 PRINCIPLES -->
   <section class="slide" id="s-principles">
-    <div class="slide-num fr">11</div>
+    <div class="slide-num fr">12</div>
     <div class="slide-head" data-r="1">
       <div class="kicker">架构原则</div>
       <h2>六条不变量</h2>
@@ -590,7 +631,7 @@
 <div class="nav">
   <button class="arrow" id="prev" aria-label="上一页">‹</button>
   <div class="dots" id="dots"></div>
-  <span class="counter" id="counter">01 / 13</span>
+  <span class="counter" id="counter">01 / 14</span>
   <button class="arrow" id="next" aria-label="下一页">›</button>
 </div>
 <div class="hint">← → / 空格翻页 · ⌘P 导出 PDF</div>
