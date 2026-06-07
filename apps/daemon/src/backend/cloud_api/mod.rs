@@ -842,6 +842,22 @@ impl Backend for CloudApiBackend {
             .await
     }
 
+    async fn insert_gateway_agent_reply(
+        &self,
+        session_id: &str,
+        sender_actor_id: &str,
+        content: &str,
+        external_message_id: Option<&str>,
+    ) -> BackendResult<String> {
+        self.insert_gateway_agent_reply_impl(
+            session_id,
+            sender_actor_id,
+            content,
+            external_message_id,
+        )
+        .await
+    }
+
     async fn insert_gateway_message_with_attachments(
         &self,
         session_id: &str,

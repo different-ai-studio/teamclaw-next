@@ -109,6 +109,37 @@ impl CloudApiBackend {
         Ok(message.id)
     }
 
+    pub(super) async fn insert_gateway_agent_reply_impl(
+        &self,
+        session_id: &str,
+        sender_actor_id: &str,
+        content: &str,
+        external_message_id: Option<&str>,
+    ) -> BackendResult<String> {
+        let id = external_message_id
+            .map(str::to_string)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let message: CloudMessage = self
+            .post(
+                &format!("/v1/sessions/{session_id}/messages"),
+                &InsertMessageRequest {
+                    id: &id,
+                    team_id: &self.cfg.team_id,
+                    sender_actor_id,
+                    content,
+                    kind: "agent_reply",
+                    metadata: None,
+                    turn_id: None,
+                    reply_to_message_id: None,
+                    model: None,
+                    created_at: None,
+                },
+                Some(&id),
+            )
+            .await?;
+        Ok(message.id)
+    }
+
     pub(super) async fn insert_gateway_message_with_attachments_impl(
         &self,
         session_id: &str,

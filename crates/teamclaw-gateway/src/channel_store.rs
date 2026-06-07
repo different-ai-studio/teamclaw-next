@@ -50,6 +50,18 @@ pub trait ChannelStore: Send + Sync + 'static {
         external_message_id: Option<&str>,
     ) -> Result<String /* message_id */, StoreError>;
 
+    /// Persist an agent reply. Same as `record_message` but stored with the
+    /// `agent_reply` message kind so clients render it as an assistant turn
+    /// (left-aligned) instead of a user message. Idempotent on
+    /// `(session_id, external_message_id)`.
+    async fn record_agent_reply(
+        &self,
+        session_id: &str,
+        sender_actor_id: &str,
+        content: &str,
+        external_message_id: Option<&str>,
+    ) -> Result<String /* message_id */, StoreError>;
+
     /// Like `record_message` but records `attachments` in the
     /// `messages.attachments` JSONB column. Idempotent on
     /// `(session_id, external_message_id)`.

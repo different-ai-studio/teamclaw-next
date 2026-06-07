@@ -1758,14 +1758,14 @@ fn process_and_reply_sync(
             .map_err(|e| format!("acp.send_prompt: {e}"))?;
 
         store
-            .record_message(
+            .record_agent_reply(
                 &outcome.session_id,
                 &primary_agent_actor_id,
                 &reply.reply_text,
                 None,
             )
             .await
-            .map_err(|e| format!("record_message out: {e}"))?;
+            .map_err(|e| format!("record_agent_reply out: {e}"))?;
 
         Ok::<_, String>((outcome.acp_session_id, outcome.session_id, reply.reply_text))
     })?;

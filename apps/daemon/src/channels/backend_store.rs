@@ -70,6 +70,19 @@ impl ChannelStore for AmuxdChannelStore {
             .map_err(|e| StoreError::Backend(e.to_string()))
     }
 
+    async fn record_agent_reply(
+        &self,
+        session_id: &str,
+        sender_actor_id: &str,
+        content: &str,
+        external_message_id: Option<&str>,
+    ) -> Result<String, StoreError> {
+        self.client
+            .insert_gateway_agent_reply(session_id, sender_actor_id, content, external_message_id)
+            .await
+            .map_err(|e| StoreError::Backend(e.to_string()))
+    }
+
     async fn record_message_with_attachments(
         &self,
         session_id: &str,

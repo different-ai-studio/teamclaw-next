@@ -1241,7 +1241,7 @@ async fn handle_message_event(event: &serde_json::Value, ctx: &HandlerContext) {
 
     if let Err(e) = ctx
         .store
-        .record_message(
+        .record_agent_reply(
             &outcome.session_id,
             &ctx.primary_agent_actor_id,
             &reply.reply_text,
@@ -1249,7 +1249,7 @@ async fn handle_message_event(event: &serde_json::Value, ctx: &HandlerContext) {
         )
         .await
     {
-        eprintln!("[Feishu] record_message (reply) failed: {}", e);
+        eprintln!("[Feishu] record_agent_reply failed: {}", e);
     }
 
     if let Ok(token) = token_manager.get_tenant_token().await {
