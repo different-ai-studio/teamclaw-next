@@ -926,8 +926,6 @@
       "appearance": "外观",
       "language": "语言",
       "languageDesc": "选择应用界面语言",
-      "autoSave": "自动保存",
-      "autoSaveDesc": "自动保存您的工作",
       "notifications": "通知",
       "notificationsDesc": "接收桌面通知",
       "mqttBroker": "MQTT Broker",
@@ -950,7 +948,9 @@
       "serverSyncedHint": "如可用，将从 daemon 读取。",
       "notifAll": "全部",
       "notifImportant": "仅重要通知",
-      "notifMute": "静音"
+      "notifMute": "静音",
+      "acpStreamDebug": "ACP 流调试",
+      "acpStreamDebugDesc": "在聊天区域上方显示实时 ACP 事件流"
     },
     "about": {
       "title": "关于",
@@ -1256,6 +1256,7 @@
       "accessTitle": "成员访问权限",
       "accessDesc": "数据读取自当前 Daemon Agent 的 agent_member_access。",
       "addAccess": "添加",
+      "selectMember": "选择成员",
       "noAccess": "暂无成员访问权限。"
     },
     "daemonOnboarding": {
