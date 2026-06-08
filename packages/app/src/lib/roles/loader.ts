@@ -329,8 +329,6 @@ async function loadRolesSkillsWorkspaceStateFromFs(
     return a.filename.localeCompare(b.filename)
   })
 
-  const linkedSkillsCount = Object.values(roleUsageBySkill).filter((owners) => owners.length > 0).length
-
   return buildRolesSkillsWorkspaceState(roles, skills, roleUsageBySkill, skillNamesByRole)
 }
 

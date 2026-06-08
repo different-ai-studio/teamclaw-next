@@ -61,10 +61,6 @@ export function NavRail() {
     [sessions, cronSessionIds],
   )
 
-  const handleComingSoon = () => {
-    void import('sonner').then((m) => m.toast(t('common.comingSoon', 'Coming soon')))
-  }
-
   const handleQuickNewChat = React.useCallback(() => {
     if (quickChatState.kind === 'agent_not_bound') {
       openDaemonAgentSettings('quick_chat')

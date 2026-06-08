@@ -5,7 +5,6 @@ import {
   ChevronDown,
   Copy,
   FolderOpen,
-  Info,
   Loader2,
   MessageCircle,
 } from 'lucide-react'

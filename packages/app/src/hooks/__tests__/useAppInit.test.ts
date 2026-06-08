@@ -232,7 +232,7 @@ describe('useWorkspaceInit', () => {
     expect(mockSetWorkspace).not.toHaveBeenCalled()
   })
 
-  it('auto-uses the daemon team dir on first launch in Tauri when a team is known', async () => {
+  it('does not auto-use the daemon team dir on first launch even when a team is known', async () => {
     mockIsTauri.mockReturnValue(true)
     currentTeamState.team = { id: 'team-xyz' }
 
@@ -242,10 +242,10 @@ describe('useWorkspaceInit', () => {
     await waitFor(() => {
       expect(result.current.initialWorkspaceResolved).toBe(true)
     })
-    expect(mockSetWorkspace).toHaveBeenCalledWith('~/.amuxd/teams/team-xyz')
-    // The synced team dir is an established team workspace — the Personal/Team
-    // chooser must be suppressed.
-    expect(mockSetIsNewWorkspace).toHaveBeenCalledWith(false)
+    // Workspace selection is explicit — a known team must not silently land the
+    // user in ~/.amuxd/teams/<id> without choosing a project directory.
+    expect(mockSetWorkspace).not.toHaveBeenCalled()
+    expect(mockSetIsNewWorkspace).not.toHaveBeenCalled()
   })
 
   it('falls back to the picker on first launch in Tauri when no team is known', async () => {
