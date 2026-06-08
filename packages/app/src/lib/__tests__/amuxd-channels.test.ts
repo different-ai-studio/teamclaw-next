@@ -37,18 +37,28 @@ describe("amuxd-channels", () => {
 
     await saveChannelConfig("wecom", {
       enabled: true,
-      botId: "bot",
-      secret: "sec",
-      encodingAesKey: "aes",
+      bots: [
+        {
+          enabled: true,
+          botId: "bot",
+          secret: "sec",
+          encodingAesKey: "aes",
+        },
+      ],
     });
 
     expect(tauri.invoke).toHaveBeenCalledWith("save_channel_config", {
       platform: "wecom",
       configJson: JSON.stringify({
         enabled: true,
-        bot_id: "bot",
-        secret: "sec",
-        encoding_aes_key: "aes",
+        bots: [
+          {
+            enabled: true,
+            bot_id: "bot",
+            secret: "sec",
+            encoding_aes_key: "aes",
+          },
+        ],
       }),
     });
   });
@@ -56,16 +66,26 @@ describe("amuxd-channels", () => {
   it("maps daemon WeCom config back to app field names on load", async () => {
     vi.mocked(tauri.invoke).mockResolvedValue({
       enabled: true,
-      bot_id: "bot",
-      secret: "sec",
-      encoding_aes_key: "aes",
+      bots: [
+        {
+          enabled: true,
+          bot_id: "bot",
+          secret: "sec",
+          encoding_aes_key: "aes",
+        },
+      ],
     });
 
     await expect(loadChannelConfig("wecom")).resolves.toEqual({
       enabled: true,
-      botId: "bot",
-      secret: "sec",
-      encodingAesKey: "aes",
+      bots: [
+        {
+          enabled: true,
+          botId: "bot",
+          secret: "sec",
+          encodingAesKey: "aes",
+        },
+      ],
     });
   });
 });
