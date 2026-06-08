@@ -73,20 +73,14 @@ saas-mono 自建 Supabase（唯一实例 / 唯一 GoTrue / 唯一 auth.users）
 3. 闸门：typecheck + FC 测试全绿。
 4. 回滚：纯代码，分支可弃。
 
-### ⬜ Step B — testsupa 预演（强烈建议，先于 prod 切）
-1. 在 testsupa 顺序应用 S1→S3A→S2→S3B。
-2. 改 testsupa PostgREST `PGRST_DB_SCHEMAS` 加 `amux`。
-3. 部署带 S2d 的 FC 指向 testsupa。
-4. 闸门：26 个 SQL RLS 测试 + FC 测试全绿；**端到端验一次登录**（确认 token 带 org_id、hook 没挂）。
-5. 这步把所有 🔴 风险（hook、PGRST、协同切）在非生产先趟一遍。
-
-### ⬜ Step C — prod 切换（停机窗口，⚠️ 不可灰度）
-**必须三件事同一窗口一起做**（否则 FC 旧 `.from()` 默认 public 即刻全断）：
-1. 我跑迁移 `20260608010000`(S2) + `20260608030000`(S3B)。
-2. 你改 prod PostgREST 容器 `PGRST_DB_SCHEMAS` 加 `amux`（保留 public）+ 重启。
+### ⬜ Step B — 在 47.115.253.201（我们自己的服务器，MCP 连接的这台）应用 S2+S3B（协同切窗口，⚠️ 不可灰度）
+没有单独的 testsupa；47.x 就是我们的环境。**三件事同一窗口一起做**（否则 FC 旧 `.from()` 默认 public 即刻全断）：
+1. 我经 MCP 跑迁移 `20260608010000`(S2) + `20260608030000`(S3B) + `20260608040000`(create_team p_oid)。
+2. 你改 47.x PostgREST 容器 `PGRST_DB_SCHEMAS` 加 `amux`（保留 public）+ 重启。
 3. 你部署带 S2d + S3-FC 的 FC。
-4. 闸门：登录冒烟 + 租户隔离冒烟。
+4. 闸门：26 个 SQL RLS 测试 + FC 测试 + 登录冒烟（token 带 org_id、hook 没挂）+ 租户隔离冒烟。
 5. 回滚：SET SCHEMA 反向 + drop teams.oid/守卫 + FC 默认 schema 改回 + PGRST 还原 + hook 还原。
+> 我能做：MCP 跑迁移。我不能做：改 PostgREST 容器 env、部署 FC（需你操作）。所以这步卡在你这两个运维动作上，不在 testsupa。
 
 ### ⬜ Step D — 合并到 saas-mono（S4，最后）
 前置（先在 saas-mono 实例跑只读查询确认）：
@@ -104,7 +98,7 @@ select schema_name from information_schema.schemata where schema_name in ('amux'
 
 | 风险 | 级别 | 缓解 |
 |---|---|---|
-| S3B hook 改 live 致登录中断 | 🔴 | Step B testsupa 先测登录；hook 有 exception→return event 防御 |
+| S3B hook 改 live 致登录中断 | 🔴 | 切换窗口内登录冒烟先验；hook 有 exception→return event 防御 |
 | 协同切窗口（S2+PGRST+FC 必须同时） | 🔴 | Step C 窗口；Step B 先预演 |
 | PostgREST 暴露 amux（PGRST_DB_SCHEMAS 容器 env，非 config.toml） | 🔴 | Step B/C 清单 |
 | saas-mono PG 大版本对齐（我们 18.3） | 🔴 | Step D 前置只读查询 |
