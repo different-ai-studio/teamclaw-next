@@ -36,8 +36,8 @@ interface ShortcutsState {
   teamRoles: TeamRole[] | null
   shortcutVisibility: Map<string, string[]> | null
 
-  loadPersonal: () => Promise<void>
-  loadTeamForCurrentTeam: (teamId: string | null) => Promise<void>
+  loadPersonal: (options?: { persist?: boolean }) => Promise<void>
+  loadTeamForCurrentTeam: (teamId: string | null, options?: { persist?: boolean }) => Promise<void>
   hydrateFromCache: () => Promise<void>
 
   addNode:    (scope: ShortcutScope, input: NewShortcutInput, teamId?: string) => Promise<string>
@@ -160,24 +160,28 @@ export const useShortcutsStore = create<ShortcutsState>((set, get) => ({
     })
   },
 
-  loadPersonal: async () => {
+  loadPersonal: async (options?: { persist?: boolean }) => {
     set({ loading: true })
     try {
       const rows = await selectShortcuts({ scope: 'personal' })
       set({ personalNodes: rows, loadedAt: Date.now() })
-      await persistCache([...rows, ...get().teamNodes])
+      if (options?.persist) {
+        await persistCache([...rows, ...get().teamNodes])
+      }
     } finally {
       set({ loading: false })
     }
   },
 
-  loadTeamForCurrentTeam: async (teamId) => {
+  loadTeamForCurrentTeam: async (teamId, options?: { persist?: boolean }) => {
     if (!teamId) { set({ teamNodes: [] }); return }
     set({ loading: true })
     try {
       const rows = await selectShortcuts({ scope: 'team', teamId })
       set({ teamNodes: rows, loadedAt: Date.now() })
-      await persistCache([...get().personalNodes, ...rows])
+      if (options?.persist) {
+        await persistCache([...get().personalNodes, ...rows])
+      }
     } finally {
       set({ loading: false })
     }
@@ -194,31 +198,31 @@ export const useShortcutsStore = create<ShortcutsState>((set, get) => ({
       order: input.order,
       target: input.target,
     })
-    if (scope === 'personal') await get().loadPersonal()
-    else                       await get().loadTeamForCurrentTeam(teamId ?? null)
+    if (scope === 'personal') await get().loadPersonal({ persist: true })
+    else                       await get().loadTeamForCurrentTeam(teamId ?? null, { persist: true })
     return id
   },
 
   updateNode: async (id, patch) => {
     await rpcShortcutUpdate(id, patch)
     const node = [...get().personalNodes, ...get().teamNodes].find(n => n.id === id)
-    if (node?.scope === 'personal') await get().loadPersonal()
-    else if (node?.scope === 'team') await get().loadTeamForCurrentTeam(node.teamId)
+    if (node?.scope === 'personal') await get().loadPersonal({ persist: true })
+    else if (node?.scope === 'team') await get().loadTeamForCurrentTeam(node.teamId, { persist: true })
   },
 
   deleteNode: async (id) => {
     const node = [...get().personalNodes, ...get().teamNodes].find(n => n.id === id)
     await rpcShortcutDelete(id)
-    if (node?.scope === 'personal') await get().loadPersonal()
-    else if (node?.scope === 'team') await get().loadTeamForCurrentTeam(node.teamId)
+    if (node?.scope === 'personal') await get().loadPersonal({ persist: true })
+    else if (node?.scope === 'team') await get().loadTeamForCurrentTeam(node.teamId, { persist: true })
   },
 
   batchMove: async (moves) => {
     await rpcShortcutBatchMove(moves)
     // After a batch move we don't know which scope was touched; refresh both.
-    await get().loadPersonal()
+    await get().loadPersonal({ persist: true })
     const teamId = get().teamNodes[0]?.teamId ?? null
-    if (teamId) await get().loadTeamForCurrentTeam(teamId)
+    if (teamId) await get().loadTeamForCurrentTeam(teamId, { persist: true })
   },
 
   loadTeamRoles: async (teamId) => {

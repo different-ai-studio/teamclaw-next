@@ -250,11 +250,11 @@ pub fn save_shortcuts(
 ) -> Result<(), String> {
     let workspace_path =
         crate::commands::team::resolve_workspace_path(workspace_path, &window, &registry)?;
-    let mut config = teamclaw_gateway::read_config(&workspace_path)?;
-    config
-        .other
-        .insert("shortcuts".to_string(), serde_json::json!(nodes));
-    teamclaw_gateway::write_config(&workspace_path, &config)
+    teamclaw_gateway::patch_config_value(
+        &workspace_path,
+        "shortcuts",
+        serde_json::json!(nodes),
+    )
 }
 
 /// Load the per-workspace system prompt from teamclaw.json. Returns "" if unset.
@@ -285,11 +285,11 @@ pub fn save_system_prompt(
 ) -> Result<(), String> {
     let workspace_path =
         crate::commands::team::resolve_workspace_path(workspace_path, &window, &registry)?;
-    let mut config = teamclaw_gateway::read_config(&workspace_path)?;
-    config
-        .other
-        .insert("systemPrompt".to_string(), serde_json::json!(prompt));
-    teamclaw_gateway::write_config(&workspace_path, &config)?;
+    teamclaw_gateway::patch_config_value(
+        &workspace_path,
+        "systemPrompt",
+        serde_json::json!(prompt),
+    )?;
     teamclaw_gateway::sync_teamclaw_claude_md(&workspace_path, &prompt)
 }
 
@@ -301,7 +301,5 @@ pub async fn set_config_locale(
     locale: String,
 ) -> Result<(), String> {
     let workspace_path = crate::commands::window::current_workspace_for_window(&window, &registry)?;
-    let mut config = teamclaw_gateway::read_config(&workspace_path)?;
-    config.locale = Some(locale);
-    teamclaw_gateway::write_config(&workspace_path, &config)
+    teamclaw_gateway::patch_config_value(&workspace_path, "locale", serde_json::json!(locale))
 }
