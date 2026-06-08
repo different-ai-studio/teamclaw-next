@@ -1,109 +1,122 @@
-# teamclaw × saas-mono 登录与租户整合方案
+# teamclaw × saas-mono 登录与租户整合 —— 统一 Spec & 执行计划
 
-**状态**: 设计已锁定（2026-06-08），实施中（阶段 1 已落地）
-**分支**: `agent/saasmono-integration`（worktree `.worktrees/saasmono-integration`）
-**目标**: 把 teamclaw（teamclaw-v2 / teamclaw-next）的登录和多租户管理与 saas-mono（`/Volumes/openbeta/workspace/saas-mono`）整合，复用 saas-mono 的 `public.orgs` 做租户真相源。
+**单一事实来源**。状态：实施中。最后更新 2026-06-08。
+**分支**：`agent/saasmono-integration`（worktree `.worktrees/saasmono-integration`）。
+**提交**：`934613fa`(S1) · `647597d1`(S2) · `349375ff`(S3)。
 
 ---
 
-## 已锁定的决定
+## 1. 目标
 
-| 决定 | 选择 |
+让 teamclaw 复用 saas-mono 的 `public.orgs` 做租户真相源、共用一套登录（GoTrue），
+两个产品最终跑在 **saas-mono 的阿里云自建 Supabase** 上：saas-mono 占 `public`，
+teamclaw 全部业务表搬到 `amux` schema 隔离。
+
+## 2. 锁定的决定
+
+| # | 决定 |
 |---|---|
-| 数据库/GoTrue 拓扑 | saas-mono 的**阿里云自建 Supabase 当家**，teamclaw 迁入 → 单实例/单 GoTrue/单 auth.users |
-| 实例类型 | 两边都是阿里云自建 Supabase（同架构），扩展可自由安装 |
-| 租户基数 | 单 org/user（org 层）；org=租户边界，team=org 内协作单元 |
-| teams 去留 | **保留 teams 表**，加 `oid` 外键列 → `public.orgs(id)`（1 org : N team，FK 列非 join 表） |
-| team_id | **不做 team_id→oid 全局重命名**（避免客户端~2000 处大改） |
-| 登录 | 统一一个 GoTrue 当唯一 IdP，token 互认，JWT `app_metadata.org_id` 当租户上下文 |
-| 数据迁移 | **不做**（按全新状态设计） |
+| D1 | saas-mono 的自建 Supabase **当家**，teamclaw 迁入（单实例/单 GoTrue/单 auth.users） |
+| D2 | 租户：**单 org/user**；org=租户边界，team=org 内协作单元 |
+| D3 | **保留 teams 表**，加 `oid` 外键 → `public.orgs(id)`（1 org:N team，FK 列非 join 表） |
+| D4 | **不重命名 team_id**（客户端继续用 teamId，零大改） |
+| D5 | 登录：统一一个 GoTrue，JWT `app_metadata.org_id` 当租户上下文 |
+| D6 | **不做数据迁移**（按全新状态设计） |
+| D7 | **Better-Auth 保留不退役**，与 GoTrue 并存（account/session/user/verification/jwks 不动） |
 
----
+## 3. 目标架构
 
-## 阶段 0 前置验证结果（teamclaw 侧，2026-06-08）
-
-- ✅ 机制：跨 schema 外键（amux→public）+ `ALTER TABLE SET SCHEMA amux` 在 PG 18.3 实测通过（回滚事务，零残留）
-- ✅ teamclaw 硬依赖扩展：`age` 1.6.0、`vector`(pgvector) 0.8.1.2、`pg_cron` 1.6、`pg_net` 0.19.6（mem0 是建在 AGE+vector 上的 schema，7 表，非扩展）
-- ✅ PostgREST 暴露 schema 由容器 env `PGRST_DB_SCHEMAS` 驱动（库内 `pgrst.db_schemas` 为 null）
-- 🔴 **新发现**：teamclaw 跑在 **PostgreSQL 18.3**，需确认 saas-mono 实例 PG 大版本对齐
-- ⏳ 待 saas-mono 侧执行：PG 版本 / 扩展差集 / schema 命名冲突（只读查询见下）；运维：GoTrue `JWT_SECRET` 统一、`PGRST_DB_SCHEMAS` 加 amux
-
-待在 saas-mono 实例跑的只读查询：
-```sql
-select version();
-select name, default_version, installed_version from pg_available_extensions where installed_version is not null order by 1;
-select schema_name from information_schema.schemata where schema_name in ('amux','app','agent_knowledge','mem0','mem0_graph') order by 1;
+```
+saas-mono 自建 Supabase（唯一实例 / 唯一 GoTrue / 唯一 auth.users）
+├── public  (saas-mono 拥有)
+│   ├── orgs   ← 唯一租户真相源
+│   ├── users  ← auth_user_id→auth.users, org_id→orgs（单 org/user）
+│   ├── plans
+│   └── account/session/user/verification/jwks ← Better-Auth（保留）
+└── amux   (teamclaw 拥有，35 张业务表)
+    ├── teams        ← 加 oid → public.orgs(id)
+    ├── actors / team_members / sessions / messages / ...（team_id 不变）
+    └── (RAG: ag_catalog/mem0/dataset_* 按需装扩展后迁入)
+租户隔离：amux.teams.oid 传递性归属唯一 org + RLS teams_org_guard + is_team_member
+登录：GoTrue 签发 token，amux_access_token_hook 注入 app_metadata.org_id + memberships + acl
 ```
 
 ---
 
-## 迁移 runbook（在我们自己的实例先跑通，最后移植 saas-mono）
+## 4. 当前状态总表（← 看这里就不乱）
 
-**纪律**：迁移即代码（写进 `services/supabase/migrations/`）；环境梯度 local→testsupa→prod；每步过测试闸门（26 SQL RLS 测试 + FC 60 测试 + 客户端 typecheck）；每步可回滚。
+| 阶段 | 内容 | 状态 | 落点 |
+|---|---|---|---|
+| **S1** | `public.orgs` + `plans` 桩 + `update_audit_columns()` | ✅ **已上 prod 47.x** | 迁移 `20260608000000` |
+| **S3A** | `public.users` 子集镜像 + `app.current_org_id()` + orgs RLS | ✅ **已上 prod 47.x** | 迁移 `20260608020000` |
+| **S2** | 35 业务表 public→amux + teams.oid + 重写 64 函数 | 🟡 写好+**干跑验证过**，未应用 | 迁移 `20260608010000` |
+| **S2d** | FC 默认 schema=amux + 41 个 .rpc→`.schema('public')` | 🟡 改好（未 typecheck） | FC 5 文件 |
+| **S3B** | provisioning 默认 team + hook 注 org_id + teams_org_guard | 🟡 写好+**干跑验证过**，未应用 | 迁移 `20260608030000` |
+| **S3-FC** | FC 调 ensure_org_default_team + 从 JWT 取 org_id 租户 | ⬜ **未写** | FC 代码 |
+| **S4** | 在 saas-mono 实例落地 + 切流 | ⬜ 未开始 | 跨实例 |
 
-> 当前执行环境：用户授权**直接在 teamclaw 生产实例 47.115.253.201** 上做（经 supabase-admin MCP）。阶段 1 纯加表安全；阶段 2 的 SET SCHEMA 是会断线的协同切换，需停机窗口 + 明确放行。
-
-### 阶段 1 — 把 orgs 建到我们库里（纯加法）✅ 已落地
-- 迁移 `20260608000000_orgs_tenant_mirror.sql`：建 `public.orgs`（saas-mono DDL 镜像）+ `public.plans`（桩，待对齐）+ `update_audit_columns()` 触发器函数。
-- orgs 是 **saas-mono 拥有的镜像**，迁移幂等（`if not exists`），标注"合并实例勿重复应用、DDL 勿漂移"。
-- **状态**：已在 prod 47.x 应用并验证（orgs 20 列/8 索引/审计触发器/RLS 启用；插入+更新 probe 通过、已回滚）。RLS 启用但暂无策略（仅 service_role 可访问）。
-- 回滚：`drop table public.orgs, public.plans; drop function public.update_audit_columns();`
-
-### 阶段 2 — teamclaw 业务表迁 amux + teams 加 oid（主结构改造，⚠️ 需停机窗口 + 放行）
-迁移 `20260608010000_move_teamclaw_to_amux.sql`（程序化 DO 块，幂等）。
-
-**搬迁清单（实测 42 张 public 表）**：
-- **搬 amux（35 张）**：所有 teamclaw 业务表（actors/sessions/messages/teams/workspaces/ideas/members/team_members/agents/… 全集）。
-- **留 public（7 张）**：`orgs`、`plans`（saas-mono 租户镜像）；`account`、`session`、`user`、`verification`、`jwks`（Better-Auth 表，阶段 3 退役，本阶段不动）。
-
-- 2a `create schema amux` + grant usage（表权限/RLS 策略随 `SET SCHEMA` 自动迁移）+ PostgREST `PGRST_DB_SCHEMAS` 加 amux（容器 env，保留 public）。
-- 2b 35 张表 `ALTER TABLE … SET SCHEMA amux`；`amux.teams` 加 `oid → public.orgs(id)`（跨 schema FK）。
-- 2c **函数留 public**，仅重写函数体 `public.<被搬表> → amux.<被搬表>`（实测 app 20 + public 44 = **64 个函数**）+ search_path 补 amux。函数不搬位置 → 避开函数间互调重写和 GoTrue 钩子 `amux_access_token_hook` 的风险。
-- 2d FC supabase 客户端**默认 schema 设 `amux`**（覆盖 243 处 `.from`，零改）；因函数留 public，**41 处 `.rpc` 改为 `.schema('public').rpc(...)`**（5 文件，已实测 FC 无 `.from` 碰 keep-list 表）。
-- **RLS org 守卫（`team.oid == jwt.org_id`）挪到阶段 3**（依赖 token 里的 org_id）；本阶段策略保持原 team-scoped 语义随表迁移。
-- 闸门：26 SQL RLS 测试 + FC 测试全绿（worktree 未装依赖时在 testsupa/装依赖后跑）。
-- ⚠️ **不可灰度**：2b 一执行，FC 旧 `.from()`（默认 public）即刻全断，必须与 2d 部署 + 2a 的 PGRST 改动**协同切换** → 停机窗口。
-- **✅ 干跑已验证（47.x，原子回滚零残留）**：moved **35 tables**, rewrote **64 functions**，amux/sessions/teams.oid 回滚后均无残留。
-- 回滚：SET SCHEMA 反向 + drop oid + FC 默认 schema 改回 + PGRST 还原。
-
-### 阶段 3 — 本地对齐 saas-mono 登录（Better-Auth **保留不退役**）
-拆两块按 amux 依赖切：
-
-**3A（public-only，✅ 已落地 prod）** — 迁移 `20260608020000_org_resolution.sql`：
-- `public.users` 子集镜像（auth_user_id→auth.users / org_id→orgs；saas-mono 合并时拥有全表，待对齐）
-- `app.current_org_id()`：先读 JWT `app_metadata.org_id`，兜底查 `public.users.org_id`（无 JWT 优雅返回 null）
-- orgs RLS `orgs_view_policy`（`id = app.current_org_id()`，镜像 saas-mono；写仅 service_role 绕过）
-- 状态：已应用 + 验证（users 表 / 函数 / 策略就位）。纯加表、客户端无感。
-
-**3B（依赖 amux，✅ 已写好+干跑，待随阶段 2 落地）** — 迁移 `20260608030000_org_tenant_guards.sql`：
-- `app.ensure_org_default_team(org_id)`：幂等在 org 下建默认 team（slug=org-<id>，oid=org_id），SECURITY DEFINER 绕过守卫
-- `amux_access_token_hook` 增强：保留原 acl + memberships，**注入 `app_metadata.org_id`**（保留已有 claim，兜底查 public.users）；保留 `exception→return event` 防御
-- `teams_org_guard`：amux.teams 上的 **restrictive** 策略（`oid is null or oid = app.current_org_id()`），与 is_team_member ANDed 做跨 org 防御
-- **✅ 干跑验证（47.x，搬 teams/actors→amux + 3B + 实测 provisioning 建默认 team + 实测 hook 返回合法 jsonb，原子回滚零残留）**
-- ⚠️ hook 是 GoTrue 登录钩子，改 live 有登录中断风险 → testsupa 测 + 验一次登录再上。
-
-**待补（FC 代码，阶段 3 收尾）**：org onboarding / 首登流程里调用 `app.ensure_org_default_team`；FC 从 JWT `org_id` 取租户上下文。Better-Auth 路径整段保留并存，不动。
-- 闸门：注册→org_id + public.users 行 + amux 默认 team；登录 token 带 org_id；`team.oid==org_id` 守卫生效；端到端测一次登录。
-
-### 阶段 4 — 合并到 saas-mono（最后碰他们的实例）
-- 前置：PG 版本对齐、扩展差集安装、`JWT_SECRET` 统一、saas-mono PostgREST 加 amux。
-- 在 saas-mono 实例应用阶段 2 迁移（orgs 跳过，他们已有）；teamclaw FC 切 `SUPABASE_URL` + 统一密钥；切流。
-- 闸门：套件在 saas-mono 重跑 + 登录 + 租户隔离冒烟。回滚：FC 指回我们实例。
+**prod 47.x 此刻实况**：已永久存在 `public.orgs/plans/users` 镜像 + `app.current_org_id()` + orgs RLS。
+全是加法，对现有 teamclaw 和四端客户端**无感**。amux 搬迁与 S3B 守卫/钩子**尚未应用**。
 
 ---
 
-## 剩余风险
+## 5. 执行计划（线性，含验证/回滚）
 
-| 项 | 级别 |
-|---|---|
-| GoTrue/token claims 合并（含 amux_access_token_hook，改错全员登录挂） | 🔴 |
-| 阶段 2 SET SCHEMA 协同切换（live prod 会断线，需窗口） | 🔴 |
-| PostgREST 暴露 amux（PGRST_DB_SCHEMAS 容器 env） | 🔴 |
-| PG 大版本对齐（我们 18.3 vs saas-mono ?） | 🔴 |
-| 扩展差集安装（age/pgvector/pg_cron/pg_net） | 🟡 |
-| RLS 加 org 一致性守卫 | 🟡 |
-| JWT secret 统一（两实例 GoTrue 密钥） | 🟡 |
-| Better-Auth：**保留不退役**（用户决定），与 GoTrue 并存 | — |
-| plans 桩表与 saas-mono 真实 DDL 对齐 | 🟡 |
+### ✅ 已完成
+- **S1 / S3A** 已应用 prod 并验证（表/函数/策略/触发器就位，回滚事务实测插入通过，零残留）。
 
-**已消除**：多团队→单 org 不可逆收敛、team_id→oid 客户端大改、跨实例数据迁移（因"保留 teams + 不做数据迁移"）。
+### ⬜ Step A — FC 代码收尾（S2d 校验 + S3-FC，可现在做，不碰实例）
+1. worktree 装依赖 → 跑 `pnpm --filter fc typecheck` + FC 测试，给 S2d 的 41 处 .rpc 改动兜底。
+2. 写 S3-FC：org onboarding/首登流程调用 `app.ensure_org_default_team(org_id)`；FC 从 JWT `app_metadata.org_id` 解析租户上下文（替代信客户端传的 team 作租户边界）。
+3. 闸门：typecheck + FC 测试全绿。
+4. 回滚：纯代码，分支可弃。
+
+### ⬜ Step B — testsupa 预演（强烈建议，先于 prod 切）
+1. 在 testsupa 顺序应用 S1→S3A→S2→S3B。
+2. 改 testsupa PostgREST `PGRST_DB_SCHEMAS` 加 `amux`。
+3. 部署带 S2d 的 FC 指向 testsupa。
+4. 闸门：26 个 SQL RLS 测试 + FC 测试全绿；**端到端验一次登录**（确认 token 带 org_id、hook 没挂）。
+5. 这步把所有 🔴 风险（hook、PGRST、协同切）在非生产先趟一遍。
+
+### ⬜ Step C — prod 切换（停机窗口，⚠️ 不可灰度）
+**必须三件事同一窗口一起做**（否则 FC 旧 `.from()` 默认 public 即刻全断）：
+1. 我跑迁移 `20260608010000`(S2) + `20260608030000`(S3B)。
+2. 你改 prod PostgREST 容器 `PGRST_DB_SCHEMAS` 加 `amux`（保留 public）+ 重启。
+3. 你部署带 S2d + S3-FC 的 FC。
+4. 闸门：登录冒烟 + 租户隔离冒烟。
+5. 回滚：SET SCHEMA 反向 + drop teams.oid/守卫 + FC 默认 schema 改回 + PGRST 还原 + hook 还原。
+
+### ⬜ Step D — 合并到 saas-mono（S4，最后）
+前置（先在 saas-mono 实例跑只读查询确认）：
+```sql
+select version();  -- 对齐我们 PG 18.3
+select name, installed_version from pg_available_extensions where installed_version is not null order by 1;  -- 差集：age 1.6.0 / vector 0.8.1.2 / pg_cron / pg_net
+select schema_name from information_schema.schemata where schema_name in ('amux','app','agent_knowledge','mem0','mem0_graph');  -- 命名冲突
+```
++ 装扩展差集、统一 GoTrue `JWT_SECRET`、saas-mono PGRST 加 amux。
+然后在 saas-mono 实例应用 S2/S3B（S1/S3A 的 orgs/users/plans 跳过——saas-mono 已有），FC 切 `SUPABASE_URL`+统一密钥，切流。
+
+---
+
+## 6. 风险登记
+
+| 风险 | 级别 | 缓解 |
+|---|---|---|
+| S3B hook 改 live 致登录中断 | 🔴 | Step B testsupa 先测登录；hook 有 exception→return event 防御 |
+| 协同切窗口（S2+PGRST+FC 必须同时） | 🔴 | Step C 窗口；Step B 先预演 |
+| PostgREST 暴露 amux（PGRST_DB_SCHEMAS 容器 env，非 config.toml） | 🔴 | Step B/C 清单 |
+| saas-mono PG 大版本对齐（我们 18.3） | 🔴 | Step D 前置只读查询 |
+| 扩展差集（age/pgvector/pg_cron/pg_net） | 🟡 | Step D 前置 |
+| FC S2d 未 typecheck | 🟡 | Step A |
+| plans/users 子集镜像 vs saas-mono 全表对齐 | 🟡 | Step D 前对齐 DDL |
+| JWT secret 统一 | 🟡 | Step D |
+
+**已消除**：多团队→单 org 收敛、team_id→oid 客户端大改、跨实例数据迁移（因 D3+D6）。
+
+## 7. 关键技术事实（避免重复踩）
+
+- prod 47.x = 生产，自建 Supabase，PG **18.3**；supabase-admin MCP 指向它。
+- `apply_migration` 缺 DATABASE_URL 不可用 → 用 `execute_sql` 应用；干跑 = 整段塞 DO 块末尾 `raise exception` 原子回滚。
+- 42 张 public 表：搬 amux 35 张；留 public 7 张（orgs/plans + 5 张 Better-Auth）。
+- 函数留 public，只重写函数体 `public.<表>→amux.<表>`（64 个）+ search_path 补 amux；因此 41 个 FC `.rpc` 要 `.schema('public')`。
+- saas-mono signup 的 orgId 是**必填输入**（org 先存在，不在 signup 建 org）→ provisioning = 挂到已有 org 时建默认 team。
