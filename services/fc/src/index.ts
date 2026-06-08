@@ -23,6 +23,10 @@ import type { JWTVerifyGetKey } from "jose";
 // closures so importing this module never requires env at load time.
 // ---------------------------------------------------------------------------
 const SUPABASE_URL_FN = () => process.env.SUPABASE_URL || "";
+// Public, browser-reachable GoTrue base used for OAuth `authorize` redirects.
+// SUPABASE_URL is typically an internal/VPC address the browser can't reach.
+const SUPABASE_PUBLIC_URL_FN = () =>
+  process.env.SUPABASE_PUBLIC_URL || process.env.SUPABASE_URL || "";
 const SUPABASE_PUBLISHABLE_KEY = () => publishableKeyFromEnv(process.env);
 
 // Build a body-like object from a GET event's query string (used by the only
@@ -48,6 +52,7 @@ export function makeAuthRepoFactory(kind: "supabase" | "postgres") {
   return () =>
     createSupabaseAuthRepository({
       supabaseUrl: SUPABASE_URL_FN(),
+      supabasePublicUrl: SUPABASE_PUBLIC_URL_FN(),
       publishableKey: SUPABASE_PUBLISHABLE_KEY(),
     });
 }

@@ -35,6 +35,31 @@ test("GET /v1/auth/oauth/google/authorize 302s to GoTrue authorize", async () =>
   assert.equal(u.searchParams.get("code_challenge_method"), "s256");
 });
 
+test("authorize redirect uses supabasePublicUrl when set (browser-reachable), not the internal supabaseUrl", async () => {
+  const auth = createSupabaseAuthRepository({
+    supabaseUrl: "http://172.18.29.136", // internal/VPC — browser can't reach
+    supabasePublicUrl: "https://amuxsupa.ucar.cc", // public
+    publishableKey: "anon-key",
+    fetchImpl: async () => new Response("{}", { status: 200 }),
+    createClient: () => ({ rpc: async () => ({ data: null, error: null }) }),
+  });
+  const deps = {
+    createRepository: () => { throw new Error("business repo not expected"); },
+    createAuthRepository: () => auth,
+  };
+  const res = await handleBusinessApiRequest({
+    httpMethod: "GET",
+    path: "/v1/auth/oauth/wechat/authorize",
+    queryParameters: { redirect: "http://127.0.0.1:54172/callback", code_challenge: "CH" },
+    headers: {},
+    body: null,
+  }, deps);
+  assert.equal(res.statusCode, 302);
+  const loc = (res.headers as any).Location;
+  assert.ok(loc.startsWith("https://amuxsupa.ucar.cc/auth/v1/authorize?"), `unexpected location: ${loc}`);
+  assert.ok(!loc.includes("172.18.29.136"), "browser redirect must not use the internal supabaseUrl");
+});
+
 test("POST /v1/auth/oauth/exchange exchanges PKCE code for tokens", async () => {
   const calls = [];
   const fetchImpl = async (url, init) => {

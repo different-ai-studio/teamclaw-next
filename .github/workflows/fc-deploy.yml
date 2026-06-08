@@ -34,6 +34,9 @@ jobs:
       BACKEND_KIND: ${{ vars.BACKEND_KIND || 'supabase' }}
       PUSH_WEBHOOK_SECRET: ${{ secrets.PUSH_WEBHOOK_SECRET }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      # Public, browser-reachable GoTrue base for OAuth authorize redirects
+      # (non-secret domain). Falls back to SUPABASE_URL inside FC when unset.
+      SUPABASE_PUBLIC_URL: ${{ vars.SUPABASE_PUBLIC_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
       APNS_PRIVATE_KEY_P8: ${{ secrets.APNS_PRIVATE_KEY_P8 }}
