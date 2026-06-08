@@ -108,6 +108,62 @@
     --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* ---------------------------------------------------------------------------
+   Build flavor: "anodized teal" (阳极蓝绿) — opt-in via build config
+   (app.palette = "teal", e.g. BUILD_ENV=teal). Applied as data-palette="teal"
+   on <html> by the early script in index.html / main.tsx.
+
+   Four anchors from the spec: teal #0F6E62 (主色), bright #16998A (亮·交互),
+   chalk #F2F0EA (底), basalt #20242A (正文). teal-forward — primary/CTA is
+   teal, bright drives interaction/focus/links; the coral accent slot becomes
+   bright teal. Light-only by design: the selector outranks `.dark`
+   (`:root[data-palette]` = (0,1,1) beats `.dark` = (0,1,0)), so toggling dark
+   mode stays on the teal-light surface instead of breaking into a half-grey
+   state. No teal dark variant exists yet — that's intentional.
+   --------------------------------------------------------------------------- */
+:root[data-palette="teal"] {
+    --background: #f2f0ea;          /* chalk · 底 */
+    --foreground: #20242a;          /* basalt · 正文 */
+    --paper: #fafaf8;               /* card surface lifted above chalk */
+    --panel: #e5e6e1;              /* secondary surface / sidebar (cool pebble) */
+    --selected: #d8ddd7;           /* selected state, faint teal tint */
+    --ink-2: #4a4f55;              /* secondary text */
+    --faint: #9aa0a0;              /* tertiary text, cool gray */
+
+    --card: #fafaf8;
+    --card-foreground: #20242a;
+    --popover: #fafaf8;
+    --popover-foreground: #20242a;
+    --primary: #0f6e62;            /* teal · 主色 — primary buttons / CTA */
+    --primary-foreground: #f4f4ef;
+    --secondary: #e5e6e1;
+    --secondary-foreground: #20242a;
+    --muted: #e5e6e1;
+    --muted-foreground: #6b7076;
+    --accent: #d8ddd7;
+    --accent-foreground: #20242a;
+    /* --destructive kept out-of-palette (red), inherited from :root above. */
+    --border: rgba(32, 36, 42, 0.08);
+    --border-soft: rgba(32, 36, 42, 0.05);
+    --input: rgba(32, 36, 42, 0.08);
+    --ring: rgba(22, 153, 138, 0.4);   /* bright teal focus ring */
+    --system-accent: #16998a;          /* 亮·交互 */
+
+    /* The single accent slot — coral becomes bright teal here. */
+    --coral: #16998a;
+    --coral-soft: #cfe3df;
+
+    /* --chart-* kept as-is (data viz, orthogonal to brand). */
+    --sidebar: #e5e6e1;
+    --sidebar-foreground: #20242a;
+    --sidebar-primary: #0f6e62;
+    --sidebar-primary-foreground: #f4f4ef;
+    --sidebar-accent: #d8ddd7;
+    --sidebar-accent-foreground: #20242a;
+    --sidebar-border: rgba(32, 36, 42, 0.08);
+    --sidebar-ring: rgba(22, 153, 138, 0.4);
+}
+
 @theme inline {
     --radius-sm: calc(var(--radius) - 4px);
     --radius-md: calc(var(--radius) - 2px);

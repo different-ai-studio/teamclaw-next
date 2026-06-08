@@ -39,6 +39,12 @@ Sentry.init({
       root.classList.add('dark')
     }
   }
+  // Build-flavor palette (mirrors the index.html early script). No-op for the
+  // default Editorial Calm palette.
+  const palette = buildConfig.app?.palette
+  if (palette && palette !== 'default') {
+    root.setAttribute('data-palette', palette)
+  }
 })()
 
 // Text entry defaults to command/config/chat style input. Mobile WebView and

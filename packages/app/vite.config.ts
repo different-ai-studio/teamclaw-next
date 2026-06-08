@@ -71,9 +71,11 @@ export default defineConfig({
       transformIndexHtml(html) {
         const uiVariant =
           (buildConfig as any).app?.uiVariant === 'workspace' ? 'workspace' : 'default'
+        const palette = ((buildConfig as any).app?.palette as string) || 'default'
         return html
           .replace(/__APP_SHORT_NAME__/g, sn as string)
           .replace(/__UI_VARIANT__/g, uiVariant)
+          .replace(/__PALETTE__/g, palette)
       },
     },
     // Bundle analysis: run with ANALYZE=true pnpm build
