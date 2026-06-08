@@ -4,9 +4,6 @@ import { NavRail } from '../NavRail'
 import { useUIStore } from '@/stores/ui'
 import { useSessionStore } from '@/stores/session'
 
-vi.mock('@/components/sidebar/IdeasSection', () => ({
-  IdeasSection: () => <div data-testid="ideas-section" />,
-}))
 vi.mock('@/components/sidebar/ActorsSection', () => ({
   ActorsSection: () => <div data-testid="actors-section" />,
 }))
@@ -53,9 +50,9 @@ describe('NavRail', () => {
     expect(screen.getByText('2')).toBeInTheDocument()
   })
 
-  it('renders IdeasSection and ActorsSection', () => {
+  it('renders ActorsSection and an Ideas filter entry', () => {
     render(<NavRail />)
-    expect(screen.getByTestId('ideas-section')).toBeInTheDocument()
     expect(screen.getByTestId('actors-section')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Ideas|想法/ })).toBeInTheDocument()
   })
 })

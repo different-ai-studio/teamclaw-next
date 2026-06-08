@@ -16,7 +16,7 @@ import { useCurrentTeamStore } from "@/stores/current-team";
 type SessionSet = (fn: ((state: SessionState) => Partial<SessionState>) | Partial<SessionState>) => void;
 type SessionGet = () => SessionState;
 
-export function createLoaderActions(set: SessionSet, get: SessionGet) {
+export function createLoaderActions(set: SessionSet, _get: SessionGet) {
   return {
     resetSessions: () => {
       sessionDataCache.clear();

@@ -128,38 +128,12 @@
     "quickSessionCreateError": "Could not start a session with your local agent",
     "localAgentWelcome": {
       "fallbackName": "Local agent",
-      "metaLoading": "Local · Checking…",
-      "metaOnline": "Local · Online · Ready to start",
-      "metaOffline": "Local · Offline · Unavailable",
-      "divider": "Local agent · Standby",
-      "statusLineOnline": "Online · Local",
-      "statusLineOffline": "Offline · Local",
-      "statusLineLoading": "Checking…",
-      "bodyReady": "Your local agent is ready. Start a conversation anytime.",
-      "quickStart": "Quick start",
       "headlineSuffix": "is waiting on this device",
       "headlineOffline": "Local agent unavailable",
       "statusSubOnline": "● online · local · ai",
       "statusSubOffline": "● offline · local",
       "statusSubLoading": "● checking…",
-      "continueShort": "resume ×{{count}}",
-      "bodyOffline": "Finish agent setup or start the daemon to chat on this device.",
-      "startConversation": "Start conversation",
-      "quickActionsShort": {
-        "workspace": "workspace",
-        "structure": "structure",
-        "report": "report"
-      },
-      "quickActions": {
-        "workspaceChanges": "Review workspace changes",
-        "projectStructure": "Summarize project structure",
-        "writeReport": "Write a report"
-      },
-      "quickMessages": {
-        "workspaceChanges": "What changed in the current workspace?",
-        "projectStructure": "Summarize this project's tech stack",
-        "writeReport": "/{Write a report} "
-      }
+      "continueShort": "resume ×{{count}}"
     },
     "sessionEmptyThread": {
       "dayDivider": "New session · Start with a message",
@@ -193,7 +167,8 @@
           "label": "Sync with everyone",
           "message": "Everyone — let's align on today's goals:"
         }
-      }
+      },
+      "participantCount": "{{count}} participants · Waiting for the first message"
     },
     "draftStartConversation": "Start conversation",
     "backToActiveSession": "Back to active session",
@@ -512,7 +487,8 @@
     "feedback": {
       "goodResponse": "Good response",
       "poorResponse": "Poor response"
-    }
+    },
+    "openAgentSettings": "Open agent settings"
   },
   "onboarding": {
     "common": {
@@ -721,7 +697,6 @@
     "showAllSessions": "Show all sessions",
     "showCronSessions": "Show scheduled sessions",
     "searchWithShortcut": "Search (⌘K)",
-    "mentions": "@Mentions",
     "pinned": "Pinned",
     "ideasSection": "Top Ideas",
     "actorsSection": "Recents",
@@ -733,7 +708,8 @@
     "unread": "Unread",
     "loadMoreSessions": "Load more",
     "mqttDisconnected": "MQTT disconnected",
-    "mqttDisconnectedHint": "Tap to configure server"
+    "mqttDisconnectedHint": "Tap to configure server",
+    "ideas": "Ideas"
   },
   "setup": {
     "title": "Setup Required",
@@ -934,7 +910,6 @@
       "daemon": "Daemon",
       "daemonGeneral": "General",
       "daemonWorkspaces": "Workspace",
-      "daemonRuntimes": "Runtimes",
       "localAgent": "Local Agent",
       "llm": "LLM Model",
       "prompt": "Prompt",
@@ -1142,11 +1117,7 @@
       "toolsProbeFailed": "Probe failed",
       "toolsNone": "No tools",
       "retryProbe": "Retry",
-      "statusConnected": "Connected",
       "statusDisabled": "Disabled",
-      "statusNotConnected": "Not connected",
-      "statusNeedsAuth": "Needs authentication",
-      "statusPending": "Pending",
       "localServer": "Local server",
       "remoteServer": "Remote server",
       "inherent": "Built-in",

@@ -221,7 +221,10 @@ pub fn read_workspace_config(workspace_path: &str) -> Result<serde_json::Value, 
         .map_err(|e| format!("Failed to parse {}: {}", super::CONFIG_FILE_NAME, e))
 }
 
-pub fn write_workspace_config(workspace_path: &str, json: &serde_json::Value) -> Result<(), String> {
+pub fn write_workspace_config(
+    workspace_path: &str,
+    json: &serde_json::Value,
+) -> Result<(), String> {
     let teamclaw_dir = Path::new(workspace_path).join(crate::commands::TEAMCLAW_DIR);
     std::fs::create_dir_all(&teamclaw_dir)
         .map_err(|e| format!("Failed to create {}: {}", super::TEAMCLAW_DIR, e))?;

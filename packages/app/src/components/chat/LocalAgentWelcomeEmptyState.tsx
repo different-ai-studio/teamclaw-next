@@ -9,42 +9,6 @@ export type LocalAgentWelcomeAgent = {
   displayName: string
 }
 
-type QuickAction = {
-  labelKey: string
-  labelDefault: string
-  shortLabelKey: string
-  shortLabelDefault: string
-  messageKey: string
-  messageDefault: string
-}
-
-const QUICK_ACTIONS: QuickAction[] = [
-  {
-    labelKey: 'chat.localAgentWelcome.quickActions.workspaceChanges',
-    labelDefault: '查看 workspace 改动',
-    shortLabelKey: 'chat.localAgentWelcome.quickActionsShort.workspace',
-    shortLabelDefault: 'workspace',
-    messageKey: 'chat.localAgentWelcome.quickMessages.workspaceChanges',
-    messageDefault: '帮我看看当前 workspace 有什么改动',
-  },
-  {
-    labelKey: 'chat.localAgentWelcome.quickActions.projectStructure',
-    labelDefault: '总结项目结构',
-    shortLabelKey: 'chat.localAgentWelcome.quickActionsShort.structure',
-    shortLabelDefault: '结构',
-    messageKey: 'chat.localAgentWelcome.quickMessages.projectStructure',
-    messageDefault: '总结一下这个项目的技术栈',
-  },
-  {
-    labelKey: 'chat.localAgentWelcome.quickActions.writeReport',
-    labelDefault: '写一份报告',
-    shortLabelKey: 'chat.localAgentWelcome.quickActionsShort.report',
-    shortLabelDefault: '报告',
-    messageKey: 'chat.localAgentWelcome.quickMessages.writeReport',
-    messageDefault: '/{写报告} ',
-  },
-]
-
 export type LocalAgentWelcomeEmptyStateProps = {
   agent: LocalAgentWelcomeAgent | null
   agentLoading?: boolean
@@ -99,7 +63,7 @@ export function LocalAgentWelcomeEmptyState({
   agentLoading = false,
   starting = false,
   onStartConversation,
-  onQuickAction,
+  onQuickAction: _onQuickAction,
   onOpenAgentSettings,
 }: LocalAgentWelcomeEmptyStateProps) {
   const { t } = useTranslation()

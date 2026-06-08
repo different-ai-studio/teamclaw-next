@@ -187,7 +187,7 @@ export function ComposerStack({
                     </div>
 
                     {showApprovalOnly ? null : (
-                      agents.map((agent, index) => {
+                      agents.map((agent) => {
                         const isAnchor = anchorActorId === agent.actorId && currentEntry !== null;
                         return (
                           <ComposerAgentStrip

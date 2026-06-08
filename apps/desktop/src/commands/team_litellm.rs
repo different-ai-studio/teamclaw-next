@@ -69,10 +69,20 @@ pub fn write_llm_config(workspace_path: &str, config: Option<&LlmConfig>) -> Res
     let config_path = format!("{}/{}", teamclaw_dir, crate::commands::CONFIG_FILE_NAME);
 
     let mut json: serde_json::Value = if Path::new(&config_path).exists() {
-        let content = std::fs::read_to_string(&config_path)
-            .map_err(|e| format!("Failed to read {}: {}", crate::commands::CONFIG_FILE_NAME, e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse {}: {}", crate::commands::CONFIG_FILE_NAME, e))?
+        let content = std::fs::read_to_string(&config_path).map_err(|e| {
+            format!(
+                "Failed to read {}: {}",
+                crate::commands::CONFIG_FILE_NAME,
+                e
+            )
+        })?;
+        serde_json::from_str(&content).map_err(|e| {
+            format!(
+                "Failed to parse {}: {}",
+                crate::commands::CONFIG_FILE_NAME,
+                e
+            )
+        })?
     } else {
         serde_json::json!({
             "$schema": "https://opencode.ai/config.json"
@@ -94,8 +104,13 @@ pub fn write_llm_config(workspace_path: &str, config: Option<&LlmConfig>) -> Res
     let content = serde_json::to_string_pretty(&json)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    std::fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write {}: {}", crate::commands::CONFIG_FILE_NAME, e))
+    std::fs::write(&config_path, content).map_err(|e| {
+        format!(
+            "Failed to write {}: {}",
+            crate::commands::CONFIG_FILE_NAME,
+            e
+        )
+    })
 }
 
 // ─── Tauri Commands ───────────────────────────────────────────────────────────

@@ -128,38 +128,12 @@
     "quickSessionCreateError": "无法与本机 Agent 开始会话",
     "localAgentWelcome": {
       "fallbackName": "本机 Agent",
-      "metaLoading": "本机 · 检测中…",
-      "metaOnline": "本机 · 在线 · 等待开始",
-      "metaOffline": "本机 · 离线 · 暂不可对话",
-      "divider": "本机 Agent · 待命",
-      "statusLineOnline": "在线 · 本机",
-      "statusLineOffline": "离线 · 本机",
-      "statusLineLoading": "检测中…",
-      "bodyReady": "本机 Agent 已就绪，随时可以开始对话。",
-      "quickStart": "快速开始",
       "headlineSuffix": "在本机等你开口",
       "headlineOffline": "本机 Agent 暂不可用",
       "statusSubOnline": "● online · local · ai",
       "statusSubOffline": "● offline · local",
       "statusSubLoading": "● checking…",
-      "continueShort": "继续 ×{{count}}",
-      "bodyOffline": "完成 Agent 配置或启动 daemon 后即可在本机对话。",
-      "startConversation": "开始对话",
-      "quickActionsShort": {
-        "workspace": "workspace",
-        "structure": "结构",
-        "report": "报告"
-      },
-      "quickActions": {
-        "workspaceChanges": "查看 workspace 改动",
-        "projectStructure": "总结项目结构",
-        "writeReport": "写一份报告"
-      },
-      "quickMessages": {
-        "workspaceChanges": "帮我看看当前 workspace 有什么改动",
-        "projectStructure": "总结一下这个项目的技术栈",
-        "writeReport": "/{写报告} "
-      }
+      "continueShort": "继续 ×{{count}}"
     },
     "sessionEmptyThread": {
       "dayDivider": "新会话 · 从一条消息开始",
@@ -193,7 +167,8 @@
           "label": "向所有人同步",
           "message": "各位，对齐一下今天的目标："
         }
-      }
+      },
+      "participantCount": "{{count}} 位参与者 · 等待第一条消息"
     },
     "draftStartConversation": "开始对话",
     "backToActiveSession": "返回活跃会话",
@@ -512,7 +487,8 @@
     "feedback": {
       "goodResponse": "回答不错",
       "poorResponse": "回答较差"
-    }
+    },
+    "openAgentSettings": "打开 Agent 设置"
   },
   "onboarding": {
     "common": {
@@ -721,7 +697,6 @@
     "showAllSessions": "显示全部会话",
     "showCronSessions": "显示定时会话",
     "searchWithShortcut": "搜索 (⌘K)",
-    "mentions": "@提及",
     "pinned": "已置顶",
     "ideasSection": "热门想法",
     "actorsSection": "最近联系",
@@ -733,7 +708,8 @@
     "unread": "未读",
     "loadMoreSessions": "加载更多",
     "mqttDisconnected": "MQTT 未连接",
-    "mqttDisconnectedHint": "点击配置服务器"
+    "mqttDisconnectedHint": "点击配置服务器",
+    "ideas": "想法"
   },
   "setup": {
     "title": "需要设置",
@@ -934,7 +910,6 @@
       "daemon": "Daemon",
       "daemonGeneral": "通用",
       "daemonWorkspaces": "工作区",
-      "daemonRuntimes": "运行时",
       "localAgent": "本地 Agent",
       "llm": "LLM 模型",
       "prompt": "提示词",
@@ -1142,11 +1117,7 @@
       "toolsProbeFailed": "探测失败",
       "toolsNone": "无工具",
       "retryProbe": "重试",
-      "statusConnected": "已连接",
       "statusDisabled": "已禁用",
-      "statusNotConnected": "未连接",
-      "statusNeedsAuth": "需要认证",
-      "statusPending": "等待中",
       "localServer": "本地服务器",
       "remoteServer": "远程服务器",
       "inherent": "内置",

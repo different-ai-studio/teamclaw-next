@@ -22,7 +22,10 @@ const ERROR_HTML: &str =
      <body style=\"font-family:system-ui;text-align:center;padding-top:18vh\">\
      <h2>登录失败 / Sign-in failed</h2><p>请返回 TeamClaw 重试。<br>Please return to TeamClaw and try again.</p></body>";
 
-type Pending = (oneshot::Receiver<Result<String, String>>, tokio::task::AbortHandle);
+type Pending = (
+    oneshot::Receiver<Result<String, String>>,
+    tokio::task::AbortHandle,
+);
 
 #[derive(Default)]
 pub struct OAuthLoopbackState {
@@ -56,7 +59,12 @@ pub async fn oauth_loopback_start(
     });
     // Replace any in-flight listener (e.g. a prior cancelled attempt) and abort
     // its task so we don't leak a parked accept() / bound port across retries.
-    if let Some((_, prev)) = state.pending.lock().unwrap().replace((rx, handle.abort_handle())) {
+    if let Some((_, prev)) = state
+        .pending
+        .lock()
+        .unwrap()
+        .replace((rx, handle.abort_handle()))
+    {
         prev.abort();
     }
     Ok(LoopbackStart { port })
@@ -191,13 +199,18 @@ mod tests {
     #[test]
     fn returns_error_when_no_code() {
         assert_eq!(
-            parse_callback_target("/callback?error=access_denied&error_description=user%20cancelled"),
+            parse_callback_target(
+                "/callback?error=access_denied&error_description=user%20cancelled"
+            ),
             Err("user cancelled".to_string())
         );
     }
 
     #[test]
     fn returns_default_error_for_empty_query() {
-        assert_eq!(parse_callback_target("/callback"), Err("oauth_no_code".to_string()));
+        assert_eq!(
+            parse_callback_target("/callback"),
+            Err("oauth_no_code".to_string())
+        );
     }
 }

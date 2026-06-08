@@ -321,7 +321,10 @@ fn compute_secret_verify(team_secret: &str) -> Result<String, String> {
 
 /// Shared body for both the synchronous (`team_git_join`) and background
 /// (`team_git_join_background`) commands.
-async fn team_git_join_impl(app: AppHandle, args: TeamGitJoinArgs) -> Result<TeamGitResult, String> {
+async fn team_git_join_impl(
+    app: AppHandle,
+    args: TeamGitJoinArgs,
+) -> Result<TeamGitResult, String> {
     let TeamGitJoinArgs {
         git_url,
         git_token,
@@ -354,7 +357,13 @@ async fn team_git_join_impl(app: AppHandle, args: TeamGitJoinArgs) -> Result<Tea
 
     let clone_args: Vec<&str> = if let Some(ref branch) = git_branch {
         if !branch.is_empty() {
-            vec!["clone", "-b", branch.as_str(), &remote_url, super::TEAM_REPO_DIR]
+            vec![
+                "clone",
+                "-b",
+                branch.as_str(),
+                &remote_url,
+                super::TEAM_REPO_DIR,
+            ]
         } else {
             vec!["clone", &remote_url, super::TEAM_REPO_DIR]
         }
@@ -510,8 +519,12 @@ async fn team_git_join_impl(app: AppHandle, args: TeamGitJoinArgs) -> Result<Tea
         }
     }
 
-    let llm_config =
-        crate::commands::team_litellm::build_llm_config(llm_base_url, llm_model, llm_model_name, llm_models);
+    let llm_config = crate::commands::team_litellm::build_llm_config(
+        llm_base_url,
+        llm_model,
+        llm_model_name,
+        llm_models,
+    );
     crate::commands::team_litellm::write_llm_config(&workspace_path, llm_config.as_ref())?;
     println!(
         "[Team Join] Wrote LLM config to {}/{}",
