@@ -1,10 +1,15 @@
+use std::path::PathBuf;
+
+use super::amuxd_client;
 use super::types::DeliveryChannel;
 use crate::commands::gateway;
 use crate::commands::gateway::email_config::EmailConfig;
 
 /// Manages delivery of cron job results to channels.
 /// Delegates to gateway modules for actual sending — no reimplementation.
-/// Reads channel config from teamclaw.json on each send to pick up any changes.
+/// Most channels still read credentials from the workspace `.teamclaw/teamclaw.json`.
+/// WeCom is routed through the amuxd-owned gateway and reads ownerId from the daemon
+/// config dir when no explicit target is set.
 #[derive(Debug, Clone)]
 pub struct DeliveryManager {
     workspace_path: String,
@@ -27,8 +32,12 @@ impl DeliveryManager {
         target: &str,
         message: &str,
     ) -> Result<Option<String>, String> {
-        let config = self.read_teamclaw_config()?;
+        if matches!(channel, DeliveryChannel::Wecom) {
+            self.send_wecom(target, message).await?;
+            return Ok(None);
+        }
 
+        let config = self.read_teamclaw_config()?;
         match channel {
             DeliveryChannel::Discord => {
                 self.send_discord(&config, target, message).await?;
@@ -50,10 +59,7 @@ impl DeliveryManager {
                 self.send_wechat(&config, target, message).await?;
                 Ok(None)
             }
-            DeliveryChannel::Wecom => {
-                self.send_wecom(target, message).await?;
-                Ok(None)
-            }
+            DeliveryChannel::Wecom => Ok(None),
         }
     }
 
@@ -289,50 +295,92 @@ impl DeliveryManager {
     }
     // ==================== WeCom ====================
 
-    /// Send via WeCom — delegates to the running WeComGateway's send_chat_message.
-    /// The gateway must be connected (WebSocket active).
+    /// Send via WeCom through amuxd's running gateway (not the desktop process).
     /// Target format: "single:{userid}" or "group:{chatid}" or raw "{userid}"
-    /// If target is empty, falls back to ownerId from config.
+    /// If target is empty, falls back to ownerId auto-recorded by the amuxd WeCom gateway.
     async fn send_wecom(&self, target: &str, message: &str) -> Result<(), String> {
-        // Fallback to ownerId when target is empty
-        let target = if target.is_empty() {
-            let config = self.read_teamclaw_config()?;
-            config
-                .get("channels")
-                .and_then(|ch| ch.get("wecom"))
-                .and_then(|w| w.get("ownerId"))
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .ok_or(
-                    "No WeCom target specified and ownerId is not set. \
-                     Send a DM to the bot first so ownerId is auto-recorded."
-                        .to_string(),
-                )?
+        let dispatch_target = if target.is_empty() {
+            format!("user:{}", self.resolve_wecom_owner_id()?)
         } else {
-            target.to_string()
-        };
-        let target = target.as_str();
-
-        let (chatid, chat_type) = if target.starts_with("single:") {
-            (target.strip_prefix("single:").unwrap_or(target), 1u32)
-        } else if target.starts_with("group:") {
-            (target.strip_prefix("group:").unwrap_or(target), 2u32)
-        } else {
-            // Raw value without prefix — default to single chat
-            (target, 1u32)
+            wecom_cron_target_to_dispatch(target)?
         };
 
         let chunks = split_message(message, 4000);
         for chunk in chunks {
-            gateway::wecom::send_proactive_message(chatid, chat_type, &chunk).await?;
+            amuxd_client::channel_send("wecom", &dispatch_target, &chunk).await?;
         }
 
         println!(
-            "[Cron Delivery] WeCom message sent to {} (chat_type={})",
-            chatid, chat_type
+            "[Cron Delivery] WeCom message sent via amuxd to {}",
+            dispatch_target
         );
         Ok(())
+    }
+
+    /// Resolve WeCom ownerId from amuxd's persisted gateway state, with a legacy
+    /// fallback to the workspace teamclaw.json for pre-migration installs.
+    fn resolve_wecom_owner_id(&self) -> Result<String, String> {
+        let daemon_root = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join(".amuxd")
+            .to_string_lossy()
+            .into_owned();
+
+        for root in [daemon_root.as_str(), self.workspace_path.as_str()] {
+            let Ok(config) = gateway::read_config(root) else {
+                continue;
+            };
+            if let Some(owner_id) = config
+                .channels
+                .as_ref()
+                .and_then(|ch| ch.wecom.as_ref())
+                .and_then(|w| w.owner_id.as_ref())
+                .filter(|s| !s.is_empty())
+            {
+                return Ok(owner_id.clone());
+            }
+        }
+
+        Err(
+            "No WeCom target specified and ownerId is not set. \
+             Send a DM to the bot first so ownerId is auto-recorded."
+                .to_string(),
+        )
+    }
+}
+
+/// Map cron UI target strings to amuxd `dispatch_send` shape.
+fn wecom_cron_target_to_dispatch(target: &str) -> Result<String, String> {
+    if let Some(id) = target.strip_prefix("single:") {
+        return Ok(format!("user:{id}"));
+    }
+    if let Some(id) = target.strip_prefix("group:") {
+        return Ok(format!("chat:{id}"));
+    }
+    if target.is_empty() {
+        return Err("WeCom target is empty".into());
+    }
+    Ok(format!("user:{target}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wecom_cron_target_to_dispatch;
+
+    #[test]
+    fn maps_single_and_group_targets() {
+        assert_eq!(
+            wecom_cron_target_to_dispatch("single:alice").unwrap(),
+            "user:alice"
+        );
+        assert_eq!(
+            wecom_cron_target_to_dispatch("group:chat-1").unwrap(),
+            "chat:chat-1"
+        );
+        assert_eq!(
+            wecom_cron_target_to_dispatch("bob").unwrap(),
+            "user:bob"
+        );
     }
 }
 
