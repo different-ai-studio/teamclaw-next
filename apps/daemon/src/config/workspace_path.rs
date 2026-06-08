@@ -23,7 +23,7 @@ mod tests {
 
     #[test]
     fn rejects_daemon_config_paths() {
-        let _lock = crate::global_team_store::TEST_HOME_LOCK
+        let _lock = crate::config::global_team_store::TEST_HOME_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();

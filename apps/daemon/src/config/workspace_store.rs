@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn add_rejects_daemon_config_paths() {
-        let _lock = crate::global_team_store::TEST_HOME_LOCK
+        let _lock = crate::config::global_team_store::TEST_HOME_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn load_drops_bogus_daemon_config_workspaces() {
-        let _lock = crate::global_team_store::TEST_HOME_LOCK
+        let _lock = crate::config::global_team_store::TEST_HOME_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
