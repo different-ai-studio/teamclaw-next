@@ -1,7 +1,11 @@
 import { create } from "@bufbuild/protobuf";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageKind, MessageSchema } from "@/lib/proto/teamclaw_pb";
-import { persistStreamingPartsForReply } from "@/lib/streaming-persist";
+import {
+  cloneStreamEntrySnapshot,
+  persistStreamingPartsForReply,
+  resolveStreamEntryForPersist,
+} from "@/lib/streaming-persist";
 import { useSessionMessageStore } from "@/stores/session-message-store";
 import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 
@@ -135,5 +139,43 @@ describe("persistStreamingPartsForReply", () => {
 
     const finalParts = JSON.parse(reply.partsJson ?? "[]");
     expect(finalParts[0].toolCall.result).toBe("PID %CPU COMM\n50369 opencode\n");
+  });
+
+  it("uses a frozen stream snapshot after beginPlanningPlaceholder clears byKey", async () => {
+    const stream = useV2StreamingStore.getState();
+    stream.pushToolUse("s1", "actor-a", {
+      toolId: "sleep-tool",
+      toolName: "bash",
+      description: "Sleep for 30 seconds",
+      params: { command: "sleep 30" },
+      toolKind: "execute",
+    });
+    stream.finishSessionActor("s1", "actor-a");
+
+    const snapshotSource = resolveStreamEntryForPersist("s1", "actor-a");
+    const streamEntrySnapshot = snapshotSource
+      ? cloneStreamEntrySnapshot(snapshotSource)
+      : undefined;
+    useV2StreamingStore.getState().beginPlanningPlaceholder("s1", "actor-a");
+
+    const reply = create(MessageSchema, {
+      messageId: "reply-interrupted",
+      sessionId: "s1",
+      senderActorId: "actor-a",
+      kind: MessageKind.AGENT_REPLY,
+      content: "",
+      turnId: "turn-interrupted",
+      createdAt: BigInt(100),
+    });
+
+    await persistStreamingPartsForReply("s1", "actor-a", reply, [], {
+      streamEntrySnapshot,
+    });
+
+    const parts = JSON.parse((reply as unknown as { partsJson: string }).partsJson);
+    expect(parts).toHaveLength(1);
+    expect(parts[0].toolCall.id).toBe("sleep-tool");
+    expect(parts[0].toolCall.status).toBe("failed");
+    expect(useV2StreamingStore.getState().byKey["s1::actor-a"].parts).toHaveLength(0);
   });
 });

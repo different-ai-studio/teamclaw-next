@@ -123,6 +123,8 @@ export async function interruptAgentActor(args: {
   // Wait for daemon Active→Idle + message.created; App.tsx finalizes the
   // partial turn via flushPendingStreamReply on statusChange.
 
+  useV2StreamingStore.getState().markInterruptedFlushPending(sessionId, agentActorId);
+
   sessionFlowLog("interrupt.ok", {
     sessionId,
     agentActorId,

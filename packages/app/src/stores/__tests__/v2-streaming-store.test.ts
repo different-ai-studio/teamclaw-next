@@ -7,7 +7,12 @@ import {
 
 beforeEach(() => {
   // Reset to a clean state
-  useV2StreamingStore.setState({ byKey: {}, archived: [], persistedPlansBySession: {} });
+  useV2StreamingStore.setState({
+    byKey: {},
+    archived: [],
+    persistedPlansBySession: {},
+    interruptedFlushPending: {},
+  });
 });
 
 describe("v2-streaming-store", () => {
@@ -304,6 +309,62 @@ describe("v2-streaming-store", () => {
     expect(useV2StreamingStore.getState().archived[0].streamId).toBe(firstStreamId);
   });
 
+  it("detachLiveStreamForPersist drops byKey without archiving", () => {
+    const store = useV2StreamingStore.getState();
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "sleep 30",
+      params: { command: "sleep 30" },
+      toolKind: "execute",
+    });
+    const streamId = useV2StreamingStore.getState().byKey["s1::a1"].streamId;
+    store.finishSessionActor("s1", "a1");
+    store.detachLiveStreamForPersist("s1", "a1", streamId);
+
+    const state = useV2StreamingStore.getState();
+    expect(state.byKey["s1::a1"]).toBeUndefined();
+    expect(state.archived).toHaveLength(0);
+    store.beginPlanningPlaceholder("s1", "a1");
+    expect(useV2StreamingStore.getState().archived).toHaveLength(0);
+  });
+
+  it("releaseActorAfterPersist clears archived interrupted turn via persistedSourceStreamId", () => {
+    const store = useV2StreamingStore.getState();
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "bash",
+      description: "sleep 30",
+      params: { command: "sleep 30" },
+      toolKind: "execute",
+    });
+    const interruptedStreamId =
+      useV2StreamingStore.getState().byKey["s1::a1"].streamId;
+    store.finishSessionActor("s1", "a1", { reason: "interrupt" });
+    store.beginPlanningPlaceholder("s1", "a1");
+    expect(useV2StreamingStore.getState().archived).toHaveLength(1);
+    expect(useV2StreamingStore.getState().archived[0].streamId).toBe(
+      interruptedStreamId,
+    );
+
+    store.releaseActorAfterPersist("s1", "a1", {
+      persistedPartsJson: JSON.stringify([
+        {
+          id: "t1",
+          type: "tool-call",
+          toolCallId: "tool-1",
+          toolCall: { id: "tool-1" },
+        },
+      ]),
+      persistedSourceStreamId: interruptedStreamId,
+    });
+
+    expect(useV2StreamingStore.getState().archived).toHaveLength(0);
+    expect(selectStreamsForSession(useV2StreamingStore.getState(), "s1")).toHaveLength(
+      0,
+    );
+  });
+
   it("releaseActorAfterPersist skips archive when parts_json already has tools", () => {
     const store = useV2StreamingStore.getState();
     store.pushToolUse("s1", "a1", {
@@ -462,6 +523,39 @@ describe("v2-streaming-store", () => {
     expect(stream.parts[0].toolCall?.status).toBe("completed");
   });
 
+  it("routes late tool results to archived streams instead of creating a phantom bubble", () => {
+    const store = useV2StreamingStore.getState();
+    store.pushToolUse("s1", "a1", {
+      toolId: "sleep-tool",
+      toolName: "bash",
+      description: "Sleep for 30 seconds",
+      params: { command: "sleep 30" },
+      toolKind: "execute",
+    });
+    store.finishSessionActor("s1", "a1");
+    store.beginPlanningPlaceholder("s1", "a1");
+
+    store.completeToolUse("s1", "a1", {
+      toolId: "sleep-tool",
+      success: true,
+      summary: "slept",
+    });
+
+    const state = useV2StreamingStore.getState();
+    expect(state.byKey["s1::a1"].toolCalls).toHaveLength(0);
+    expect(state.archived).toHaveLength(1);
+    expect(state.archived[0].toolCalls[0]).toMatchObject({
+      id: "sleep-tool",
+      status: "completed",
+      result: "slept",
+    });
+    const streams = selectStreamsForSession(state, "s1");
+    expect(streams.filter((entry) => entry.toolCalls.length > 0)).toHaveLength(1);
+    expect(streams.find((entry) => entry.toolCalls[0]?.id === "sleep-tool")?.toolCalls[0]?.status).toBe(
+      "completed",
+    );
+  });
+
   it("replaceParts does not downgrade completed tools to calling (enrich race)", () => {
     const store = useV2StreamingStore.getState();
     const ids = ["tool-1", "tool-2", "tool-3"];
@@ -570,6 +664,20 @@ describe("v2-streaming-store", () => {
     expect(stream.planEntries).toHaveLength(2);
     expect(stream.planEntries[0].content).toBe("Analyze requirements");
     expect(stream.planEntries[1].content).toBe("Write tests");
+  });
+
+  it("tracks interrupted flush pending per actor and clears on beginPlanning", () => {
+    const store = useV2StreamingStore.getState();
+    store.markInterruptedFlushPending("s1", "a1");
+    expect(store.isInterruptedFlushPending("s1", "a1")).toBe(true);
+    expect(store.isInterruptedFlushPending("s1", "a2")).toBe(false);
+
+    store.clearInterruptedFlushPending("s1", "a1");
+    expect(store.isInterruptedFlushPending("s1", "a1")).toBe(false);
+
+    store.markInterruptedFlushPending("s1", "a1");
+    store.beginPlanningPlaceholder("s1", "a1");
+    expect(store.isInterruptedFlushPending("s1", "a1")).toBe(false);
   });
 
   it("adds a completed placeholder when a result references an unseen tool in an existing stream", () => {

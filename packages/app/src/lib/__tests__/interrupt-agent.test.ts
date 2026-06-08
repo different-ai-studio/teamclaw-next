@@ -62,7 +62,11 @@ describe("interruptAgentActor", () => {
     listRuntimeTargetsForSession.mockResolvedValue([
       { agent_id: "agent-a", runtime_id: "rt-abcd" },
     ]);
-    useV2StreamingStore.setState({ byKey: {}, archived: [] });
+    useV2StreamingStore.setState({
+      byKey: {},
+      archived: [],
+      interruptedFlushPending: {},
+    });
     useV2StreamingStore.getState().appendOutput("session-1", "agent-a", "Hello");
   });
 
@@ -81,6 +85,9 @@ describe("interruptAgentActor", () => {
 
     expect(discardPendingStreamReply).not.toHaveBeenCalled();
     expect(useV2StreamingStore.getState().byKey["session-1::agent-a"]?.active).toBe(true);
+    expect(
+      useV2StreamingStore.getState().isInterruptedFlushPending("session-1", "agent-a"),
+    ).toBe(true);
   });
 
   it("cleans up locally when runtime target cannot be resolved", async () => {

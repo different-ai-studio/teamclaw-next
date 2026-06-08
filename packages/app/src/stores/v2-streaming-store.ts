@@ -11,6 +11,7 @@ import {
   agentReplyTextsEquivalent,
   pickCanonicalAgentReplyText,
 } from "@/lib/agent-reply-text";
+import { logInterruptMsgDiag } from "@/lib/interrupt-msg-diag-core";
 import {
   logStreamToolDiag,
   summarizeToolCallsForDiag,
@@ -71,6 +72,11 @@ interface State {
   archived: ArchivedEntry[];
   /** Session-scoped plan snapshot for the inline Todo dock after a turn ends. */
   persistedPlansBySession: Record<string, PersistedSessionPlan>;
+  /** Set when user cancels a turn; enables eager flush on the next terminal finishOnly. */
+  interruptedFlushPending: Record<string, true>;
+  markInterruptedFlushPending: (sessionId: string, actorId: string) => void;
+  clearInterruptedFlushPending: (sessionId: string, actorId: string) => void;
+  isInterruptedFlushPending: (sessionId: string, actorId: string) => boolean;
   appendOutput: (sessionId: string, actorId: string, delta: string) => void;
   appendThinking: (sessionId: string, actorId: string, delta: string) => void;
   pushToolUse: (
@@ -107,7 +113,13 @@ interface State {
   releaseActorAfterPersist: (
     sessionId: string,
     actorId: string,
-    opts?: { persistedPartsJson?: string },
+    opts?: { persistedPartsJson?: string; persistedSourceStreamId?: string },
+  ) => void;
+  /** Drop live byKey without archiving — caller already snapshot parts for persist. */
+  detachLiveStreamForPersist: (
+    sessionId: string,
+    actorId: string,
+    streamId: string,
   ) => void;
   clearActor: (
     sessionId: string,
@@ -595,6 +607,26 @@ export const useV2StreamingStore = create<State>((set, get) => ({
   byKey: {},
   archived: [],
   persistedPlansBySession: {},
+  interruptedFlushPending: {},
+
+  markInterruptedFlushPending: (sessionId, actorId) => {
+    const key = k(sessionId, actorId);
+    if (get().interruptedFlushPending[key]) return;
+    set({
+      interruptedFlushPending: { ...get().interruptedFlushPending, [key]: true },
+    });
+  },
+
+  clearInterruptedFlushPending: (sessionId, actorId) => {
+    const key = k(sessionId, actorId);
+    if (!get().interruptedFlushPending[key]) return;
+    const next = { ...get().interruptedFlushPending };
+    delete next[key];
+    set({ interruptedFlushPending: next });
+  },
+
+  isInterruptedFlushPending: (sessionId, actorId) =>
+    Boolean(get().interruptedFlushPending[k(sessionId, actorId)]),
 
   appendOutput: (sessionId, actorId, delta) => {
     if (!delta) return;
@@ -697,6 +729,89 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     const existing = state.byKey[key];
     const before = summarizeToolCallsForDiag(existing?.toolCalls);
     const fallbackToolCall = completedToolPlaceholder(toolId, success, summary);
+
+    const applyCompletedTool = (
+      entry: AgentStreamEntry,
+      hasToolCall: boolean,
+    ): { toolCalls: ToolCall[]; parts: MessagePart[] } => {
+      const updated = hasToolCall
+        ? withCompletedTool(entry.toolCalls, toolId, success, summary)
+        : [...entry.toolCalls, fallbackToolCall];
+      const parts = hasToolCall
+        ? syncToolParts(entryParts(entry), updated)
+        : [...entryParts(entry), toolCallPart(fallbackToolCall)];
+      return { toolCalls: updated, parts };
+    };
+
+    if (existing?.toolCalls.some((tc) => tc.id === toolId)) {
+      const { toolCalls, parts } = applyCompletedTool(existing, true);
+      set({
+        byKey: {
+          ...state.byKey,
+          [key]: {
+            ...existing,
+            toolCalls,
+            parts,
+            lastUpdate: Date.now(),
+          },
+        },
+      });
+      logStreamToolDiag("completeToolUse", {
+        sessionId,
+        actorId,
+        toolId,
+        success,
+        hadEntry: true,
+        active: existing.active,
+        matchedExistingTool: true,
+        matchedArchived: false,
+        before,
+        after: summarizeToolCallsForDiag(toolCalls),
+      });
+      return;
+    }
+
+    const archivedIndex = state.archived.findLastIndex(
+      (entry) =>
+        entry.sessionId === sessionId &&
+        entry.actorId === actorId &&
+        entry.toolCalls.some((tc) => tc.id === toolId),
+    );
+    if (archivedIndex >= 0) {
+      const archivedEntry = state.archived[archivedIndex];
+      const { toolCalls, parts } = applyCompletedTool(archivedEntry, true);
+      const archived = [...state.archived];
+      archived[archivedIndex] = {
+        ...archivedEntry,
+        toolCalls,
+        parts,
+      };
+      set({ archived });
+      logInterruptMsgDiag("stream.completeToolUse.archived", {
+        sessionId,
+        actorId,
+        toolId,
+        success,
+        archiveId: archivedEntry.archiveId,
+        streamId: archivedEntry.streamId,
+        before: summarizeToolCallsForDiag(archivedEntry.toolCalls),
+        after: summarizeToolCallsForDiag(toolCalls),
+      });
+      logStreamToolDiag("completeToolUse", {
+        sessionId,
+        actorId,
+        toolId,
+        success,
+        hadEntry: Boolean(existing),
+        active: existing?.active ?? false,
+        matchedExistingTool: false,
+        matchedArchived: true,
+        before: summarizeToolCallsForDiag(archivedEntry.toolCalls),
+        after: summarizeToolCallsForDiag(toolCalls),
+      });
+      return;
+    }
+
     if (!existing) {
       set({
         byKey: {
@@ -717,24 +832,20 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         success,
         hadEntry: false,
         matchedExistingTool: false,
+        matchedArchived: false,
         before,
         after: summarizeToolCallsForDiag([fallbackToolCall]),
       });
       return;
     }
-    const hasToolCall = existing.toolCalls.some((tc) => tc.id === toolId);
-    const updated = hasToolCall
-      ? withCompletedTool(existing.toolCalls, toolId, success, summary)
-      : [...existing.toolCalls, fallbackToolCall];
-    const parts = hasToolCall
-      ? syncToolParts(entryParts(existing), updated)
-      : [...entryParts(existing), toolCallPart(fallbackToolCall)];
+
+    const { toolCalls, parts } = applyCompletedTool(existing, false);
     set({
       byKey: {
         ...state.byKey,
         [key]: {
           ...existing,
-          toolCalls: updated,
+          toolCalls,
           parts,
           lastUpdate: Date.now(),
         },
@@ -747,9 +858,10 @@ export const useV2StreamingStore = create<State>((set, get) => ({
       success,
       hadEntry: true,
       active: existing.active,
-      matchedExistingTool: hasToolCall,
+      matchedExistingTool: false,
+      matchedArchived: false,
       before,
-      after: summarizeToolCallsForDiag(updated),
+      after: summarizeToolCallsForDiag(toolCalls),
     });
   },
 
@@ -1019,9 +1131,28 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     const state = get();
     const key = k(sessionId, actorId);
     const existing = state.byKey[key];
-    if (existing?.active && streamEntryHasVisibleContent(existing)) return;
+    if (existing?.active && streamEntryHasVisibleContent(existing)) {
+      logInterruptMsgDiag("stream.beginPlanning.skip", {
+        sessionId,
+        actorId,
+        streamId: existing.streamId,
+        reason: "active-with-content",
+      });
+      return;
+    }
 
     const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
+    logInterruptMsgDiag("stream.beginPlanning", {
+      sessionId,
+      actorId,
+      archived: Boolean(toArchive),
+      archivedStreamId: toArchive?.streamId ?? null,
+      archivedToolCalls: summarizeToolCallsForDiag(toArchive?.toolCalls),
+      nextStreamId: entry.streamId,
+      archivedCountBefore: state.archived.length,
+    });
+    const interruptedFlushPending = { ...state.interruptedFlushPending };
+    delete interruptedFlushPending[key];
     set({
       byKey: {
         ...state.byKey,
@@ -1040,6 +1171,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         },
       },
       archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      interruptedFlushPending,
     });
   },
 
@@ -1051,16 +1183,30 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     delete next[key];
 
     const skipArchive = persistedPartsCoverLiveArtifacts(opts?.persistedPartsJson);
+    logInterruptMsgDiag("stream.releaseAfterPersist", {
+      sessionId,
+      actorId,
+      skipArchive,
+      hadByKeyEntry: Boolean(existing),
+      streamId: existing?.streamId ?? null,
+      persistedSourceStreamId: opts?.persistedSourceStreamId ?? null,
+      partsJsonLength: opts?.persistedPartsJson?.length ?? 0,
+      archivedCountBefore: state.archived.length,
+    });
     let archived = state.archived;
-    if (skipArchive && existing) {
-      // Remove a stale archived bubble from the same flush (ChatMessage now
-      // renders tool/thinking via parts_json).
+    const persistedSourceStreamId = opts?.persistedSourceStreamId?.trim();
+    if (skipArchive && (existing || persistedSourceStreamId)) {
+      // Remove stale archived bubbles for the flushed turn. After
+      // beginPlanningPlaceholder the live byKey entry is a new stream, so we
+      // must also match the snapshot streamId from the interrupted turn.
       archived = archived.filter(
         (entry) =>
           !(
             entry.sessionId === sessionId &&
             entry.actorId === actorId &&
-            entry.streamId === existing.streamId
+            ((existing && entry.streamId === existing.streamId) ||
+              (persistedSourceStreamId &&
+                entry.streamId === persistedSourceStreamId))
           ),
       );
     }
@@ -1117,6 +1263,22 @@ export const useV2StreamingStore = create<State>((set, get) => ({
       archived,
       persistedPlansBySession,
     });
+  },
+
+  detachLiveStreamForPersist: (sessionId, actorId, streamId) => {
+    const trimmed = streamId.trim();
+    if (!trimmed) return;
+    const key = k(sessionId, actorId);
+    const existing = get().byKey[key];
+    if (!existing || existing.streamId !== trimmed) return;
+    const next = { ...get().byKey };
+    delete next[key];
+    logInterruptMsgDiag("stream.detachForPersist", {
+      sessionId,
+      actorId,
+      streamId: trimmed,
+    });
+    set({ byKey: next });
   },
 
   clearActor: (sessionId, actorId, opts) => {

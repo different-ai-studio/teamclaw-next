@@ -1,5 +1,8 @@
+import { create as createMessage } from "@bufbuild/protobuf";
 import { AgentStatus } from "@/lib/proto/amux_pb";
 import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
+import { MessageKind, MessageSchema } from "@/lib/proto/teamclaw_pb";
+import type { AgentStreamEntry } from "@/stores/v2-streaming-store";
 import { deriveAgentReplyContent } from "@/lib/agent-reply-transcript";
 import { agentReplyTextsEquivalent } from "@/lib/agent-reply-text";
 
@@ -80,8 +83,39 @@ export function mergePendingAgentReplies(
   if (pending.length === 0) return null;
   const last = pending[pending.length - 1];
   const content = deriveAgentReplyContent(streamEntry?.parts ?? [], pending);
-  if (!content.trim()) return null;
+  if (!content.trim() && !streamEntryHasVisibleContent(streamEntry)) return null;
   return { ...last, content };
+}
+
+/** Client-side anchor when daemon terminal arrives before agent_reply (interrupt + tool). */
+export function buildInterruptedStreamAnchor(
+  sessionId: string,
+  actorId: string,
+  snapshot: AgentStreamEntry,
+): TeamclawMessage {
+  const createdAtMs =
+    snapshot.toolCalls[0]?.startTime?.getTime?.() ??
+    snapshot.lastUpdate ??
+    Date.now();
+  return createMessage(MessageSchema, {
+    messageId: `interrupt-${snapshot.streamId}`,
+    sessionId,
+    senderActorId: actorId,
+    kind: MessageKind.AGENT_REPLY,
+    content: "",
+    turnId: `interrupt-${snapshot.streamId}`,
+    createdAt: BigInt(Math.max(1, Math.floor(createdAtMs / 1000))),
+  });
+}
+
+/** Daemon emits an empty AGENT_REPLY anchor when a tool-only turn ends (e.g. cancel). */
+export function isToolOnlyTurnAnchor(
+  pending: TeamclawMessage[],
+  streamEntry?: StreamVisibilityEntry,
+): boolean {
+  const merged = mergePendingAgentReplies(pending, streamEntry);
+  if (!merged) return false;
+  return !merged.content.trim() && streamEntryHasVisibleContent(streamEntry);
 }
 
 type StreamVisibilityEntry = {

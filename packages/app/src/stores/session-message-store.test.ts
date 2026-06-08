@@ -91,4 +91,54 @@ describe("session-message-store", () => {
     expect(rows[0]?.messageId).toBe("r2");
     expect(rows[0]?.content).toBe("second");
   });
+
+  it("replaceTurnAgentRepliesInStore inserts by createdAt instead of appending", () => {
+    const earlyUser = createMessage(MessageSchema, {
+      messageId: "u1",
+      sessionId: "s1",
+      senderActorId: "user",
+      kind: MessageKind.TEXT,
+      content: "first",
+      createdAt: BigInt(1),
+    });
+    const lateUser = createMessage(MessageSchema, {
+      messageId: "u2",
+      sessionId: "s1",
+      senderActorId: "user",
+      kind: MessageKind.TEXT,
+      content: "second",
+      createdAt: BigInt(3),
+    });
+    const lateReply = createMessage(MessageSchema, {
+      messageId: "r-late",
+      sessionId: "s1",
+      senderActorId: "agent",
+      kind: MessageKind.AGENT_REPLY,
+      content: "late turn",
+      turnId: "turn-late",
+      createdAt: BigInt(4),
+    });
+    const earlyReply = createMessage(MessageSchema, {
+      messageId: "r-early",
+      sessionId: "s1",
+      senderActorId: "agent",
+      kind: MessageKind.AGENT_REPLY,
+      content: "early turn",
+      turnId: "turn-early",
+      createdAt: BigInt(2),
+    });
+    useSessionMessageStore.getState().setMessages("s1", [
+      earlyUser,
+      lateUser,
+      lateReply,
+    ]);
+    useSessionMessageStore
+      .getState()
+      .replaceTurnAgentRepliesInStore("s1", earlyReply);
+
+    const ids =
+      useSessionMessageStore.getState().messages.s1?.map((row) => row.messageId) ??
+      [];
+    expect(ids).toEqual(["u1", "r-early", "u2", "r-late"]);
+  });
 });
