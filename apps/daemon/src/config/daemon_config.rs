@@ -449,25 +449,27 @@ encoding_aes_key = "k"
         );
     }
 
+    // These parse `WeComChannel` directly rather than a full `DaemonConfig`
+    // (which requires a top-level `actor`/`device` section). The TOML body is
+    // therefore rooted at the `[channels.wecom]` table, so the bots array is
+    // `[[bots]]` here.
     #[test]
     fn wecom_parses_multi_bot_array() {
         let toml = r#"
-[channels.wecom]
 enabled = true
 
-[[channels.wecom.bots]]
+[[bots]]
 bot_id = "botA"
 secret = "secretA"
 workspace_id = "ws111111"
 agent_type = "opencode"
 system_prompt = "You are A."
 
-[[channels.wecom.bots]]
+[[bots]]
 bot_id = "botB"
 secret = "secretB"
 "#;
-        let cfg: DaemonConfig = toml::from_str(toml).unwrap();
-        let wecom = cfg.channels.wecom.unwrap();
+        let wecom: WeComChannel = toml::from_str(toml).unwrap();
         let bots = wecom.resolved_bots();
         assert_eq!(bots.len(), 2);
         assert_eq!(bots[0].bot_id, "botA");
@@ -481,14 +483,13 @@ secret = "secretB"
     #[test]
     fn wecom_legacy_single_bot_is_synthesized_into_one_bot() {
         let toml = r#"
-[channels.wecom]
 enabled = true
 bot_id = "legacy"
 secret = "legacysecret"
 encoding_aes_key = "k"
 "#;
-        let cfg: DaemonConfig = toml::from_str(toml).unwrap();
-        let bots = cfg.channels.wecom.unwrap().resolved_bots();
+        let wecom: WeComChannel = toml::from_str(toml).unwrap();
+        let bots = wecom.resolved_bots();
         assert_eq!(bots.len(), 1);
         assert_eq!(bots[0].bot_id, "legacy");
         assert_eq!(bots[0].secret, "legacysecret");
@@ -497,9 +498,8 @@ encoding_aes_key = "k"
 
     #[test]
     fn wecom_empty_yields_no_bots() {
-        let toml = "[channels.wecom]\nenabled = false\n";
-        let cfg: DaemonConfig = toml::from_str(toml).unwrap();
-        assert!(cfg.channels.wecom.unwrap().resolved_bots().is_empty());
+        let wecom: WeComChannel = toml::from_str("enabled = false\n").unwrap();
+        assert!(wecom.resolved_bots().is_empty());
     }
 
     #[test]
