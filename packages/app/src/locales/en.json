@@ -178,13 +178,8 @@
     "restoreArchivedHint": "Restore this session to continue chatting",
     "agent": "Agent",
     "startNewChat": "Start a New Chat",
-    "suggestions": {
-      "analyze": "Analyze data",
-      "report": "Write a report",
-      "skill": "Add a new skill"
-    },
     "askAboutFile": "Ask questions about the file",
-    "askAnything": "Ask me anything, or choose a suggestion below",
+    "askAnything": "Ask me anything",
     "runtimeRefresh": {
       "sessionHint": "Reload the agent runtime to pick up workspace changes.",
       "sessionHintKinds": "Reload the agent to pick up {{kinds}}."
@@ -935,12 +930,6 @@
       "autoSaveDesc": "Automatically save your work",
       "notifications": "Notifications",
       "notificationsDesc": "Receive desktop notifications",
-      "chatSuggestions": "Chat Suggestions",
-      "chatSuggestionsDesc": "Custom suggestions shown on the Start a New Chat page",
-      "addSuggestion": "Add",
-      "suggestionPlaceholder": "Enter a suggestion text...",
-      "noCustomSuggestions": "No custom suggestions yet",
-      "builtInSuggestions": "Built-in Suggestions",
       "mqttBroker": "MQTT broker",
       "mqttUsername": "MQTT username",
       "mqttPassword": "MQTT password",

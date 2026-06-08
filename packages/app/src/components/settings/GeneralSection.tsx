@@ -12,11 +12,8 @@ import {
   Bell,
   Shield,
   AlertTriangle,
-  MessageSquareText,
-  Plus,
   Server,
   User,
-  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -34,7 +31,6 @@ import { useMqttReconnectStore } from '@/stores/mqtt-reconnect'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { SettingCard, SectionHeader, ToggleSwitch } from './shared'
 import { getPermissionPolicy, setPermissionPolicy, type PermissionPolicy } from '@/lib/permission-policy'
-import { useSuggestionsStore } from '@/stores/suggestions'
 import { appShortName, buildConfig } from '@/lib/build-config'
 import { LANGUAGE_OPTIONS, getPreferredLanguage, normalizeSupportedLanguage, persistLanguage } from '@/lib/locale'
 import {
@@ -342,113 +338,10 @@ export const GeneralSection = React.memo(function GeneralSection() {
         </div>
       </SettingCard>
 
-      <ChatSuggestionsCard />
-
       <ServerAddressCard />
     </div>
   )
 })
-
-function ChatSuggestionsCard() {
-  const { t } = useTranslation()
-  const customSuggestions = useSuggestionsStore(s => s.customSuggestions)
-  const addSuggestion = useSuggestionsStore(s => s.addSuggestion)
-  const removeSuggestion = useSuggestionsStore(s => s.removeSuggestion)
-  const [newSuggestion, setNewSuggestion] = React.useState('')
-
-  const handleAdd = React.useCallback(() => {
-    const trimmed = newSuggestion.trim()
-    if (!trimmed) return
-    addSuggestion(trimmed)
-    setNewSuggestion('')
-  }, [newSuggestion, addSuggestion])
-
-  const handleKeyDown = React.useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      handleAdd()
-    }
-  }, [handleAdd])
-
-  const builtInSuggestions = [
-    t('chat.suggestions.analyze', 'Analyze data'),
-    t('chat.suggestions.report', 'Write a report'),
-    t('chat.suggestions.skill', 'Add a new skill'),
-  ]
-
-  return (
-    <SettingCard>
-      <h4 className="font-medium mb-4 flex items-center gap-2">
-        <MessageSquareText className="h-4 w-4 text-muted-foreground" />
-        {t('settings.general.chatSuggestions', 'Chat Suggestions')}
-      </h4>
-      <p className="text-xs text-muted-foreground mb-4">
-        {t('settings.general.chatSuggestionsDesc', 'Custom suggestions shown on the Start a New Chat page')}
-      </p>
-
-      <div className="space-y-3">
-        <div className="text-xs text-muted-foreground font-medium">
-          {t('settings.general.builtInSuggestions', 'Built-in Suggestions')}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {builtInSuggestions.map((s) => (
-            <span
-              key={s}
-              className="inline-flex h-8 items-center rounded-[8px] border border-border bg-panel px-3 text-xs text-muted-foreground"
-            >
-              {s}
-            </span>
-          ))}
-        </div>
-
-        {customSuggestions.length > 0 && (
-          <div className="flex flex-wrap gap-2 pt-2">
-            {customSuggestions.map((s, i) => (
-              <span
-                key={`${i}-${s}`}
-                className="inline-flex h-8 items-center gap-1 rounded-[8px] border border-border bg-selected pl-3 pr-1 text-xs text-foreground"
-              >
-                {s}
-                <button
-                  onClick={() => removeSuggestion(i)}
-                  className="ml-1 p-0.5 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-
-        {customSuggestions.length === 0 && (
-          <p className="text-xs text-muted-foreground italic pt-1">
-            {t('settings.general.noCustomSuggestions', 'No custom suggestions yet')}
-          </p>
-        )}
-
-        <div className="flex gap-2 pt-2">
-          <Input
-            value={newSuggestion}
-            onChange={(e) => setNewSuggestion(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={t('settings.general.suggestionPlaceholder', 'Enter a suggestion text...')}
-            className="h-8 text-[13px]"
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 shrink-0"
-            onClick={handleAdd}
-            disabled={!newSuggestion.trim()}
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            {t('settings.general.addSuggestion', 'Add')}
-          </Button>
-        </div>
-      </div>
-    </SettingCard>
-  )
-}
 
 function ServerAddressCard() {
   const { t } = useTranslation()
