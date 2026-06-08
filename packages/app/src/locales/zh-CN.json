@@ -203,13 +203,8 @@
     "restoreArchivedHint": "恢复此会话后可继续聊天",
     "agent": "助手",
     "startNewChat": "开始新对话",
-    "suggestions": {
-      "analyze": "分析数据",
-      "report": "撰写报告",
-      "skill": "添加新技能"
-    },
     "askAboutFile": "询问关于文件的问题",
-    "askAnything": "向我提问，或选择下方建议",
+    "askAnything": "向我提问",
     "runtimeRefresh": {
       "sessionHint": "重载 Agent 运行时以加载工作区变更。",
       "sessionHintKinds": "重载 Agent 以加载 {{kinds}}。"
@@ -960,12 +955,6 @@
       "autoSaveDesc": "自动保存您的工作",
       "notifications": "通知",
       "notificationsDesc": "接收桌面通知",
-      "chatSuggestions": "聊天建议",
-      "chatSuggestionsDesc": "在「开始新对话」页面显示的自定义建议",
-      "addSuggestion": "添加",
-      "suggestionPlaceholder": "输入建议文本...",
-      "noCustomSuggestions": "暂无自定义建议",
-      "builtInSuggestions": "内置建议",
       "mqttBroker": "MQTT Broker",
       "mqttUsername": "MQTT 用户名",
       "mqttPassword": "MQTT 密码",

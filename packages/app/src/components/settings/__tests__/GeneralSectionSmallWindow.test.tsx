@@ -3,8 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 const mockInvoke = vi.fn()
-const mockAddSuggestion = vi.fn()
-const mockRemoveSuggestion = vi.fn()
 const mockPersistLanguage = vi.fn()
 const mockNormalizeSupportedLanguage = vi.fn((language: string) => language)
 const mockChangeLanguage = vi.fn()
@@ -79,15 +77,6 @@ vi.mock('@/components/ui/select', () => ({
 vi.mock('@/lib/permission-policy', () => ({
   getPermissionPolicy: () => 'ask',
   setPermissionPolicy: vi.fn(),
-}))
-
-vi.mock('@/stores/suggestions', () => ({
-  useSuggestionsStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      customSuggestions: [],
-      addSuggestion: mockAddSuggestion,
-      removeSuggestion: mockRemoveSuggestion,
-    }),
 }))
 
 vi.mock('../shared', () => ({

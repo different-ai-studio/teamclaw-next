@@ -502,10 +502,7 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
                   >
                     {compact
                       ? t("chat.askAboutFile", "Ask questions about the file")
-                      : t(
-                          "chat.askAnything",
-                          "Ask me anything, or choose a suggestion below",
-                        )}
+                      : t("chat.askAnything", "Ask me anything")}
                   </p>
                 </div>
               )}
