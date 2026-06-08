@@ -90,6 +90,36 @@ pub async fn list_channels() -> Result<Vec<ChannelStatus>, String> {
         .map_err(|e| format!("bad response from amuxd: {e} (body={buf:?})"))
 }
 
+/// Per-bot WeCom connection status as reported by amuxd over `amuxd.sock`.
+/// The daemon emits camelCase keys (`botId`, `connected`, `error`), which we
+/// re-expose unchanged to the frontend (matching the TS `WeComBotStatus`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WeComBotStatus {
+    pub bot_id: String,
+    pub connected: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// List per-bot WeCom connection status. Mirrors `list_channels`' socket
+/// plumbing: writes `wecom-bots-status` to `amuxd.sock`, reads the single
+/// JSON-array line, and deserializes it into `Vec<WeComBotStatus>`.
+#[tauri::command]
+pub async fn list_wecom_bots_status() -> Result<Vec<WeComBotStatus>, String> {
+    let mut s =
+        UnixStream::connect(sock_path()).map_err(|e| format!("amuxd not reachable: {e}"))?;
+    s.write_all(b"wecom-bots-status\n")
+        .map_err(|e| format!("write failed: {e}"))?;
+    s.shutdown(std::net::Shutdown::Write)
+        .map_err(|e| format!("shutdown write half failed: {e}"))?;
+    let mut buf = String::new();
+    s.read_to_string(&mut buf)
+        .map_err(|e| format!("read failed: {e}"))?;
+    serde_json::from_str(buf.trim())
+        .map_err(|e| format!("bad response from amuxd: {e} (body={buf:?})"))
+}
+
 /// Load a persisted channel config from daemon.toml. This is local-only data:
 /// secrets already live on this machine, and the settings UI needs to
 /// rehydrate forms after the panel is closed and reopened.
