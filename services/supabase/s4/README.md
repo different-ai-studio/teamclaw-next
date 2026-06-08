@@ -45,8 +45,15 @@ The 3-phase load resolves the table⇄function⇄trigger dependency cycle:
 
 ## Manual steps after the script (DB-side done, these are config/ops)
 
-1. **GoTrue**: set the custom access-token hook → `public.amux_access_token_hook`
-   (injects `app_metadata.org_id` + memberships + acl). Test one login.
+1. **GoTrue hook — SKIP on current hosting**: the managed GoTrue in use does **not**
+   support custom access-token hooks, so `amux_access_token_hook` will not run and
+   tokens won't carry `org_id`/`memberships`/`acl`. Verified safe: no RLS/policy
+   depends on those claims; FC + RLS use fallbacks (`ensure_personal_org`,
+   `current_org_id` → `public.users`). The hook fn + its grant to
+   `supabase_auth_admin` are in place for if/when hosting supports it (env:
+   `GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED=true` +
+   `..._URI=pg-functions://postgres/public/amux_access_token_hook`). acl matters
+   only for MQTT/EMQX (not enforcing ACL currently).
 2. **PostgREST**: add `amux` to `PGRST_DB_SCHEMAS` (keep `public`) + restart.
 3. **Reconcile mirrors**: the 47.x `public.plans` (stub) and `public.users`
    (subset) were dev mirrors — on saas-mono use its **real** plans/users DDL.
