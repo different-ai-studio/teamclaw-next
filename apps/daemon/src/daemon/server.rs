@@ -576,6 +576,10 @@ impl DaemonServer {
             agent_type_override: Arc::new(AsyncMutex::new(HashMap::new())),
             workspaces_path: self.workspaces_path.clone(),
             workspace_override: Arc::new(AsyncMutex::new(HashMap::new())),
+            // Per-bot runtime registry — populated by a later wiring task that
+            // reads `WeComChannel::resolved_bots()`; empty here so all bots
+            // fall back to the daemon-wide defaults.
+            bot_configs: Arc::new(HashMap::new()),
         });
         let store: Arc<dyn ChannelStore> = Arc::new(AmuxdChannelStore {
             client: self.backend.clone(),
