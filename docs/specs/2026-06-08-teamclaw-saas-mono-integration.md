@@ -58,7 +58,9 @@ saas-mono 自建 Supabase（唯一实例 / 唯一 GoTrue / 唯一 auth.users）
 | **S4** | 在 saas-mono 实例落地 + 切流 | ⬜ 未开始 | 跨实例 |
 
 **47.x 此刻实况**（无活跃流量，已直接切 DB 侧）：35 张业务表已在 `amux`，`teams.oid`、`teams_org_guard`、org_id 注入的 `amux_access_token_hook`、`create_team(p_oid)`、`ensure_personal_org`/`ensure_org_default_team` 全部就位；`public` 留 orgs/plans/users 镜像 + 5 张 Better-Auth。
-⬜ **剩两个运维动作（你做），FC 才能跑通**：① 47.x PostgREST 容器 `PGRST_DB_SCHEMAS` 加 `amux`（保留 public）+ 重启 ② 部署本分支的 FC（含 S2d + S3-FC）。在这两步完成前，旧 FC 对 amux 表的 `.from()` 会失败（当前无流量故无影响）。
+运维收尾：
+- ✅ **PostgREST 暴露 amux 已完成**（authenticator.pgrst.db_schemas = `public, storage, graphql_public, amux`，已 reload，curl `Accept-Profile: amux` 返回 200）。
+- ⬜ **部署本分支 FC（含 S2d + S3-FC）** → 合并 **PR #409** 自动触发（GHA on `services/fc/**`）。合并后即完成 47.x 切换。
 
 ---
 
@@ -97,7 +99,7 @@ saas-mono 自建 Supabase（唯一实例 / 唯一 GoTrue / 唯一 auth.users）
 
 | 风险 | 级别 | 缓解 |
 |---|---|---|
-| S3B hook 改 live 致登录中断 | 🔴 | 切换窗口内登录冒烟先验；hook 有 exception→return event 防御 |
+| ~~S3B hook 改 live 致登录中断~~ | ✅ 已不适用 | 当前托管 GoTrue **不支持** custom access token hook → hook 不被调用，token 无 org_id/memberships/acl；已核实无 RLS/策略依赖这些声明、唯一消费者 app.jwt_memberships 是死代码 → 全走 fallback（ensure_personal_org / current_org_id→public.users）。FC 冒烟已证建队+租户隔离正常。acl 仅 MQTT（不强制）。日后换托管再启用（grant 已就位） |
 | 协同切窗口（S2+PGRST+FC 必须同时） | 🔴 | Step C 窗口；Step B 先预演 |
 | PostgREST 暴露 amux（PGRST_DB_SCHEMAS 容器 env，非 config.toml） | 🔴 | Step B/C 清单 |
 | ~~saas-mono PG 大版本对齐~~ | ✅ 解除 | 用户确认 saas-mono 生产与 47.x 完全一致（PG 18.3） |
