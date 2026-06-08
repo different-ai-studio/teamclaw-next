@@ -771,12 +771,18 @@ export const useV2StreamingStore = create<State>((set, get) => ({
       return;
     }
 
-    const archivedIndex = state.archived.findLastIndex(
-      (entry) =>
+    let archivedIndex = -1;
+    for (let i = state.archived.length - 1; i >= 0; i--) {
+      const entry = state.archived[i];
+      if (
         entry.sessionId === sessionId &&
         entry.actorId === actorId &&
-        entry.toolCalls.some((tc) => tc.id === toolId),
-    );
+        entry.toolCalls.some((tc) => tc.id === toolId)
+      ) {
+        archivedIndex = i;
+        break;
+      }
+    }
     if (archivedIndex >= 0) {
       const archivedEntry = state.archived[archivedIndex];
       const { toolCalls, parts } = applyCompletedTool(archivedEntry, true);
