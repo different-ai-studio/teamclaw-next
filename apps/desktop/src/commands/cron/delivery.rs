@@ -341,11 +341,9 @@ impl DeliveryManager {
             }
         }
 
-        Err(
-            "No WeCom target specified and ownerId is not set. \
+        Err("No WeCom target specified and ownerId is not set. \
              Send a DM to the bot first so ownerId is auto-recorded."
-                .to_string(),
-        )
+            .to_string())
     }
 }
 
@@ -377,10 +375,7 @@ mod tests {
             wecom_cron_target_to_dispatch("group:chat-1").unwrap(),
             "chat:chat-1"
         );
-        assert_eq!(
-            wecom_cron_target_to_dispatch("bob").unwrap(),
-            "user:bob"
-        );
+        assert_eq!(wecom_cron_target_to_dispatch("bob").unwrap(), "user:bob");
     }
 }
 

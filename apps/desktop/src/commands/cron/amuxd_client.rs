@@ -171,10 +171,7 @@ pub async fn channel_send_at(
     amuxd_json_roundtrip(sock_path, &payload).await
 }
 
-async fn amuxd_json_roundtrip(
-    sock_path: &Path,
-    payload: &serde_json::Value,
-) -> Result<(), String> {
+async fn amuxd_json_roundtrip(sock_path: &Path, payload: &serde_json::Value) -> Result<(), String> {
     let mut stream = UnixStream::connect(sock_path)
         .await
         .map_err(|e| format!("amuxd unreachable at {}: {e}", sock_path.display()))?;
