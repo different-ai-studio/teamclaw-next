@@ -33,6 +33,8 @@ export type {
   KookConfig,
   KookGatewayStatus,
   KookGatewayStatusResponse,
+  WeComBot,
+  WeComBotStatus,
   WeComConfig,
   WeComGatewayStatus,
   WeComGatewayStatusResponse,
