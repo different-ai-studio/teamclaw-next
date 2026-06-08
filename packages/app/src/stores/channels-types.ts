@@ -145,13 +145,31 @@ export interface KookGatewayStatusResponse {
 }
 
 // WeCom types
-export interface WeComConfig {
+export interface WeComBot {
   enabled: boolean
   botId: string
   secret: string
   encodingAesKey?: string
-  /** Auto-recorded userid of the person who bound this bot (first DM sender) */
+  workspaceId?: string
+  agentType?: 'claude-code' | 'opencode' | 'codex'
+  systemPrompt?: string
+}
+
+export interface WeComConfig {
+  enabled: boolean
+  /** New multi-bot list. Legacy single-bot fields below are migration-only. */
+  bots: WeComBot[]
+  // legacy single-bot fields (read-only fallback; written as bots[] going forward)
+  botId?: string
+  secret?: string
+  encodingAesKey?: string
   ownerId?: string
+}
+
+export interface WeComBotStatus {
+  botId: string
+  connected: boolean
+  error?: string
 }
 
 export type WeComGatewayStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -214,9 +232,7 @@ export interface GatewayStatusResponse {
 // Default configurations
 export const defaultWeComConfig: WeComConfig = {
   enabled: false,
-  botId: '',
-  secret: '',
-  encodingAesKey: undefined,
+  bots: [],
 }
 
 export const defaultWeChatConfig: WeChatConfig = {
@@ -323,6 +339,7 @@ export interface ChannelsState {
   wecom: WeComConfig | null
   wecomIsLoading: boolean
   wecomGatewayStatus: WeComGatewayStatusResponse
+  wecomBotStatuses: WeComBotStatus[]
   wecomHasChanges: boolean
   wecomIsTesting: boolean
   wecomTestResult: { success: boolean; message: string } | null
@@ -384,6 +401,7 @@ export interface ChannelsState {
   startWecomGateway: () => Promise<void>
   stopWecomGateway: () => Promise<void>
   refreshWecomStatus: () => Promise<void>
+  loadWecomBotStatuses: () => Promise<void>
   testWecomCredentials: (botId: string, secret: string) => Promise<boolean>
   clearWecomTestResult: () => void
   setWecomHasChanges: (hasChanges: boolean) => void

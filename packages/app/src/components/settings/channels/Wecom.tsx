@@ -32,11 +32,18 @@ import {
 import {
   useChannelsStore,
   type WeComConfig,
+  type WeComBot,
   defaultWeComConfig,
 } from '@/stores/channels'
 import { WeComIcon } from './shared'
 import { GatewayStatusCard } from './GatewayStatusCard'
 import { useChannelConfig } from '@/hooks/useChannelConfig'
+import { useCurrentTeamStore } from '@/stores/current-team'
+import {
+  getCurrentDaemonWorkspaceAgent,
+  listDaemonWorkspaces,
+  type DaemonWorkspace,
+} from '@/lib/daemon-workspaces'
 
 // WeCom Setup Wizard
 const WECOM_WIZARD_STEPS = [
@@ -555,14 +562,41 @@ export function WeComChannel() {
     setWecomHasChanges,
     toggleWecomEnabled,
   } = useChannelsStore()
+  const botStatuses = useChannelsStore(s => s.wecomBotStatuses)
+  const loadWecomBotStatuses = useChannelsStore(s => s.loadWecomBotStatuses)
+  const team = useCurrentTeamStore(s => s.team)
 
   const [expanded, setExpanded] = React.useState(false)
   const [wizardOpen, setWizardOpen] = React.useState(false)
+  const [workspaceOptions, setWorkspaceOptions] = React.useState<DaemonWorkspace[]>([])
 
   React.useEffect(() => {
     loadWecomConfig()
+    loadWecomBotStatuses()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Load available daemon workspaces for the per-bot workspace picker. Same source
+  // as DaemonWorkspacesSection (public.workspaces via the current daemon agent).
+  React.useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      if (!team?.id) {
+        if (!cancelled) setWorkspaceOptions([])
+        return
+      }
+      try {
+        const agent = await getCurrentDaemonWorkspaceAgent(team.id)
+        const list = agent ? await listDaemonWorkspaces(team.id, agent.id) : []
+        if (!cancelled) setWorkspaceOptions(list.filter(w => !w.archived))
+      } catch {
+        if (!cancelled) setWorkspaceOptions([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [team?.id])
 
   const {
     localConfig,
@@ -584,8 +618,25 @@ export function WeComChannel() {
     refreshStatus: refreshWecomStatus,
   })
 
+  const bots = localConfig.bots ?? []
+
+  const updateBot = (i: number, patch: Partial<WeComBot>) => {
+    updateLocalConfig({ bots: bots.map((b, j) => (j === i ? { ...b, ...patch } : b)) })
+    setWecomHasChanges(true)
+  }
+  const addBot = () => {
+    updateLocalConfig({ bots: [...bots, { enabled: true, botId: '', secret: '' }] })
+    setWecomHasChanges(true)
+  }
+  const removeBot = (i: number) => {
+    updateLocalConfig({ bots: bots.filter((_, j) => j !== i) })
+    setWecomHasChanges(true)
+  }
+
+  const startDisabled = bots.length === 0 || bots.some(b => !b.botId || !b.secret)
+
   const handleWizardSave = (botId: string, secret: string) => {
-    updateLocalConfig({ botId, secret, enabled: true })
+    updateLocalConfig({ bots: [...bots, { enabled: true, botId, secret }], enabled: true })
     setWecomHasChanges(true)
   }
 
@@ -628,11 +679,11 @@ export function WeComChannel() {
         onStart={startWecomGateway}
         onStop={stopWecomGateway}
         onRestart={handleRestart}
-        startDisabled={!localConfig.botId || !localConfig.secret}
+        startDisabled={startDisabled}
         onOpenWizard={() => setWizardOpen(true)}
       >
-        {/* Setup Wizard Prompt - Show when no credentials */}
-        {!localConfig.botId && (
+        {/* Setup Wizard Prompt - Show when no bots configured */}
+        {bots.length === 0 && (
           <div className="p-4 rounded-lg bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-950/30 dark:to-cyan-950/30 border border-blue-200 dark:border-blue-800">
             <div className="flex items-center gap-4">
               <Bot className="h-8 w-8 text-blue-600 dark:text-blue-400 flex-shrink-0" />
@@ -652,54 +703,147 @@ export function WeComChannel() {
           </div>
         )}
 
-        {/* Bot Credentials */}
-        <div className="space-y-2">
-          <label className="text-[13px] font-medium flex items-center gap-2">
-            <Key className="h-4 w-4 text-muted-foreground" />
-            {t('settings.channels.wecom.botCredentials', 'Bot Credentials')}
-          </label>
-          <div className="space-y-2">
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">{t('settings.channels.wecom.botId', 'Bot ID')}</label>
-              <Input
-                value={localConfig.botId}
-                onChange={(e) => updateLocalConfig({ botId: e.target.value })}
-                placeholder={t('settings.channels.wecom.botIdPlaceholder', 'Enter your WeCom bot ID')}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">{t('settings.channels.wecom.secret', 'Secret')}</label>
-              <div className="relative">
-                <Input
-                  type="password"
-                  value={localConfig.secret}
-                  onChange={(e) => updateLocalConfig({ secret: e.target.value })}
-                  placeholder={t('settings.channels.wecom.secretPlaceholder', 'Enter your WeCom bot secret')}
-                  className="pr-10"
-                />
-                <Shield className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        {/* Per-bot list */}
+        <div className="space-y-3">
+          {bots.map((bot, i) => {
+            const status = botStatuses.find(s => s.botId === bot.botId)
+            return (
+              <div
+                key={i}
+                className="space-y-3 rounded-lg border border-border-soft bg-background/50 p-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-[13px] font-medium flex items-center gap-2">
+                    <Bot className="h-4 w-4 text-muted-foreground" />
+                    {t('settings.channels.wecom.botLabel', { defaultValue: 'Bot {{n}}', n: i + 1 })}
+                  </label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs text-muted-foreground"
+                    onClick={() => removeBot(i)}
+                  >
+                    {t('settings.channels.wecom.removeBot', 'Remove')}
+                  </Button>
+                </div>
+
+                {/* Per-bot connection status */}
+                {bot.botId && (
+                  status?.connected ? (
+                    <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      {t('settings.channels.wecom.botConnected', 'Connected')}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <AlertCircle className="h-3.5 w-3.5" />
+                      {t('settings.channels.wecom.botDisconnected', 'Disconnected')}
+                      {status?.error ? <span className="text-red-600">— {status.error}</span> : null}
+                    </div>
+                  )
+                )}
+
+                {/* Bot ID */}
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">{t('settings.channels.wecom.botId', 'Bot ID')}</label>
+                  <Input
+                    value={bot.botId}
+                    onChange={e => updateBot(i, { botId: e.target.value })}
+                    placeholder={t('settings.channels.wecom.botIdPlaceholder', 'Enter your WeCom bot ID')}
+                  />
+                </div>
+
+                {/* Secret */}
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">{t('settings.channels.wecom.secret', 'Secret')}</label>
+                  <div className="relative">
+                    <Input
+                      type="password"
+                      value={bot.secret}
+                      onChange={e => updateBot(i, { secret: e.target.value })}
+                      placeholder={t('settings.channels.wecom.secretPlaceholder', 'Enter your WeCom bot secret')}
+                      className="pr-10"
+                    />
+                    <Shield className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  </div>
+                </div>
+
+                {/* Encoding AES Key (optional) */}
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">
+                    {t('settings.channels.wecom.encodingAesKey', 'Encoding AES Key')}{' '}
+                    <span className="font-normal">({t('settings.channels.optional', 'optional')})</span>
+                  </label>
+                  <Input
+                    type="password"
+                    value={bot.encodingAesKey || ''}
+                    onChange={e => updateBot(i, { encodingAesKey: e.target.value || undefined })}
+                    placeholder={t('settings.channels.wecom.encodingAesKeyPlaceholder', '43-character key for attachment decryption')}
+                  />
+                </div>
+
+                {/* Workspace */}
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">{t('settings.channels.wecom.botWorkspace', 'Workspace')}</label>
+                  {workspaceOptions.length > 0 ? (
+                    <select
+                      value={bot.workspaceId ?? ''}
+                      onChange={e => updateBot(i, { workspaceId: e.target.value || undefined })}
+                      className="h-9 w-full rounded-[7px] border border-border bg-paper px-3 text-[13px] transition-colors focus:border-foreground/30 focus:outline-none"
+                    >
+                      <option value="">{t('settings.channels.wecom.botDefaultOption', 'Default')}</option>
+                      {workspaceOptions.map(w => (
+                        <option key={w.id} value={w.id}>{w.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <Input
+                      value={bot.workspaceId ?? ''}
+                      onChange={e => updateBot(i, { workspaceId: e.target.value || undefined })}
+                      placeholder={t('settings.channels.wecom.botDefaultOption', 'Default')}
+                    />
+                  )}
+                </div>
+
+                {/* Agent */}
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">{t('settings.channels.wecom.botAgent', 'Agent')}</label>
+                  <select
+                    value={bot.agentType ?? ''}
+                    onChange={e => updateBot(i, { agentType: (e.target.value || undefined) as WeComBot['agentType'] })}
+                    className="h-9 w-full rounded-[7px] border border-border bg-paper px-3 text-[13px] transition-colors focus:border-foreground/30 focus:outline-none"
+                  >
+                    <option value="">{t('settings.channels.wecom.botDefaultOption', 'Default')}</option>
+                    <option value="claude-code">claude-code</option>
+                    <option value="opencode">opencode</option>
+                    <option value="codex">codex</option>
+                  </select>
+                </div>
+
+                {/* System prompt */}
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">{t('settings.channels.wecom.botSystemPrompt', 'System prompt')}</label>
+                  <textarea
+                    value={bot.systemPrompt ?? ''}
+                    onChange={e => updateBot(i, { systemPrompt: e.target.value || undefined })}
+                    placeholder={t('settings.channels.wecom.botSystemPromptPlaceholder', 'Optional system prompt for this bot')}
+                    rows={3}
+                    className="w-full rounded-[7px] border border-border bg-paper px-3 py-2 text-[13px] transition-colors focus:border-foreground/30 focus:outline-none"
+                  />
+                </div>
               </div>
-            </div>
-          </div>
+            )
+          })}
+
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={addBot}>
+            <Bot className="h-4 w-4" />
+            {t('settings.channels.wecom.addBot', 'Add bot')}
+          </Button>
+
           <p className="text-xs text-muted-foreground flex items-center gap-1">
             <Shield className="h-3 w-3" />
             {t('settings.channels.credentialsStoredLocally', 'Your credentials are stored locally and never sent to our servers.')}
           </p>
-        </div>
-
-        {/* Encoding AES Key (optional) */}
-        <div className="space-y-2">
-          <label className="text-[13px] font-medium flex items-center gap-2">
-            <Key className="h-4 w-4 text-muted-foreground" />
-            {t('settings.channels.wecom.encodingAesKey', 'Encoding AES Key')}
-            <span className="text-xs text-muted-foreground font-normal">({t('settings.channels.optional', 'optional')})</span>
-          </label>
-          <Input
-            type="password"
-            value={localConfig.encodingAesKey || ''}
-            onChange={e => updateLocalConfig({ encodingAesKey: e.target.value || undefined })}
-            placeholder={t('settings.channels.wecom.encodingAesKeyPlaceholder', '43-character key for attachment decryption')}
-          />
         </div>
 
         {/* Active Sessions */}
@@ -770,8 +914,6 @@ export function WeComChannel() {
         open={wizardOpen}
         onOpenChange={setWizardOpen}
         onCredentialsSave={handleWizardSave}
-        existingBotId={localConfig.botId}
-        existingSecret={localConfig.secret}
       />
     </>
   )

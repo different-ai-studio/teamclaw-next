@@ -1,6 +1,7 @@
 import type {
   WeComConfig,
   WeComGatewayStatusResponse,
+  WeComBotStatus,
   WeComQrAuthStart,
   WeComQrAuthPollResult,
   ChannelsState,
@@ -107,6 +108,16 @@ export function createWecomActions(set: ChannelsSet) {
         set({ wecomGatewayStatus: statusFor('wecom', list), error: null })
       } catch (e) {
         console.error('[WeCom] Failed to refresh status:', e)
+      }
+    },
+
+    loadWecomBotStatuses: async () => {
+      try {
+        const statuses = await invoke<WeComBotStatus[]>('list_wecom_bots_status')
+        set({ wecomBotStatuses: Array.isArray(statuses) ? statuses : [] })
+      } catch (e) {
+        console.error('[WeCom] Failed to load per-bot statuses:', e)
+        set({ wecomBotStatuses: [] })
       }
     },
 

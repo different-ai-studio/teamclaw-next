@@ -258,6 +258,7 @@ fn active_git_syncs() -> &'static Mutex<HashSet<PathBuf>> {
     LOCK.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+#[derive(Debug)]
 struct GitSyncGuard {
     team_dir: PathBuf,
 }

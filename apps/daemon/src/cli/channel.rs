@@ -85,6 +85,7 @@ fn bind(cfg: &mut DaemonConfig, b: ChannelBindArgs) -> anyhow::Result<()> {
                 bot_id,
                 secret,
                 encoding_aes_key,
+                bots: vec![],
             });
         }
         ChannelBindPlatform::Feishu { app_id, app_secret } => {

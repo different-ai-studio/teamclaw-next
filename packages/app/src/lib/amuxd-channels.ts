@@ -72,13 +72,21 @@ function toDaemonConfig(platform: ChannelPlatform, config: ChannelConfig): Chann
         bot_token: String(config.token ?? ""),
         default_username: config.defaultUsername ?? null,
       };
-    case "wecom":
+    case "wecom": {
+      const bots = Array.isArray(config.bots) ? (config.bots as ChannelConfig[]) : [];
       return {
         enabled: Boolean(config.enabled),
-        bot_id: String(config.botId ?? ""),
-        secret: String(config.secret ?? ""),
-        encoding_aes_key: config.encodingAesKey || undefined,
+        bots: bots.map((b) => ({
+          enabled: Boolean(b.enabled),
+          bot_id: String(b.botId ?? ""),
+          secret: String(b.secret ?? ""),
+          encoding_aes_key: b.encodingAesKey || undefined,
+          workspace_id: b.workspaceId || undefined,
+          agent_type: b.agentType || undefined,
+          system_prompt: b.systemPrompt || undefined,
+        })),
       };
+    }
     case "feishu":
       return {
         enabled: Boolean(config.enabled),
@@ -122,13 +130,38 @@ function fromDaemonConfig(platform: ChannelPlatform, config: ChannelConfig): Cha
         token: String(config.bot_token ?? ""),
         defaultUsername: config.default_username ?? undefined,
       };
-    case "wecom":
+    case "wecom": {
+      const rawBots = config.bots;
+      if (Array.isArray(rawBots) && rawBots.length > 0) {
+        return {
+          enabled: Boolean(config.enabled),
+          bots: (rawBots as ChannelConfig[]).map((b) => ({
+            enabled: b.enabled ?? true,
+            botId: String(b.bot_id ?? ""),
+            secret: String(b.secret ?? ""),
+            encodingAesKey: b.encoding_aes_key ?? undefined,
+            workspaceId: b.workspace_id ?? undefined,
+            agentType: b.agent_type ?? undefined,
+            systemPrompt: b.system_prompt ?? undefined,
+          })),
+        };
+      }
+      // Legacy single-bot migration: top-level bot_id/secret/encoding_aes_key
+      const legacy = config.bot_id
+        ? [
+            {
+              enabled: true,
+              botId: String(config.bot_id),
+              secret: String(config.secret ?? ""),
+              encodingAesKey: config.encoding_aes_key ?? undefined,
+            },
+          ]
+        : [];
       return {
         enabled: Boolean(config.enabled),
-        botId: String(config.bot_id ?? ""),
-        secret: String(config.secret ?? ""),
-        encodingAesKey: config.encoding_aes_key ?? undefined,
+        bots: legacy,
       };
+    }
     case "feishu":
       return {
         enabled: Boolean(config.enabled),

@@ -656,6 +656,12 @@ impl WeComGateway {
         *self.config.write().await = config;
     }
 
+    /// The configured bot id for this gateway. Used by the channel manager to
+    /// route bot-pinned sends and report per-bot status across a multi-bot fleet.
+    pub async fn bot_id(&self) -> String {
+        self.config.read().await.bot_id.clone()
+    }
+
     pub fn workspace_path(&self) -> &str {
         &self.workspace_path
     }
