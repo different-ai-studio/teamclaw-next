@@ -250,14 +250,64 @@ pub struct DiscordChannel {
     pub default_username: Option<String>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeComBot {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub bot_id: String,
+    pub secret: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encoding_aes_key: Option<String>,
+    /// Workspace this bot's sessions run in (resolved against workspaces.toml).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    /// Backend: "claude-code" | "opencode" | "codex". None -> daemon default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_type: Option<String>,
+    /// Per-bot system prompt injected into the first turn + CLAUDE.local.md.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeComChannel {
     pub enabled: bool,
-    /// WeCom bot id (QR-bound bot mode used by `teamclaw_gateway::wecom`).
-    pub bot_id: String,
-    pub secret: String,
+    // ----- legacy single-bot fields (kept for back-compat) -----
     #[serde(default)]
+    pub bot_id: String,
+    #[serde(default)]
+    pub secret: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encoding_aes_key: Option<String>,
+    // ----- new multi-bot list -----
+    #[serde(default)]
+    pub bots: Vec<WeComBot>,
+}
+
+impl WeComChannel {
+    /// Normalize to a flat bot list: prefer the explicit `bots` array; if it
+    /// is empty, synthesize a single bot from the legacy top-level fields.
+    pub fn resolved_bots(&self) -> Vec<WeComBot> {
+        if !self.bots.is_empty() {
+            return self.bots.clone();
+        }
+        if self.bot_id.is_empty() {
+            return vec![];
+        }
+        vec![WeComBot {
+            enabled: true,
+            bot_id: self.bot_id.clone(),
+            secret: self.secret.clone(),
+            encoding_aes_key: self.encoding_aes_key.clone(),
+            workspace_id: None,
+            agent_type: None,
+            system_prompt: None,
+        }]
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -397,6 +447,59 @@ encoding_aes_key = "k"
                 .map(|c| (c.binary.clone(), c.default_flags.clone())),
             Some(("opencode".to_string(), vec!["acp".to_string()]))
         );
+    }
+
+    #[test]
+    fn wecom_parses_multi_bot_array() {
+        let toml = r#"
+[channels.wecom]
+enabled = true
+
+[[channels.wecom.bots]]
+bot_id = "botA"
+secret = "secretA"
+workspace_id = "ws111111"
+agent_type = "opencode"
+system_prompt = "You are A."
+
+[[channels.wecom.bots]]
+bot_id = "botB"
+secret = "secretB"
+"#;
+        let cfg: DaemonConfig = toml::from_str(toml).unwrap();
+        let wecom = cfg.channels.wecom.unwrap();
+        let bots = wecom.resolved_bots();
+        assert_eq!(bots.len(), 2);
+        assert_eq!(bots[0].bot_id, "botA");
+        assert_eq!(bots[0].workspace_id.as_deref(), Some("ws111111"));
+        assert_eq!(bots[0].agent_type.as_deref(), Some("opencode"));
+        assert_eq!(bots[0].system_prompt.as_deref(), Some("You are A."));
+        assert!(bots[1].enabled, "bot enabled defaults to true");
+        assert_eq!(bots[1].workspace_id, None);
+    }
+
+    #[test]
+    fn wecom_legacy_single_bot_is_synthesized_into_one_bot() {
+        let toml = r#"
+[channels.wecom]
+enabled = true
+bot_id = "legacy"
+secret = "legacysecret"
+encoding_aes_key = "k"
+"#;
+        let cfg: DaemonConfig = toml::from_str(toml).unwrap();
+        let bots = cfg.channels.wecom.unwrap().resolved_bots();
+        assert_eq!(bots.len(), 1);
+        assert_eq!(bots[0].bot_id, "legacy");
+        assert_eq!(bots[0].secret, "legacysecret");
+        assert_eq!(bots[0].encoding_aes_key.as_deref(), Some("k"));
+    }
+
+    #[test]
+    fn wecom_empty_yields_no_bots() {
+        let toml = "[channels.wecom]\nenabled = false\n";
+        let cfg: DaemonConfig = toml::from_str(toml).unwrap();
+        assert!(cfg.channels.wecom.unwrap().resolved_bots().is_empty());
     }
 
     #[test]
