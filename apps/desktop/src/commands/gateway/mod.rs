@@ -250,11 +250,7 @@ pub fn save_shortcuts(
 ) -> Result<(), String> {
     let workspace_path =
         crate::commands::team::resolve_workspace_path(workspace_path, &window, &registry)?;
-    teamclaw_gateway::patch_config_value(
-        &workspace_path,
-        "shortcuts",
-        serde_json::json!(nodes),
-    )
+    teamclaw_gateway::patch_config_value(&workspace_path, "shortcuts", serde_json::json!(nodes))
 }
 
 /// Load the per-workspace system prompt from teamclaw.json. Returns "" if unset.
