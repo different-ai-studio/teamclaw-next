@@ -377,7 +377,7 @@ function SidebarUserAccountMenu() {
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 min-w-0 max-w-[150px] gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+          className="h-7 min-w-0 shrink max-w-full gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
           data-testid="sidebar-user-menu-trigger"
         >
           {avatarUrl ? (
@@ -387,7 +387,7 @@ function SidebarUserAccountMenu() {
               {(userName?.[0] || "?").toUpperCase()}
             </div>
           )}
-          <span className="truncate">{userName}</span>
+          <span className="min-w-0 truncate">{userName}</span>
           <ChevronUp className="h-3.5 w-3.5 shrink-0" />
         </Button>
       </DropdownMenuTrigger>
@@ -906,17 +906,19 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           {!isWorkspaceUIVariant() && <DefaultBottomNav />}
 
           {isWorkspaceUIVariant() && (
-            <div className="flex items-center justify-between">
+            <div className="flex min-w-0 items-center justify-between gap-1 overflow-hidden">
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1.5"
+                className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
                 onClick={() => openSettings()}
               >
                 <Settings className="h-3.5 w-3.5 shrink-0" />
                 {t('common.settings', 'Settings')}
               </Button>
-              <SidebarUserAccountMenu />
+              <div className="min-w-0 overflow-hidden">
+                <SidebarUserAccountMenu />
+              </div>
             </div>
           )}
 
