@@ -264,7 +264,7 @@ function buildPushDeps() {
     auth: { persistSession: false },
   });
   const sb = {
-    rpc: (name: string, args: unknown) => sbClient.rpc(name, args as Record<string, unknown>),
+    rpc: (name: string, args: unknown) => sbClient.schema("public").rpc(name, args as Record<string, unknown>),
     revokeToken: async (token: string) => {
       await sbClient.from('device_push_tokens')
         .update({ revoked_at: new Date().toISOString() })

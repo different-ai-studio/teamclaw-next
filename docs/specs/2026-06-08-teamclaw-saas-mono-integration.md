@@ -49,13 +49,21 @@ select schema_name from information_schema.schemata where schema_name in ('amux'
 - **状态**：已在 prod 47.x 应用并验证（orgs 20 列/8 索引/审计触发器/RLS 启用；插入+更新 probe 通过、已回滚）。RLS 启用但暂无策略（仅 service_role 可访问）。
 - 回滚：`drop table public.orgs, public.plans; drop function public.update_audit_columns();`
 
-### 阶段 2 — teamclaw 全表迁 amux + teams 加 oid（主结构改造，⚠️ 需停机窗口 + 放行）
-- 2a `create schema amux` + grant + PostgREST `PGRST_DB_SCHEMAS` 加 amux（容器 env），保留 public。
-- 2b teamclaw 全表 `ALTER TABLE … SET SCHEMA amux`（orgs/users/plans 留 public）；`amux.teams` 加 `oid NOT NULL → public.orgs(id)`。
-- 2c `app.*` + ~44 个 RPC 函数体 `public.x → amux.x`；RLS 保留 team-scoped + 加 `team.oid == jwt.org_id` 守卫。
-- 2d FC supabase 客户端默认 schema 设 `amux`（243 处 .from/.rpc 零改），访问 orgs/users 处用 `.schema('public')`。
-- 闸门：26 SQL RLS 测试 + FC 测试全绿。
-- ⚠️ **不可灰度**：2b 一执行，FC 旧 `.from()`（默认 public）即刻全断，必须与 2d 部署 + 2a 的 PGRST 改动协同切换 → 停机窗口。
+### 阶段 2 — teamclaw 业务表迁 amux + teams 加 oid（主结构改造，⚠️ 需停机窗口 + 放行）
+迁移 `20260608010000_move_teamclaw_to_amux.sql`（程序化 DO 块，幂等）。
+
+**搬迁清单（实测 42 张 public 表）**：
+- **搬 amux（35 张）**：所有 teamclaw 业务表（actors/sessions/messages/teams/workspaces/ideas/members/team_members/agents/… 全集）。
+- **留 public（7 张）**：`orgs`、`plans`（saas-mono 租户镜像）；`account`、`session`、`user`、`verification`、`jwks`（Better-Auth 表，阶段 3 退役，本阶段不动）。
+
+- 2a `create schema amux` + grant usage（表权限/RLS 策略随 `SET SCHEMA` 自动迁移）+ PostgREST `PGRST_DB_SCHEMAS` 加 amux（容器 env，保留 public）。
+- 2b 35 张表 `ALTER TABLE … SET SCHEMA amux`；`amux.teams` 加 `oid → public.orgs(id)`（跨 schema FK）。
+- 2c **函数留 public**，仅重写函数体 `public.<被搬表> → amux.<被搬表>`（实测 app 20 + public 44 = **64 个函数**）+ search_path 补 amux。函数不搬位置 → 避开函数间互调重写和 GoTrue 钩子 `amux_access_token_hook` 的风险。
+- 2d FC supabase 客户端**默认 schema 设 `amux`**（覆盖 243 处 `.from`，零改）；因函数留 public，**41 处 `.rpc` 改为 `.schema('public').rpc(...)`**（5 文件，已实测 FC 无 `.from` 碰 keep-list 表）。
+- **RLS org 守卫（`team.oid == jwt.org_id`）挪到阶段 3**（依赖 token 里的 org_id）；本阶段策略保持原 team-scoped 语义随表迁移。
+- 闸门：26 SQL RLS 测试 + FC 测试全绿（worktree 未装依赖时在 testsupa/装依赖后跑）。
+- ⚠️ **不可灰度**：2b 一执行，FC 旧 `.from()`（默认 public）即刻全断，必须与 2d 部署 + 2a 的 PGRST 改动**协同切换** → 停机窗口。
+- **✅ 干跑已验证（47.x，原子回滚零残留）**：moved **35 tables**, rewrote **64 functions**，amux/sessions/teams.oid 回滚后均无残留。
 - 回滚：SET SCHEMA 反向 + drop oid + FC 默认 schema 改回 + PGRST 还原。
 
 ### 阶段 3 — 本地对齐 saas-mono 登录

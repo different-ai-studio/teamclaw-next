@@ -26,6 +26,6 @@ export function createServiceRoleClient() {
   const key  = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
   return createClient(url, key, {
     auth: { persistSession: false },
-    realtime: REALTIME_TRANSPORT_OPTS,
+    db: { schema: "amux" }, realtime: REALTIME_TRANSPORT_OPTS,
   });
 }
