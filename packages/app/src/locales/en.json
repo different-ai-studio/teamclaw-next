@@ -926,8 +926,6 @@
       "appearance": "Appearance",
       "language": "Language",
       "languageDesc": "Choose the app display language",
-      "autoSave": "Auto Save",
-      "autoSaveDesc": "Automatically save your work",
       "notifications": "Notifications",
       "notificationsDesc": "Receive desktop notifications",
       "mqttBroker": "MQTT broker",
@@ -950,7 +948,9 @@
       "serverSyncedHint": "Loaded from daemon when available.",
       "notifAll": "All",
       "notifImportant": "Important only",
-      "notifMute": "Mute"
+      "notifMute": "Mute",
+      "acpStreamDebug": "ACP stream debug",
+      "acpStreamDebugDesc": "Show live ACP event stream above the chat thread"
     },
     "about": {
       "title": "About",
@@ -1256,6 +1256,7 @@
       "accessTitle": "Member access",
       "accessDesc": "Rows are read from agent_member_access for this daemon agent.",
       "addAccess": "Add",
+      "selectMember": "Select member",
       "noAccess": "No member access rows yet."
     },
     "daemonOnboarding": {

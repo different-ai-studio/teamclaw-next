@@ -8,12 +8,12 @@ import {
   Sun,
   Monitor,
   Languages,
-  Save,
   Bell,
   Shield,
   AlertTriangle,
   Server,
   User,
+  Bug,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -30,6 +30,7 @@ import { useMqttConnected } from '@/hooks/useMqttConnected'
 import { useMqttReconnectStore } from '@/stores/mqtt-reconnect'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { SettingCard, SectionHeader, ToggleSwitch } from './shared'
+import { useAcpDebugStore } from '@/stores/acp-debug-store'
 import { getPermissionPolicy, setPermissionPolicy, type PermissionPolicy } from '@/lib/permission-policy'
 import { appShortName, buildConfig } from '@/lib/build-config'
 import { LANGUAGE_OPTIONS, getPreferredLanguage, normalizeSupportedLanguage, persistLanguage } from '@/lib/locale'
@@ -114,7 +115,6 @@ export const GeneralSection = React.memo(function GeneralSection() {
     }
   }, [displayNameDraft, currentMemberName, renameCurrentMember, t])
 
-  const [autoSave, setAutoSave] = React.useState(true)
   const [notificationLevel, setNotificationLevelState] = React.useState(() => {
     try {
       const stored = localStorage.getItem(`${appShortName}-notification-level`)
@@ -132,6 +132,8 @@ export const GeneralSection = React.memo(function GeneralSection() {
     setPermissionPolicyState(policy)
     setPermissionPolicy(policy)
   }, [])
+  const acpStreamDebugEnabled = useAcpDebugStore((s) => s.enabled)
+  const setAcpStreamDebugEnabled = useAcpDebugStore((s) => s.setEnabled)
   // Listen to system preference changes when theme is 'system'
   React.useEffect(() => {
     if (theme !== 'system') return
@@ -271,39 +273,24 @@ export const GeneralSection = React.memo(function GeneralSection() {
 
       <SettingCard>
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <label className="text-[13px] font-medium flex items-center gap-2">
-                <Save className="h-4 w-4 text-muted-foreground" />
-                {t('settings.general.autoSave', 'Auto Save')}
-              </label>
-              <p className="text-xs text-muted-foreground">
-                {t('settings.general.autoSaveDesc', 'Automatically save your work')}
-              </p>
-            </div>
-            <ToggleSwitch enabled={autoSave} onChange={setAutoSave} />
-          </div>
-          
-          <div className="border-t pt-4">
-            <div className="space-y-2">
-              <label className="text-[13px] font-medium flex items-center gap-2">
-                <Bell className="h-4 w-4 text-muted-foreground" />
-                {t('settings.general.notifications', 'Notifications')}
-              </label>
-              <p className="text-xs text-muted-foreground">
-                {t('settings.general.notificationsDesc', 'Control when desktop notifications are sent')}
-              </p>
-              <Select value={notificationLevel} onValueChange={setNotificationLevel}>
-                <SelectTrigger className="h-11" data-testid="notification-level-select">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t('settings.general.notifAll', 'All notifications')}</SelectItem>
-                  <SelectItem value="important">{t('settings.general.notifImportant', 'Important only')}</SelectItem>
-                  <SelectItem value="mute">{t('settings.general.notifMute', 'Mute')}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="space-y-2">
+            <label className="text-[13px] font-medium flex items-center gap-2">
+              <Bell className="h-4 w-4 text-muted-foreground" />
+              {t('settings.general.notifications', 'Notifications')}
+            </label>
+            <p className="text-xs text-muted-foreground">
+              {t('settings.general.notificationsDesc', 'Control when desktop notifications are sent')}
+            </p>
+            <Select value={notificationLevel} onValueChange={setNotificationLevel}>
+              <SelectTrigger className="h-11" data-testid="notification-level-select">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('settings.general.notifAll', 'All notifications')}</SelectItem>
+                <SelectItem value="important">{t('settings.general.notifImportant', 'Important only')}</SelectItem>
+                <SelectItem value="mute">{t('settings.general.notifMute', 'Mute')}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="border-t pt-4">
@@ -333,6 +320,24 @@ export const GeneralSection = React.memo(function GeneralSection() {
                   </p>
                 </div>
               )}
+            </div>
+          </div>
+
+          <div className="border-t pt-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-1">
+                <label className="text-[13px] font-medium flex items-center gap-2">
+                  <Bug className="h-4 w-4 text-muted-foreground" />
+                  {t('settings.general.acpStreamDebug', 'ACP stream debug')}
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  {t('settings.general.acpStreamDebugDesc', 'Show live ACP event stream above the chat thread')}
+                </p>
+              </div>
+              <ToggleSwitch
+                enabled={acpStreamDebugEnabled}
+                onChange={setAcpStreamDebugEnabled}
+              />
             </div>
           </div>
         </div>

@@ -1,6 +1,18 @@
 import { create } from "zustand";
 import { appendAcpDebugLineToFile } from "@/lib/acp-debug-file-log";
+import { appShortName } from "@/lib/build-config";
 import type { AcpEvent } from "@/lib/proto/amux_pb";
+
+const ACP_DEBUG_ENABLED_KEY = `${appShortName}-acp-stream-debug`;
+
+function readAcpDebugEnabled(): boolean {
+  if (import.meta.env.VITE_ACP_DEBUG_STREAM === "true") return true;
+  try {
+    return localStorage.getItem(ACP_DEBUG_ENABLED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 
 /** In-memory ring buffer for the debug panel (disk log keeps full history). */
 export const ACP_DEBUG_MAX_LINES = 2000;
@@ -52,7 +64,7 @@ interface State {
 
 export const useAcpDebugStore = create<State>((set, get) => ({
   lines: [],
-  enabled: import.meta.env.DEV || import.meta.env.VITE_ACP_DEBUG_STREAM === "true",
+  enabled: readAcpDebugEnabled(),
   append: (input) => {
     if (!get().enabled) return;
     const line: AcpDebugLine = {
@@ -80,9 +92,16 @@ export const useAcpDebugStore = create<State>((set, get) => ({
     void appendAcpDebugLineToFile(line);
   },
   clear: () => set({ lines: [] }),
-  setEnabled: (enabled) => set({ enabled }),
+  setEnabled: (enabled) => {
+    try {
+      localStorage.setItem(ACP_DEBUG_ENABLED_KEY, String(enabled));
+    } catch {
+      /* ignore */
+    }
+    set({ enabled });
+  },
 }));
 
 export function isAcpDebugPanelVisible(): boolean {
-  return import.meta.env.DEV || import.meta.env.VITE_ACP_DEBUG_STREAM === "true";
+  return useAcpDebugStore.getState().enabled;
 }

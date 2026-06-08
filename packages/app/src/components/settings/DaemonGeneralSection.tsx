@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { AlertCircle, AlertTriangle, Bot, Check, Loader2, RefreshCw, RotateCcw, Save, Trash2, UserPlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DaemonOnboardingWizard } from '@/components/auth/DaemonOnboardingWizard'
 import { useDaemonOnboardingStore } from '@/stores/daemon-onboarding'
 import { useCurrentTeamStore } from '@/stores/current-team'
@@ -431,27 +432,39 @@ export function DaemonGeneralSection() {
               </div>
 
               <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]">
-                <select
-                  value={memberId}
-                  onChange={(event) => setMemberId(event.target.value)}
+                <Select
+                  value={memberId || undefined}
+                  onValueChange={setMemberId}
                   disabled={saving || !agent.isOwner || members.length === 0}
-                  className="h-9 rounded-[7px] border border-border bg-paper px-3 text-[13px] transition-colors focus:border-foreground/30 focus:outline-none disabled:opacity-60"
                 >
-                  {members.map((member) => (
-                    <option key={member.id} value={member.id}>{member.displayName}</option>
-                  ))}
-                </select>
-                <select
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder={t('settings.daemonGeneral.selectMember', 'Select member')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {members.map((member) => (
+                      <SelectItem key={member.id} value={member.id}>
+                        {member.displayName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
                   value={permissionLevel}
-                  onChange={(event) => setPermissionLevel(event.target.value as AgentPermissionLevel)}
+                  onValueChange={(value) => setPermissionLevel(value as AgentPermissionLevel)}
                   disabled={saving || !agent.isOwner}
-                  className="h-9 rounded-[7px] border border-border bg-paper px-3 text-[13px] transition-colors focus:border-foreground/30 focus:outline-none disabled:opacity-60"
                 >
-                  {permissionLevels.map((level) => (
-                    <option key={level} value={level}>{level}</option>
-                  ))}
-                </select>
-                <Button size="sm" className="h-9 gap-1.5" onClick={handleAddAccess} disabled={saving || !agent.isOwner || !memberId}>
+                  <SelectTrigger className="h-11">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {permissionLevels.map((level) => (
+                      <SelectItem key={level} value={level}>
+                        {level}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button size="sm" className="h-11 gap-1.5" onClick={handleAddAccess} disabled={saving || !agent.isOwner || !memberId}>
                   <UserPlus className="h-3.5 w-3.5" />
                   {t('settings.daemonGeneral.addAccess', 'Add')}
                 </Button>
@@ -463,20 +476,26 @@ export function DaemonGeneralSection() {
                 ) : accessRows.map((row) => (
                   <div key={row.id} className="flex items-center justify-between gap-3 rounded-[10px] border border-border-soft bg-background/40 px-3.5 py-2.5">
                     <div className="min-w-0">
-                      <p className="text-[13px] font-medium">{row.memberName}</p>
+                      <p className="text-[13px] text-foreground">{row.memberName}</p>
                       <code className="block truncate font-mono text-[11px] text-faint">{row.memberId}</code>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                      <select
+                      <Select
                         value={row.permissionLevel}
-                        onChange={(event) => handleUpdateAccess(row, event.target.value as AgentPermissionLevel)}
+                        onValueChange={(value) => handleUpdateAccess(row, value as AgentPermissionLevel)}
                         disabled={saving || !agent.isOwner}
-                        className="h-8 rounded-[7px] border border-border bg-paper px-2 text-xs transition-colors focus:border-foreground/30 focus:outline-none disabled:opacity-60"
                       >
-                        {permissionLevels.map((level) => (
-                          <option key={level} value={level}>{level}</option>
-                        ))}
-                      </select>
+                        <SelectTrigger className="h-9 w-[120px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {permissionLevels.map((level) => (
+                            <SelectItem key={level} value={level}>
+                              {level}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <Button variant="ghost" size="sm" className="h-8 text-destructive hover:text-destructive" onClick={() => handleRemoveAccess(row)} disabled={saving || !agent.isOwner || row.memberId === agent.id}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>

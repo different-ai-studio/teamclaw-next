@@ -4,6 +4,7 @@ import { Shield } from 'lucide-react'
 import { useTelemetryStore } from '@/stores/telemetry'
 import { cn } from '@/lib/utils'
 import { buildConfig } from '@/lib/build-config'
+import { ToggleSwitch } from './shared'
 
 export function PrivacySection() {
   const { t } = useTranslation()
@@ -12,9 +13,9 @@ export function PrivacySection() {
 
   const isGranted = consent === 'granted'
 
-  const handleToggleConsent = React.useCallback(async () => {
-    await setConsent(isGranted ? 'denied' : 'granted')
-  }, [isGranted, setConsent])
+  const handleToggleConsent = React.useCallback(async (enabled: boolean) => {
+    await setConsent(enabled ? 'granted' : 'denied')
+  }, [setConsent])
 
   return (
     <div className="space-y-6">
@@ -42,22 +43,7 @@ export function PrivacySection() {
               {t('settings.privacy.analyticsDesc', 'Store anonymous usage metrics locally (tokens, tool stats, scores). No code, conversations, or personal data. Data stays on your device.')}
             </p>
           </div>
-          <button
-            onClick={handleToggleConsent}
-            className={cn(
-              'relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-              isGranted ? 'bg-foreground' : 'bg-panel',
-            )}
-            role="switch"
-            aria-checked={isGranted}
-          >
-            <span
-              className={cn(
-                'pointer-events-none block h-5 w-5 rounded-full bg-paper shadow-lg ring-0 transition-transform',
-                isGranted ? 'translate-x-5' : 'translate-x-0.5',
-              )}
-            />
-          </button>
+          <ToggleSwitch enabled={isGranted} onChange={handleToggleConsent} />
         </div>
         <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
           <div className={cn(
