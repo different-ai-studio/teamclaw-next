@@ -83,14 +83,13 @@ saas-mono 自建 Supabase（唯一实例 / 唯一 GoTrue / 唯一 auth.users）
 > 我能做：MCP 跑迁移。我不能做：改 PostgREST 容器 env、部署 FC（需你操作）。所以这步卡在你这两个运维动作上，不在 testsupa。
 
 ### ⬜ Step D — 合并到 saas-mono（S4，最后）
-前置（先在 saas-mono 实例跑只读查询确认）：
-```sql
-select version();  -- 对齐我们 PG 18.3
-select name, installed_version from pg_available_extensions where installed_version is not null order by 1;  -- 差集：age 1.6.0 / vector 0.8.1.2 / pg_cron / pg_net
-select schema_name from information_schema.schemata where schema_name in ('amux','app','agent_knowledge','mem0','mem0_graph');  -- 命名冲突
-```
-+ 装扩展差集、统一 GoTrue `JWT_SECRET`、saas-mono PGRST 加 amux。
-然后在 saas-mono 实例应用 S2/S3B（S1/S3A 的 orgs/users/plans 跳过——saas-mono 已有），FC 切 `SUPABASE_URL`+统一密钥，切流。
+**前置（PG 版本 / 扩展差集）= ✅ 通过**：用户确认 saas-mono 生产实例**与 47.x 完全一致**（同 PG 18.3、同扩展 age 1.6.0/pgvector 0.8.1.2/pg_cron/pg_net、同 Supabase 自建），`amux` 在 saas-mono 不存在（无命名冲突）。仅剩运维确认：GoTrue `JWT_SECRET` 统一、saas-mono PGRST 加 `amux`。
+
+**落地方式（澄清）**：S4 **不是在 saas-mono 上重跑 S2 的"move-all-except-keep-list"**——那会把 saas-mono 自己的 public 表也搬进 amux。正确做法是**把 47.x 的 `amux` schema 整体移植过去**：
+1. `pg_dump --schema=amux --schema-only`（不带数据，符合 D6）从 47.x → 导入 saas-mono 的 `amux`（含 35 表 + `amux.actor_directory` 视图 + teams.oid + RLS 策略/触发器）。
+2. public 侧只补 teamclaw 需要的函数与策略（`app.*`、`current_org_id`、`ensure_personal_org`、`amux_access_token_hook`、`create_team(p_oid)`、`claim_team_invite`、orgs RLS）——**orgs/plans/users 镜像跳过**（saas-mono 已有真表；用其真实 DDL，注意 plans 桩/users 子集要对齐）。
+3. saas-mono PGRST 加 `amux`；FC 切 `SUPABASE_URL` + 统一 `JWT_SECRET`；切流。
+4. 闸门：登录冒烟 + 建队（teams.oid 盖对）+ 租户隔离 + 邀请认领换 org。
 
 ---
 
@@ -101,8 +100,10 @@ select schema_name from information_schema.schemata where schema_name in ('amux'
 | S3B hook 改 live 致登录中断 | 🔴 | 切换窗口内登录冒烟先验；hook 有 exception→return event 防御 |
 | 协同切窗口（S2+PGRST+FC 必须同时） | 🔴 | Step C 窗口；Step B 先预演 |
 | PostgREST 暴露 amux（PGRST_DB_SCHEMAS 容器 env，非 config.toml） | 🔴 | Step B/C 清单 |
-| saas-mono PG 大版本对齐（我们 18.3） | 🔴 | Step D 前置只读查询 |
-| 扩展差集（age/pgvector/pg_cron/pg_net） | 🟡 | Step D 前置 |
+| ~~saas-mono PG 大版本对齐~~ | ✅ 解除 | 用户确认 saas-mono 生产与 47.x 完全一致（PG 18.3） |
+| ~~扩展差集（age/pgvector/pg_cron/pg_net）~~ | ✅ 解除 | 同上，扩展一致 |
+| S4 用 amux schema 移植（pg_dump）而非重跑 S2-move | 🟡 | Step D：move-all-except-keep-list 不能用于 saas-mono 的 public |
+| 迁移漏视图（actor_directory）→ 已补 `20260608070000` | ✅ 已修 | S2 只搬 BASE TABLE；视图单独搬 + 修引用它的函数 |
 | FC S2d 未 typecheck | 🟡 | Step A |
 | plans/users 子集镜像 vs saas-mono 全表对齐 | 🟡 | Step D 前对齐 DDL |
 | JWT secret 统一 | 🟡 | Step D |
