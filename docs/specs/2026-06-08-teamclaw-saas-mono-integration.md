@@ -66,9 +66,24 @@ select schema_name from information_schema.schemata where schema_name in ('amux'
 - **✅ 干跑已验证（47.x，原子回滚零残留）**：moved **35 tables**, rewrote **64 functions**，amux/sessions/teams.oid 回滚后均无残留。
 - 回滚：SET SCHEMA 反向 + drop oid + FC 默认 schema 改回 + PGRST 还原。
 
-### 阶段 3 — 本地对齐 saas-mono 登录
-- GoTrue 注册往 `app_metadata.org_id` 写租户；建 `public.users` 镜像（auth_user_id/org_id）；provisioning 在 org 下自动建默认 team；FC 改为从 JWT `org_id` 取租户；`amux_access_token_hook` 与 org_id claim 合并。
-- 闸门：注册→org_id + public.users 行 + amux 默认 team；登录 token 带 org_id；`team.oid==org_id` 守卫生效；端到端测一次登录。Better-Auth 路径先并存。
+### 阶段 3 — 本地对齐 saas-mono 登录（Better-Auth **保留不退役**）
+拆两块按 amux 依赖切：
+
+**3A（public-only，✅ 已落地 prod）** — 迁移 `20260608020000_org_resolution.sql`：
+- `public.users` 子集镜像（auth_user_id→auth.users / org_id→orgs；saas-mono 合并时拥有全表，待对齐）
+- `app.current_org_id()`：先读 JWT `app_metadata.org_id`，兜底查 `public.users.org_id`（无 JWT 优雅返回 null）
+- orgs RLS `orgs_view_policy`（`id = app.current_org_id()`，镜像 saas-mono；写仅 service_role 绕过）
+- 状态：已应用 + 验证（users 表 / 函数 / 策略就位）。纯加表、客户端无感。
+
+**3B（依赖 amux，✅ 已写好+干跑，待随阶段 2 落地）** — 迁移 `20260608030000_org_tenant_guards.sql`：
+- `app.ensure_org_default_team(org_id)`：幂等在 org 下建默认 team（slug=org-<id>，oid=org_id），SECURITY DEFINER 绕过守卫
+- `amux_access_token_hook` 增强：保留原 acl + memberships，**注入 `app_metadata.org_id`**（保留已有 claim，兜底查 public.users）；保留 `exception→return event` 防御
+- `teams_org_guard`：amux.teams 上的 **restrictive** 策略（`oid is null or oid = app.current_org_id()`），与 is_team_member ANDed 做跨 org 防御
+- **✅ 干跑验证（47.x，搬 teams/actors→amux + 3B + 实测 provisioning 建默认 team + 实测 hook 返回合法 jsonb，原子回滚零残留）**
+- ⚠️ hook 是 GoTrue 登录钩子，改 live 有登录中断风险 → testsupa 测 + 验一次登录再上。
+
+**待补（FC 代码，阶段 3 收尾）**：org onboarding / 首登流程里调用 `app.ensure_org_default_team`；FC 从 JWT `org_id` 取租户上下文。Better-Auth 路径整段保留并存，不动。
+- 闸门：注册→org_id + public.users 行 + amux 默认 team；登录 token 带 org_id；`team.oid==org_id` 守卫生效；端到端测一次登录。
 
 ### 阶段 4 — 合并到 saas-mono（最后碰他们的实例）
 - 前置：PG 版本对齐、扩展差集安装、`JWT_SECRET` 统一、saas-mono PostgREST 加 amux。
@@ -87,7 +102,8 @@ select schema_name from information_schema.schemata where schema_name in ('amux'
 | PG 大版本对齐（我们 18.3 vs saas-mono ?） | 🔴 |
 | 扩展差集安装（age/pgvector/pg_cron/pg_net） | 🟡 |
 | RLS 加 org 一致性守卫 | 🟡 |
-| JWT secret 统一 / Better-Auth 退役确认 | 🟡 |
+| JWT secret 统一（两实例 GoTrue 密钥） | 🟡 |
+| Better-Auth：**保留不退役**（用户决定），与 GoTrue 并存 | — |
 | plans 桩表与 saas-mono 真实 DDL 对齐 | 🟡 |
 
 **已消除**：多团队→单 org 不可逆收敛、team_id→oid 客户端大改、跨实例数据迁移（因"保留 teams + 不做数据迁移"）。
