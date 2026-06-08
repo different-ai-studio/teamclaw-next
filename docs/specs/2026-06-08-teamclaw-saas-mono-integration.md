@@ -50,7 +50,7 @@ saas-mono 自建 Supabase（唯一实例 / 唯一 GoTrue / 唯一 auth.users）
 | **S1** | `public.orgs` + `plans` 桩 + `update_audit_columns()` | ✅ **已上 prod 47.x** | 迁移 `20260608000000` |
 | **S3A** | `public.users` 子集镜像 + `app.current_org_id()` + orgs RLS | ✅ **已上 prod 47.x** | 迁移 `20260608020000` |
 | **S2** | 35 业务表 public→amux + teams.oid + 重写 64 函数 | 🟡 写好+**干跑验证过**，未应用 | 迁移 `20260608010000` |
-| **S2d** | FC 默认 schema=amux + 41 个 .rpc→`.schema('public')` | 🟡 改好（未 typecheck） | FC 5 文件 |
+| **S2d** | FC 默认 schema=amux + 41 个 .rpc→`.schema('public')` | 🟢 改好 + **typecheck 干净**（5 个错经还原对比证实 pre-existing） | FC 5 文件 |
 | **S3B** | provisioning 默认 team + hook 注 org_id + teams_org_guard | 🟡 写好+**干跑验证过**，未应用 | 迁移 `20260608030000` |
 | **S3-FC** | FC 调 ensure_org_default_team + 从 JWT 取 org_id 租户 | ⬜ **未写** | FC 代码 |
 | **S4** | 在 saas-mono 实例落地 + 切流 | ⬜ 未开始 | 跨实例 |
