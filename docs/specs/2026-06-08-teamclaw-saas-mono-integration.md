@@ -52,7 +52,9 @@ saas-mono 自建 Supabase（唯一实例 / 唯一 GoTrue / 唯一 auth.users）
 | **S2** | 35 业务表 public→amux + teams.oid + 重写 64 函数 | 🟡 写好+**干跑验证过**，未应用 | 迁移 `20260608010000` |
 | **S2d** | FC 默认 schema=amux + 41 个 .rpc→`.schema('public')` | 🟢 改好 + **typecheck 干净**（5 个错经还原对比证实 pre-existing） | FC 5 文件 |
 | **S3B** | provisioning 默认 team + hook 注 org_id + teams_org_guard | 🟡 写好+**干跑验证过**，未应用 | 迁移 `20260608030000` |
-| **S3-FC** | FC 调 ensure_org_default_team + 从 JWT 取 org_id 租户 | ⬜ **未写** | FC 代码 |
+| **S3-FC.1** | create_team 加 p_oid + FC createTeam 传 token org_id | 🟡 写好+**干跑(功能)验证**+typecheck 干净 | 迁移 `20260608040000` + supabase-repo.ts |
+| **S3-FC.2** | 匿名 lazy-provision 个人 org + 默认 team（首登/bootstrap 入口） | ⬜ 未写（需追 bootstrap 入口） | FC 代码 |
+| **S3-FC.3** | claim_team_invite 换 org（严格单 org，清理弃用个人 org） | ⬜ 未写（独立子项） | 迁移 + FC |
 | **S4** | 在 saas-mono 实例落地 + 切流 | ⬜ 未开始 | 跨实例 |
 
 **prod 47.x 此刻实况**：已永久存在 `public.orgs/plans/users` 镜像 + `app.current_org_id()` + orgs RLS。
@@ -120,3 +122,21 @@ select schema_name from information_schema.schemata where schema_name in ('amux'
 - 42 张 public 表：搬 amux 35 张；留 public 7 张（orgs/plans + 5 张 Better-Auth）。
 - 函数留 public，只重写函数体 `public.<表>→amux.<表>`（64 个）+ search_path 补 amux；因此 41 个 FC `.rpc` 要 `.schema('public')`。
 - saas-mono signup 的 orgId 是**必填输入**（org 先存在，不在 signup 建 org）→ provisioning = 挂到已有 org 时建默认 team。
+- create_team RPC 签名：`(p_name, p_slug, p_litellm_team_id, p_ai_gateway_endpoint, p_display_name)` → S3-FC 加 `p_oid`。
+- claim_team_invite(p_token)：①认领预建匿名 member 槽（target_actor_id，校验 is_anonymous，给该匿名用户发 session）②已登录/匿名用户 `auth.uid()` 直接加入 invite 的 team（插 actor/member/team_members）。
+
+## 8. 匿名登录 & 协作边界（决定：仅本组织内 / 严格单 org）
+
+teamclaw 用 GoTrue 匿名用户（`auth.users.is_anonymous`），首启 bootstrap 建个人 team。
+整合后：
+
+**匿名 = 一人个人 org（lazy-provision）**
+- 匿名登录时 FC 懒建：个人 org + `public.users(auth_user_id, org_id)` + `app_metadata.org_id` + `ensure_org_default_team` 默认 team。匿名用户在自己个人 org 里本地优先使用。
+
+**升级（匿名→正式邮箱/手机/Apple）**
+- GoTrue 升级保留同一 `auth.users.id` → org_id + 数据**无缝继承**，零迁移。✅ 天然干净。
+
+**协作边界 = 仅本组织内（严格单 org）**
+- 用户的所有 actors/teams 都在其唯一 org 内；`teams_org_guard`（oid = current_org_id）**保持不变**。
+- **invite-claim = 换 org**：用户认领指向 org Y 的 team 邀请时，其 org 重置为 Y，原匿名个人 org X（及其默认 team）并入/弃用。
+- ⚠️ **待实现（claim 改造）**：`claim_team_invite` 需在加入 invite team 时把 claimer 的 `public.users.org_id` + `auth.users` 的 `app_metadata.org_id` 改成该 team 的 `oid`，并清理其被弃用的个人 org（否则 claimer 会同时挂在 X、Y 两个 org 的 team 上，违反严格单 org）。这是 S3 之后的独立子项。

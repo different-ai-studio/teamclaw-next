@@ -131,6 +131,11 @@ export function createSupabaseBusinessRepository(options) {
       if (input.displayName !== undefined) args.p_display_name = input.displayName;
       if (input.litellmTeamId !== undefined) args.p_litellm_team_id = input.litellmTeamId;
       if (input.aiGatewayEndpoint !== undefined) args.p_ai_gateway_endpoint = input.aiGatewayEndpoint;
+      // S3-FC: stamp the new team with the caller's org (strict single-org).
+      // org_id comes from the GoTrue token's app_metadata (amux_access_token_hook).
+      const { data: caller } = await supabase.auth.getUser();
+      const orgId = (caller?.user?.app_metadata as any)?.org_id;
+      if (orgId) args.p_oid = orgId;
       const { data, error } = await supabase.schema("public").rpc("create_team", args);
       if (error) throw error;
       const row = requiredRow(data, "teams.createTeam");
