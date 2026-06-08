@@ -2017,7 +2017,8 @@
       "proTipDesc": "良好的系统提示词应包含您偏好的回复风格、所需的领域专业知识以及 AI 应遵循的具体指南。",
       "saveChanges": "保存更改",
       "saveSuccess": "系统提示词已保存",
-      "saveError": "保存系统提示词失败"
+      "saveError": "保存系统提示词失败",
+      "saveReloadWarning": "系统提示词已保存，但 Agent 运行时重载失败"
     },
     "roles": {
       "title": "角色",
