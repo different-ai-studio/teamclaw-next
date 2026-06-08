@@ -83,7 +83,7 @@
     "radix-ui": "^1.4.3",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-i18next": "^16.5.4",
+    "react-i18next": "^17.0.8",
     "react-markdown": "^10.1.0",
     "react-pdf": "^10.3.0",
     "remark-gfm": "^4.0.0",
