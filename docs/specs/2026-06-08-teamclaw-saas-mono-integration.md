@@ -53,7 +53,7 @@ saas-mono 自建 Supabase（唯一实例 / 唯一 GoTrue / 唯一 auth.users）
 | **S2d** | FC 默认 schema=amux + 41 个 .rpc→`.schema('public')` | 🟢 改好 + **typecheck 干净**（5 个错经还原对比证实 pre-existing） | FC 5 文件 |
 | **S3B** | provisioning 默认 team + hook 注 org_id + teams_org_guard | 🟡 写好+**干跑验证过**，未应用 | 迁移 `20260608030000` |
 | **S3-FC.1** | create_team 加 p_oid + FC createTeam 传 token org_id | 🟡 写好+**干跑(功能)验证**+typecheck 干净 | 迁移 `20260608040000` + supabase-repo.ts |
-| **S3-FC.2** | 匿名 lazy-provision 个人 org + 默认 team（首登/bootstrap 入口） | ⬜ 未写（需追 bootstrap 入口） | FC 代码 |
+| **S3-FC.2** | 匿名 lazy-provision 个人 org（createTeam 路径，无 org 时 ensure_personal_org） | ✅ **已上 prod**（public-only）+ 干跑功能验证 + FC typecheck 干净 | 迁移 `20260608050000` + supabase-repo.ts |
 | **S3-FC.3** | claim_team_invite 换 org（严格单 org，清理弃用个人 org） | ⬜ 未写（独立子项） | 迁移 + FC |
 | **S4** | 在 saas-mono 实例落地 + 切流 | ⬜ 未开始 | 跨实例 |
 
@@ -130,8 +130,10 @@ select schema_name from information_schema.schemata where schema_name in ('amux'
 teamclaw 用 GoTrue 匿名用户（`auth.users.is_anonymous`），首启 bootstrap 建个人 team。
 整合后：
 
-**匿名 = 一人个人 org（lazy-provision）**
-- 匿名登录时 FC 懒建：个人 org + `public.users(auth_user_id, org_id)` + `app_metadata.org_id` + `ensure_org_default_team` 默认 team。匿名用户在自己个人 org 里本地优先使用。
+**匿名 = 一人个人 org（lazy-provision，已实现 S3-FC.2）**
+- createTeam 路径：caller 无 org 时调 `public.ensure_personal_org()`（幂等：建个人 org + `public.users(auth_user_id, org_id)`，受 `uq_users_auth_user_id` 唯一约束保单 org/user + 并发兜底）。
+- 首个 team = 客户端 bootstrap 显式调的 `POST /v1/teams`，被 S3-FC.1 用该个人 org 盖 `oid`（**不另建默认 team,避免重复**）。`app_metadata.org_id` 由 hook 从 public.users 注入 token。
+- `ensure_org_default_team`（S3B）保留给"saas-mono 已有 org → 建默认 teamclaw team"那条路径。
 
 **升级（匿名→正式邮箱/手机/Apple）**
 - GoTrue 升级保留同一 `auth.users.id` → org_id + 数据**无缝继承**，零迁移。✅ 天然干净。

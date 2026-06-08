@@ -132,9 +132,17 @@ export function createSupabaseBusinessRepository(options) {
       if (input.litellmTeamId !== undefined) args.p_litellm_team_id = input.litellmTeamId;
       if (input.aiGatewayEndpoint !== undefined) args.p_ai_gateway_endpoint = input.aiGatewayEndpoint;
       // S3-FC: stamp the new team with the caller's org (strict single-org).
-      // org_id comes from the GoTrue token's app_metadata (amux_access_token_hook).
+      // Prefer the JWT app_metadata.org_id (amux_access_token_hook). For a brand-new
+      // (anonymous) user with no org yet, lazily provision a personal org so the
+      // first team is stamped (S3-FC.2).
       const { data: caller } = await supabase.auth.getUser();
-      const orgId = (caller?.user?.app_metadata as any)?.org_id;
+      let orgId = (caller?.user?.app_metadata as any)?.org_id;
+      if (!orgId && caller?.user?.id) {
+        const { data: provisioned, error: orgErr } =
+          await supabase.schema("public").rpc("ensure_personal_org");
+        if (orgErr) throw orgErr;
+        orgId = provisioned as string | null;
+      }
       if (orgId) args.p_oid = orgId;
       const { data, error } = await supabase.schema("public").rpc("create_team", args);
       if (error) throw error;
