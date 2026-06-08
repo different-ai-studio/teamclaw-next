@@ -41,6 +41,10 @@ export type ActorRow = {
   team_role?: string | null
   // Agent: 'team' | 'personal'. Member: undefined.
   visibility?: string | null
+  // Member contact — null for agents and anonymous members. Only carried on the
+  // network directory row (the libsql first-paint cache does not persist it).
+  email?: string | null
+  phone?: string | null
 }
 
 export interface UseActorsForTeamResult {
@@ -140,6 +144,8 @@ export function useActorsForTeam(): UseActorsForTeamResult {
         created_at: row.created_at ?? null,
         team_role: row.team_role ?? null,
         visibility: row.visibility ?? null,
+        email: row.email ?? null,
+        phone: row.phone ?? null,
       }))
       setActors(rows)
       setLoading(false)

@@ -21,6 +21,8 @@ type CloudActor = {
   defaultAgentType?: string | null;
   defaultWorkspaceId?: string | null;
   visibility?: string | null;
+  email?: string | null;
+  phone?: string | null;
   lastActiveAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -60,6 +62,8 @@ function mapActor(row: CloudActor): ActorDirectoryEntry {
     default_agent_type: row.defaultAgentType ?? null,
     default_workspace_id: row.defaultWorkspaceId ?? null,
     visibility: row.visibility ?? null,
+    email: row.email ?? null,
+    phone: row.phone ?? null,
     last_active_at: row.lastActiveAt ?? null,
     created_at: row.createdAt ?? null,
     updated_at: row.updatedAt ?? null,

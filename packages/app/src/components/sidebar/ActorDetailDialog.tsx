@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Copy, MessageCircle, Sparkles, User as UserIcon, X } from 'lucide-react'
+import { Copy, Link2, Loader2, MessageCircle, Sparkles, User as UserIcon, X } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -11,6 +11,8 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { getBackend } from '@/lib/backend'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { formatDate, formatRelativeTime } from '@/lib/date-format'
 import { useActorPresenceStore } from '@/stores/actor-presence-store'
@@ -35,6 +37,16 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
   const agentPresence = useActorPresenceStore((s) =>
     displayActor && isAgent ? s.byActorId[displayActor.id] : undefined,
   )
+
+  const [reinviting, setReinviting] = React.useState(false)
+  const [reinvite, setReinvite] = React.useState<{ deeplink: string; expiresAt: string } | null>(null)
+
+  // Reset the re-invite result whenever the dialog targets a different actor
+  // (or is reopened) so a stale link from a previous actor never leaks through.
+  React.useEffect(() => {
+    setReinvite(null)
+    setReinviting(false)
+  }, [actor?.id])
 
   if (!displayActor) return null
 
@@ -87,6 +99,59 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
       kind: displayActor.actor_type,
     })
     onOpenChange(false)
+  }
+
+  const regenerateInvite = async () => {
+    if (!teamId || reinviting) return
+    setReinviting(true)
+    try {
+      // targetActorId rotates credentials on this existing actor (re-invite)
+      // instead of minting a new one — mirrors the iOS "Re-invite" flow.
+      const row = isAgent
+        ? await getBackend().teams.createTeamInvite({
+            teamId,
+            kind: 'agent',
+            displayName: displayActor.display_name,
+            agentKind: 'daemon',
+            ttlSeconds: null,
+            targetActorId: displayActor.id,
+          })
+        : await getBackend().teams.createTeamInvite({
+            teamId,
+            kind: 'member',
+            displayName: displayActor.display_name,
+            teamRole:
+              displayActor.team_role === 'admin' || displayActor.team_role === 'owner'
+                ? displayActor.team_role
+                : 'member',
+            ttlSeconds: null,
+            targetActorId: displayActor.id,
+          })
+      const deeplink = row.deeplink ?? row.inviteUrl
+      if (!deeplink) {
+        toast.error(t('invite.failed', 'Failed to create invite: {{msg}}', { msg: 'empty response' }))
+        return
+      }
+      setReinvite({
+        deeplink,
+        expiresAt: row.expiresAt ?? new Date(Date.now() + 604800 * 1000).toISOString(),
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      toast.error(t('invite.failed', 'Failed to create invite: {{msg}}', { msg }))
+    } finally {
+      setReinviting(false)
+    }
+  }
+
+  const copyReinvite = async () => {
+    if (!reinvite) return
+    try {
+      await navigator.clipboard.writeText(reinvite.deeplink)
+      toast.success(t('invite.copied', 'Invite link copied'))
+    } catch {
+      toast.error(t('invite.copyFailed', 'Failed to copy invite link'))
+    }
   }
 
   return (
@@ -154,6 +219,22 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
                   <dd className="min-w-0 truncate text-foreground">{roleLabel ?? '—'}</dd>
                 </>
               )}
+              {!isAgent && displayActor.email && (
+                <>
+                  <dt className="text-muted-foreground">{t('actors.detail.email', 'Email')}</dt>
+                  <dd className="min-w-0 truncate text-foreground">
+                    <a href={`mailto:${displayActor.email}`} className="hover:underline">{displayActor.email}</a>
+                  </dd>
+                </>
+              )}
+              {!isAgent && displayActor.phone && (
+                <>
+                  <dt className="text-muted-foreground">{t('actors.detail.phone', 'Phone')}</dt>
+                  <dd className="min-w-0 truncate text-foreground">
+                    <a href={`tel:${displayActor.phone}`} className="hover:underline">{displayActor.phone}</a>
+                  </dd>
+                </>
+              )}
               <dt className="text-muted-foreground">{t('actors.detail.type', 'Type')}</dt>
               <dd className="min-w-0 truncate text-foreground">{actorTypeLabel}</dd>
               {isAgent && visibilityLabel && (
@@ -211,6 +292,54 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
               <dd className="min-w-0 truncate font-mono text-[12px] text-foreground">{displayActor.id}</dd>
             </dl>
           </div>
+
+          {teamId && (
+            <div className="mt-8 border-t border-border-soft pt-5">
+              <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-faint">
+                {t('actors.reinvite.title', 'Re-invite')}
+              </div>
+              <p className="mb-4 text-[12px] leading-5 text-muted-foreground">
+                {isAgent
+                  ? t('actors.reinvite.agentHint', 'Use this if the daemon was wiped and needs to re-pair.')
+                  : t(
+                      'actors.reinvite.memberHint',
+                      'Use this if the user signed out and lost access. Only available for anonymous accounts.',
+                    )}
+              </p>
+              {reinvite ? (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <Input value={reinvite.deeplink} readOnly className="font-mono text-xs" />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => void copyReinvite()}
+                      title={t('invite.copy', 'Copy')}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {t('invite.expiresAt', 'Expires {{date}}', {
+                      date: new Date(reinvite.expiresAt).toLocaleString(),
+                    })}
+                  </p>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  onClick={() => void regenerateInvite()}
+                  disabled={reinviting}
+                  className="h-9 rounded-[9px] border-border-soft bg-background text-[13px]"
+                >
+                  {reinviting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+                  {isAgent
+                    ? t('actors.reinvite.agentButton', 'Regenerate invite link')
+                    : t('actors.reinvite.memberButton', 'Generate re-invite link')}
+                </Button>
+              )}
+            </div>
+          )}
         </div>
 
         <DialogFooter className="flex-row items-center gap-3 border-t border-border-soft bg-paper px-6 py-4 sm:justify-between">

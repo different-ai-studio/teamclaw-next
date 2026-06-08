@@ -2636,6 +2636,8 @@
       "agentType": "Agent type",
       "supportedAgentTypes": "Supported types",
       "defaultWorkspace": "Default workspace",
+      "email": "Email",
+      "phone": "Phone",
       "joined": "Joined",
       "lastActiveLabel": "Last active",
       "never": "Never",
@@ -2654,7 +2656,14 @@
     "copiedId": "Copied actor ID",
     "copyFailed": "Copy failed",
     "removed": "Removed from team",
-    "removeFailed": "Remove failed: {{msg}}"
+    "removeFailed": "Remove failed: {{msg}}",
+    "reinvite": {
+      "title": "Re-invite",
+      "agentHint": "Use this if the daemon was wiped and needs to re-pair.",
+      "memberHint": "Use this if the user signed out and lost access. Only available for anonymous accounts.",
+      "agentButton": "Regenerate invite link",
+      "memberButton": "Generate re-invite link"
+    }
   },
   "ideas": {
     "allTitle": "Ideas",

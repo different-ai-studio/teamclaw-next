@@ -426,6 +426,9 @@ export interface ActorDirectoryEntry {
   default_agent_type?: string | null;
   default_workspace_id?: string | null;
   visibility?: string | null;
+  // Member contact — null for agents/external and anonymous members.
+  email?: string | null;
+  phone?: string | null;
 }
 
 export interface ConnectedAgentRow extends ActorDirectoryEntry {
