@@ -581,7 +581,16 @@ impl DaemonServer {
             if let Some(wecom) = &cfg.channels.wecom {
                 for bot in wecom.resolved_bots() {
                     let workspace_dir = bot.workspace_id.as_deref().and_then(|id| {
-                        self.workspaces.find_by_id(id).map(|w| w.path.clone())
+                        let path = self.workspaces.find_by_id(id).map(|w| w.path.clone());
+                        if path.is_none() {
+                            warn!(
+                                bot_id = %bot.bot_id,
+                                workspace_id = %id,
+                                "wecom bot workspace not synced locally; \
+                                 its sessions fall back to the daemon default workspace"
+                            );
+                        }
+                        path
                     });
                     let agent_type = bot.agent_type.as_deref().and_then(agent_type_from_name);
                     m.insert(
