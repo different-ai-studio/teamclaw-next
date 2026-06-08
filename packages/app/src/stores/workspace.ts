@@ -363,10 +363,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (isTauri()) {
       const wsName = getFolderName(expandedPath);
       import('@tauri-apps/api/core')
-        .then((m) => Promise.all([
-          m.invoke('set_window_title', { title: `TeamClaw — ${wsName}` }),
-          m.invoke('register_window_workspace', { workspacePath: expandedPath }),
-        ]))
+        .then(async (m) => {
+          await Promise.all([
+            m.invoke('set_window_title', { title: `TeamClaw — ${wsName}` }),
+            m.invoke('register_window_workspace', { workspacePath: expandedPath }),
+          ]);
+          const { default: i18n } = await import('@/lib/i18n');
+          await m.invoke('set_config_locale', { locale: i18n.language }).catch(() => {});
+        })
         .catch(() => {});
     }
 

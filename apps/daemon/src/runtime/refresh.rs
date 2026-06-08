@@ -29,8 +29,12 @@ pub const INTERNAL_WRITE_SUPPRESS: Duration = Duration::from_secs(3);
 pub const APPLY_REFRESH_SUPPRESS: Duration = Duration::from_secs(5);
 
 pub const INTERNAL_OPENCODE_KINDS: [RefreshChangeKind; 1] = [RefreshChangeKind::OpencodeJson];
-pub const INTERNAL_PREPARE_KINDS: [RefreshChangeKind; 2] =
-    [RefreshChangeKind::OpencodeJson, RefreshChangeKind::Skills];
+pub const INTERNAL_TEAMCLAW_KINDS: [RefreshChangeKind; 1] = [RefreshChangeKind::TeamclawConfig];
+pub const INTERNAL_PREPARE_KINDS: [RefreshChangeKind; 3] = [
+    RefreshChangeKind::OpencodeJson,
+    RefreshChangeKind::Skills,
+    RefreshChangeKind::TeamclawConfig,
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "snake_case")]

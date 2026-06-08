@@ -147,6 +147,82 @@ pub async fn prompt_await_at(
     })
 }
 
+/// Send a proactive message through amuxd's running channel gateway.
+/// `target` must use the daemon dispatch shape: `user:<id>` or `chat:<id>`.
+pub async fn channel_send(channel: &str, target: &str, message: &str) -> Result<(), String> {
+    let path = crate::commands::gateway::sock_path();
+    channel_send_at(&path, channel, target, message).await
+}
+
+pub async fn channel_send_at(
+    sock_path: &Path,
+    channel: &str,
+    target: &str,
+    message: &str,
+) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "cmd": "mcp-send",
+        // Placeholder binding — cron delivery supplies explicit overrides.
+        "binding": "wecom://cron/cron/single/placeholder",
+        "message": message,
+        "channel_override": channel,
+        "target_override": target,
+    });
+    amuxd_json_roundtrip(sock_path, &payload).await
+}
+
+async fn amuxd_json_roundtrip(sock_path: &Path, payload: &serde_json::Value) -> Result<(), String> {
+    let mut stream = UnixStream::connect(sock_path)
+        .await
+        .map_err(|e| format!("amuxd unreachable at {}: {e}", sock_path.display()))?;
+
+    let line = serde_json::to_string(payload).map_err(|e| format!("encode request: {e}"))?;
+    stream
+        .write_all(line.as_bytes())
+        .await
+        .map_err(|e| format!("amuxd sock IO (write): {e}"))?;
+    stream
+        .write_all(b"\n")
+        .await
+        .map_err(|e| format!("amuxd sock IO (write nl): {e}"))?;
+    stream
+        .flush()
+        .await
+        .map_err(|e| format!("amuxd sock IO (flush): {e}"))?;
+
+    const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+    let mut buf = Vec::with_capacity(4096);
+    let mut byte = [0u8; 1];
+    loop {
+        if buf.len() >= MAX_RESPONSE_BYTES {
+            return Err("amuxd response exceeded 1 MB".into());
+        }
+        match stream.read(&mut byte).await {
+            Ok(0) => break,
+            Ok(_) if byte[0] == b'\n' => break,
+            Ok(_) => buf.push(byte[0]),
+            Err(e) => return Err(format!("amuxd sock IO (read): {e}")),
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Wire {
+        ok: bool,
+        #[serde(default)]
+        error: Option<String>,
+    }
+
+    let body = String::from_utf8(buf).map_err(|e| format!("amuxd bad response: not utf8: {e}"))?;
+    let parsed: Wire = serde_json::from_str(body.trim())
+        .map_err(|e| format!("amuxd bad response: {e} (body={body:?})"))?;
+    if !parsed.ok {
+        return Err(parsed
+            .error
+            .unwrap_or_else(|| "unknown amuxd error".to_string()));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,5 +470,21 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.contains("missing result"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn channel_send_uses_mcp_send_with_overrides() {
+        let sock_path = mock_server(|req| {
+            assert_eq!(req["cmd"].as_str(), Some("mcp-send"));
+            assert_eq!(req["channel_override"].as_str(), Some("wecom"));
+            assert_eq!(req["target_override"].as_str(), Some("user:alice"));
+            assert_eq!(req["message"].as_str(), Some("hello"));
+            serde_json::json!({ "ok": true, "result": {} }).to_string()
+        })
+        .await;
+
+        channel_send_at(&sock_path, "wecom", "user:alice", "hello")
+            .await
+            .unwrap();
     }
 }

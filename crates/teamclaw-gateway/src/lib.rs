@@ -289,22 +289,69 @@ pub fn get_config_path(workspace_path: &str) -> String {
     format!("{}/{}/{}", workspace_path, TEAMCLAW_DIR, CONFIG_FILE_NAME)
 }
 
-/// Read configuration from file
-pub fn read_config(workspace_path: &str) -> Result<OpenCodeJsonConfigWithChannels, String> {
+/// Read the raw `teamclaw.json` object without typed round-tripping.
+pub fn read_config_value(workspace_path: &str) -> Result<serde_json::Value, String> {
     ensure_teamclaw_dir(workspace_path)?;
     let path = get_config_path(workspace_path);
 
     if !std::path::Path::new(&path).exists() {
-        return Ok(OpenCodeJsonConfigWithChannels {
-            schema: Some("https://opencode.ai/config.json".to_string()),
-            ..Default::default()
-        });
+        return Ok(serde_json::json!({
+            "$schema": "https://opencode.ai/config.json"
+        }));
     }
 
     let content =
         std::fs::read_to_string(&path).map_err(|e| format!("Failed to read config file: {}", e))?;
 
     serde_json::from_str(&content).map_err(|e| format!("Failed to parse config file: {}", e))
+}
+
+/// Patch a single top-level `teamclaw.json` key in place (preserves unrelated fields).
+pub fn patch_config_value(
+    workspace_path: &str,
+    key: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let path = get_config_path(workspace_path);
+    let mut root = read_config_value(workspace_path)?;
+    let obj = root
+        .as_object_mut()
+        .ok_or_else(|| "config root is not an object".to_string())?;
+    if obj.get(key) == Some(&value) {
+        return Ok(());
+    }
+    obj.insert(key.to_string(), value);
+    write_json_value_if_changed(&path, &root)
+}
+
+/// Read configuration from file
+pub fn read_config(workspace_path: &str) -> Result<OpenCodeJsonConfigWithChannels, String> {
+    let value = read_config_value(workspace_path)?;
+    serde_json::from_value(value).map_err(|e| format!("Failed to parse config file: {}", e))
+}
+
+/// Write JSON to `path` only when the semantic value differs from the on-disk file.
+/// Skipping identical rewrites avoids bumping mtime and spurious runtime-refresh banners.
+pub fn write_json_value_if_changed(path: &str, value: &serde_json::Value) -> Result<(), String> {
+    if std::path::Path::new(path).exists() {
+        if let Ok(existing_content) = std::fs::read_to_string(path) {
+            if let Ok(existing) = serde_json::from_str::<serde_json::Value>(&existing_content) {
+                if existing == *value {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+    }
+
+    let content = serde_json::to_string_pretty(value)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    std::fs::write(path, content).map_err(|e| format!("Failed to write config file: {}", e))
 }
 
 /// Write configuration to file
@@ -314,9 +361,89 @@ pub fn write_config(
 ) -> Result<(), String> {
     ensure_teamclaw_dir(workspace_path)?;
     let path = get_config_path(workspace_path);
-
-    let content = serde_json::to_string_pretty(config)
+    let value = serde_json::to_value(config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    write_json_value_if_changed(&path, &value)
+}
 
-    std::fs::write(&path, content).map_err(|e| format!("Failed to write config file: {}", e))
+#[cfg(test)]
+mod config_write_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn write_json_value_if_changed_skips_identical_rewrite() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("teamclaw.json");
+        let value = serde_json::json!({ "shortcuts": [], "locale": "zh-CN" });
+        write_json_value_if_changed(path.to_str().unwrap(), &value).unwrap();
+        let mtime_after_first = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write_json_value_if_changed(path.to_str().unwrap(), &value).unwrap();
+        let mtime_after_second = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+        assert_eq!(mtime_after_first, mtime_after_second);
+    }
+
+    #[test]
+    fn patch_config_value_preserves_unrelated_fields() {
+        let dir = tempdir().unwrap();
+        let workspace = dir.path().to_str().unwrap();
+        let path = dir.path().join(".teamclaw/teamclaw.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "envVars": [{ "key": "OPENAI_API_KEY" }],
+                "shortcuts": [{ "id": "a", "label": "Old" }],
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        patch_config_value(
+            workspace,
+            "shortcuts",
+            serde_json::json!([{ "id": "a", "label": "Old" }]),
+        )
+        .unwrap();
+        let mtime_after_noop = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        patch_config_value(
+            workspace,
+            "shortcuts",
+            serde_json::json!([{ "id": "a", "label": "New" }]),
+        )
+        .unwrap();
+
+        let on_disk: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            on_disk.get("envVars"),
+            Some(&serde_json::json!([{ "key": "OPENAI_API_KEY" }]))
+        );
+        assert_eq!(
+            on_disk.get("shortcuts"),
+            Some(&serde_json::json!([{ "id": "a", "label": "New" }]))
+        );
+        assert_ne!(
+            mtime_after_noop,
+            std::fs::metadata(&path).unwrap().modified().unwrap()
+        );
+    }
+
+    #[test]
+    fn write_json_value_if_changed_writes_when_value_differs() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("teamclaw.json");
+        let first = serde_json::json!({ "locale": "en" });
+        let second = serde_json::json!({ "locale": "zh-CN" });
+        write_json_value_if_changed(path.to_str().unwrap(), &first).unwrap();
+        write_json_value_if_changed(path.to_str().unwrap(), &second).unwrap();
+        let on_disk: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(on_disk, second);
+    }
 }

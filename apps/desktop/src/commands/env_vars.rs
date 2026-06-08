@@ -298,9 +298,7 @@ pub(crate) fn write_teamclaw_json(
     let teamclaw_dir = format!("{}/{}", workspace_path, super::TEAMCLAW_DIR);
     let _ = std::fs::create_dir_all(&teamclaw_dir);
     let path = get_teamclaw_json_path(workspace_path);
-    let content = serde_json::to_string_pretty(json)
-        .map_err(|e| format!("Failed to serialize {}: {}", super::CONFIG_FILE_NAME, e))?;
-    std::fs::write(&path, content)
+    teamclaw_gateway::write_json_value_if_changed(&path, json)
         .map_err(|e| format!("Failed to write {}: {}", super::CONFIG_FILE_NAME, e))
 }
 

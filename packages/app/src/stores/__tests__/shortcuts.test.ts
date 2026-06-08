@@ -36,7 +36,7 @@ beforeEach(() => {
 })
 
 describe('useShortcutsStore', () => {
-  it('loadPersonal fetches via selectShortcuts and persists cache', async () => {
+  it('loadPersonal fetches via selectShortcuts without persisting by default', async () => {
     mockSelectShortcuts.mockResolvedValue([
       { id: 'a', scope: 'personal', label: 'A', type: 'link', target: 't', parentId: null,
         order: 0, ownerMemberId: 'm', teamId: null, icon: null, createdAt: '', updatedAt: '' },
@@ -44,6 +44,16 @@ describe('useShortcutsStore', () => {
     mockInvoke.mockResolvedValue(undefined)
     await useShortcutsStore.getState().loadPersonal()
     expect(useShortcutsStore.getState().personalNodes).toHaveLength(1)
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it('loadPersonal persists cache when persist option is set', async () => {
+    mockSelectShortcuts.mockResolvedValue([
+      { id: 'a', scope: 'personal', label: 'A', type: 'link', target: 't', parentId: null,
+        order: 0, ownerMemberId: 'm', teamId: null, icon: null, createdAt: '', updatedAt: '' },
+    ])
+    mockInvoke.mockResolvedValue(undefined)
+    await useShortcutsStore.getState().loadPersonal({ persist: true })
     expect(mockInvoke).toHaveBeenCalledWith('save_shortcuts', expect.objectContaining({
       workspacePath: '/ws',
       nodes: expect.any(Array),
