@@ -32,7 +32,7 @@ describe("amuxd-channels", () => {
     expect(result[0].platform).toBe("discord");
   });
 
-  it("maps WeCom config to daemon field names on save", async () => {
+  it("maps WeCom multi-bot config to daemon field names on save", async () => {
     vi.mocked(tauri.invoke).mockResolvedValue(undefined);
 
     await saveChannelConfig("wecom", {
@@ -63,7 +63,33 @@ describe("amuxd-channels", () => {
     });
   });
 
-  it("maps daemon WeCom config back to app field names on load", async () => {
+  it("maps daemon WeCom multi-bot config back to app field names on load", async () => {
+    vi.mocked(tauri.invoke).mockResolvedValue({
+      enabled: true,
+      bots: [
+        {
+          enabled: true,
+          bot_id: "bot",
+          secret: "sec",
+          encoding_aes_key: "aes",
+        },
+      ],
+    });
+
+    await expect(loadChannelConfig("wecom")).resolves.toEqual({
+      enabled: true,
+      bots: [
+        {
+          enabled: true,
+          botId: "bot",
+          secret: "sec",
+          encodingAesKey: "aes",
+        },
+      ],
+    });
+  });
+
+  it("migrates legacy single-bot WeCom daemon config on load", async () => {
     vi.mocked(tauri.invoke).mockResolvedValue({
       enabled: true,
       bots: [
