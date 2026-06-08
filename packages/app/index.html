@@ -28,6 +28,15 @@
         --sk-border: oklch(1 0 0 / 10%);
         --sk-bone: oklch(0.3 0 0);
       }
+      /* Anodized teal build flavor — mirrors :root[data-palette="teal"] in
+         globals.css so the skeleton's first paint already matches. Outranks
+         .dark so the flavor stays light. */
+      :root[data-palette="teal"] {
+        --sk-bg: #f2f0ea;
+        --sk-panel: #e5e6e1;
+        --sk-border: rgba(32, 36, 42, 0.08);
+        --sk-bone: #d5d8d0;
+      }
 
       #skeleton {
         position: fixed;
@@ -123,6 +132,11 @@
         if (!theme) theme = 'system';
         if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
           document.documentElement.classList.add('dark');
+        }
+        // Build-flavor palette (__PALETTE__ replaced by Vite transformIndexHtml).
+        var palette = '__PALETTE__';
+        if (palette && palette !== 'default') {
+          document.documentElement.setAttribute('data-palette', palette);
         }
       })();
     </script>

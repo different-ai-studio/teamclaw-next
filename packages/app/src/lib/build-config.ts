@@ -32,6 +32,10 @@ export interface BuildConfig {
   app: {
     name: string
     shortName?: string
+    /** Visual palette flavor. Omitted / "default" → Editorial Calm.
+     *  "teal" → anodized-teal build flavor (see styles/globals.css). Applied
+     *  as data-palette on <html> at first paint. */
+    palette?: string
   }
   features: {
     teamMode: boolean

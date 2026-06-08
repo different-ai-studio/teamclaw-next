@@ -13,6 +13,7 @@
     "name": "TeamClaw",
     "shortName": "teamclaw",
     "uiVariant": "default",
+    "palette": "default",
     "updater": {
       "endpoints": [
         "__OSS_BASE_URL__/releases/latest.json",
