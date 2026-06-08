@@ -54,7 +54,7 @@ saas-mono 自建 Supabase（唯一实例 / 唯一 GoTrue / 唯一 auth.users）
 | **S3B** | provisioning 默认 team + hook 注 org_id + teams_org_guard | ✅ **已应用 47.x**（hook 实测返回正常） | 迁移 `20260608030000` |
 | **S3-FC.1** | create_team 加 p_oid + FC createTeam 传 token org_id | ✅ DB 已应用 47.x；FC 代码改好 ⬜ **待部署** | 迁移 `20260608040000` + supabase-repo.ts |
 | **S3-FC.2** | 匿名 lazy-provision 个人 org（createTeam 路径，无 org 时 ensure_personal_org） | ✅ **已上 prod**（public-only）+ 干跑功能验证 + FC typecheck 干净 | 迁移 `20260608050000` + supabase-repo.ts |
-| **S3-FC.3** | claim_team_invite 换 org（严格单 org，清理弃用个人 org） | ⬜ 未写（独立子项） | 迁移 + FC |
+| **S3-FC.3** | claim_team_invite 换 org（严格单 org，best-effort GC 个人 org） | ✅ **已应用 47.x** + 场景干跑验证（C 换 org+个人 org/team GC+入新 team） | 迁移 `20260608060000` |
 | **S4** | 在 saas-mono 实例落地 + 切流 | ⬜ 未开始 | 跨实例 |
 
 **47.x 此刻实况**（无活跃流量，已直接切 DB 侧）：35 张业务表已在 `amux`，`teams.oid`、`teams_org_guard`、org_id 注入的 `amux_access_token_hook`、`create_team(p_oid)`、`ensure_personal_org`/`ensure_org_default_team` 全部就位；`public` 留 orgs/plans/users 镜像 + 5 张 Better-Auth。
@@ -135,4 +135,4 @@ teamclaw 用 GoTrue 匿名用户（`auth.users.is_anonymous`），首启 bootstr
 **协作边界 = 仅本组织内（严格单 org）**
 - 用户的所有 actors/teams 都在其唯一 org 内；`teams_org_guard`（oid = current_org_id）**保持不变**。
 - **invite-claim = 换 org**：用户认领指向 org Y 的 team 邀请时，其 org 重置为 Y，原匿名个人 org X（及其默认 team）并入/弃用。
-- ⚠️ **待实现（claim 改造）**：`claim_team_invite` 需在加入 invite team 时把 claimer 的 `public.users.org_id` + `auth.users` 的 `app_metadata.org_id` 改成该 team 的 `oid`，并清理其被弃用的个人 org（否则 claimer 会同时挂在 X、Y 两个 org 的 team 上，违反严格单 org）。这是 S3 之后的独立子项。
+- ✅ **已实现（S3-FC.3，迁移 `20260608060000`）**：`claim_team_invite` 的 member 路径在加入 invite team 后把 claimer 的 `public.users.org_id` 改成该 team 的 `oid`（`app_metadata.org_id` 由 hook 从 public.users 注入下次 token），并 best-effort GC 弃用的一人个人 org（删 `amux.teams where oid=旧org` 级联 + 删 org；包 exception，GC 失败不影响认领）。场景干跑验证通过。
