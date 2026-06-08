@@ -361,7 +361,7 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
         text: &str,
     ) -> Result<(), AcpError> {
         let outcome = self.resolve_or_spawn(session).await?;
-        let mgr = self.manager.lock().await;
+        let mut mgr = self.manager.lock().await;
         mgr.inject_context(&outcome.real_acp_sid, sender_display, text)
             .await
             .map_err(|e| AcpError::Send(e.to_string()))

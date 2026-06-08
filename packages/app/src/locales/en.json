@@ -2046,7 +2046,8 @@
       "proTipDesc": "A good system prompt includes your preferred response style, any domain expertise needed, and specific guidelines for the AI to follow.",
       "saveChanges": "Save Changes",
       "saveSuccess": "System prompt saved successfully",
-      "saveError": "Failed to save system prompt"
+      "saveError": "Failed to save system prompt",
+      "saveReloadWarning": "System prompt saved, but Agent runtime reload failed"
     },
     "roles": {
       "title": "Roles",

@@ -119,6 +119,8 @@ pub fn classify_change_path(
     for workspace in workspaces {
         let kind = if path == workspace.workspace_path.join("opencode.json") {
             Some(RefreshChangeKind::OpencodeJson)
+        } else if path == workspace.workspace_path.join(".teamclaw/teamclaw.json") {
+            Some(RefreshChangeKind::TeamclawConfig)
         } else if path.starts_with(workspace.workspace_path.join(TEAM_LINK_NAME).join(".mcp")) {
             Some(RefreshChangeKind::Mcp)
         } else if path.starts_with(workspace.workspace_path.join(".teamclaw/skills"))
@@ -220,6 +222,10 @@ fn watch_roots(workspaces: &[WatchedWorkspace], home: Option<&Path>) -> Vec<Watc
     for workspace in workspaces {
         roots.push(WatchRoot {
             path: workspace.workspace_path.join("opencode.json"),
+            recursive: false,
+        });
+        roots.push(WatchRoot {
+            path: workspace.workspace_path.join(".teamclaw/teamclaw.json"),
             recursive: false,
         });
         roots.push(WatchRoot {
@@ -420,6 +426,10 @@ mod tests {
             (
                 Path::new("/tmp/ws-1/opencode.json"),
                 RefreshChangeKind::OpencodeJson,
+            ),
+            (
+                Path::new("/tmp/ws-1/.teamclaw/teamclaw.json"),
+                RefreshChangeKind::TeamclawConfig,
             ),
         ];
 

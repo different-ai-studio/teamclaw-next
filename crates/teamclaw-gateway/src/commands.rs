@@ -299,6 +299,16 @@ mod tests {
             Ok("msg-1".to_string())
         }
 
+        async fn record_agent_reply(
+            &self,
+            _session_id: &str,
+            _sender_actor_id: &str,
+            _content: &str,
+            _external_message_id: Option<&str>,
+        ) -> Result<String, StoreError> {
+            Ok("reply-1".to_string())
+        }
+
         async fn record_message_with_attachments(
             &self,
             _session_id: &str,

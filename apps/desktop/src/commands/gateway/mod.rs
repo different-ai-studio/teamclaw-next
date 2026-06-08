@@ -259,7 +259,8 @@ pub fn save_system_prompt(
     config
         .other
         .insert("systemPrompt".to_string(), serde_json::json!(prompt));
-    teamclaw_gateway::write_config(&workspace_path, &config)
+    teamclaw_gateway::write_config(&workspace_path, &config)?;
+    teamclaw_gateway::sync_teamclaw_claude_md(&workspace_path, &prompt)
 }
 
 /// Set the locale in teamclaw.json for UI i18n.

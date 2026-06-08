@@ -41,7 +41,7 @@ use crate::history::EventHistory;
 use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
 use crate::proto::amux;
 use crate::provider_config::ProviderConfig;
-use crate::runtime::{AgentLaunchConfig, RuntimeManager};
+use crate::runtime::{apply_workspace_system_instructions, AgentLaunchConfig, RuntimeManager};
 use crate::team_shared_git::TeamSharedGitConfig;
 use teamclaw_gateway::{AcpHandle, ChannelStore};
 
@@ -4758,6 +4758,23 @@ impl DaemonServer {
                 });
             }
         };
+
+        {
+            let mut agents = self.agents.lock().await;
+            if let Err(e) = apply_workspace_system_instructions(
+                &mut agents,
+                &new_id,
+                Path::new(&resolved_worktree),
+                agent_type,
+            ) {
+                warn!(
+                    runtime_id = %new_id,
+                    session_id,
+                    err = %e,
+                    "apply_start_runtime: workspace system instructions failed"
+                );
+            }
+        }
 
         // STARTING retain — fleeting but observable by mid-spawn reconnects.
         let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);

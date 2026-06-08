@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
 
 use super::adapter::AcpCommand;
+use super::instruction_delivery::InstructionDelivery;
 use crate::proto::amux;
 
 #[derive(Debug, Clone)]
@@ -11,6 +12,13 @@ pub struct PendingMessage {
     pub sender_display: String, // for the prefix prose ("Matt: …")
     pub content: String,
     pub created_at: i64, // unix ts; preserved for ordering after coalescing
+}
+
+/// Buffered context from `inject_context` — flushed on the next `send_prompt`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InjectedContextItem {
+    pub sender_display: String,
+    pub content: String,
 }
 
 pub struct RuntimeHandle {
@@ -54,6 +62,10 @@ pub struct RuntimeHandle {
     /// the mention set. Drained into a `[Context: …]` prefix on the next
     /// real send_prompt so the runtime catches up without firing N turns.
     pub pending_silent: Vec<PendingMessage>,
+    /// Instructions queued by `inject_context` (workspace system prompt, /ctx).
+    pub injected_context: Vec<InjectedContextItem>,
+    /// How static workspace instructions are delivered for this runtime.
+    pub instruction_delivery: InstructionDelivery,
     /// Backend `agent_runtimes.id` for this runtime row. Used to PATCH
     /// `last_processed_message_id` via `update_runtime_cursor`.
     ///
@@ -103,6 +115,8 @@ impl RuntimeHandle {
             cmd_tx: None,
             turn_lock: Arc::new(AsyncMutex::new(())),
             pending_silent: Vec::new(),
+            injected_context: Vec::new(),
+            instruction_delivery: InstructionDelivery::BufferedInject,
             backend_runtime_row_id: None,
             last_processed_message_id: None,
             available_models: Vec::new(),
@@ -249,6 +263,42 @@ impl RuntimeHandle {
         text.push_str("[End context]\n\n");
         (text, ids)
     }
+
+    pub fn push_injected_context(&mut self, sender_display: &str, content: &str) {
+        let trimmed = content.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let sender = sender_display.trim();
+        if !sender.is_empty() {
+            self.injected_context
+                .retain(|item| item.sender_display != sender);
+        }
+        self.injected_context.push(InjectedContextItem {
+            sender_display: sender.to_string(),
+            content: trimmed.to_string(),
+        });
+    }
+
+    pub fn flush_injected_context(&mut self) -> (String, Vec<InjectedContextItem>) {
+        if self.injected_context.is_empty() {
+            return (String::new(), Vec::new());
+        }
+        let drained = std::mem::take(&mut self.injected_context);
+        let mut text = String::from(
+            "[TeamClaw Instructions — follow for all replies in this session. \
+Do not acknowledge separately. Reply only to the user prompt that follows.]\n",
+        );
+        for item in &drained {
+            if !item.sender_display.is_empty() {
+                text.push_str(&format!("[{}] ", item.sender_display));
+            }
+            text.push_str(&item.content);
+            text.push('\n');
+        }
+        text.push('\n');
+        (text, drained)
+    }
 }
 
 #[cfg(test)]
@@ -276,6 +326,8 @@ impl RuntimeHandle {
             cmd_tx: None,
             turn_lock: Arc::new(AsyncMutex::new(())),
             pending_silent: Vec::new(),
+            injected_context: Vec::new(),
+            instruction_delivery: InstructionDelivery::BufferedInject,
             backend_runtime_row_id: None,
             last_processed_message_id: None,
             available_models: Vec::new(),
@@ -286,6 +338,26 @@ impl RuntimeHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flush_injected_context_drains_into_prefix() {
+        let mut h = RuntimeHandle::test_dummy();
+        h.push_injected_context("system", "请使用中文回答");
+        let (text, drained) = h.flush_injected_context();
+        assert_eq!(drained.len(), 1);
+        assert!(text.contains("TeamClaw Instructions"));
+        assert!(text.contains("[system] 请使用中文回答"));
+        assert!(h.injected_context.is_empty());
+    }
+
+    #[test]
+    fn push_injected_context_replaces_same_sender() {
+        let mut h = RuntimeHandle::test_dummy();
+        h.push_injected_context("system", "first");
+        h.push_injected_context("system", "second");
+        assert_eq!(h.injected_context.len(), 1);
+        assert_eq!(h.injected_context[0].content, "second");
+    }
 
     #[test]
     fn flush_pending_silent_returns_empty_when_queue_empty() {
