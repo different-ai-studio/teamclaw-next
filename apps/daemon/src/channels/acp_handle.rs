@@ -213,6 +213,27 @@ impl AmuxdAcpHandle {
             .map_err(|e| AcpError::Create(e.to_string()))?
         };
 
+        // Durable persona for ClaudeCode: write CLAUDE.local.md into the
+        // bot's workspace. Non-fatal; the preamble already delivered it.
+        if matches!(agent_type, Some(amux::AgentType::ClaudeCode) | None) {
+            if let (Some(ws), Some(bot_id)) =
+                (workspace_dir.as_deref(), bot_id_from_binding(&binding))
+            {
+                if let Some(prompt) = self
+                    .bot_configs
+                    .get(bot_id)
+                    .and_then(|c| c.system_prompt.as_deref())
+                {
+                    if let Err(e) = super::bot_prompt_file::write_bot_instruction_file(
+                        std::path::Path::new(ws),
+                        prompt,
+                    ) {
+                        tracing::warn!(bot_id, error = %e, "write CLAUDE.local.md failed");
+                    }
+                }
+            }
+        }
+
         // Insert under a write lock; if a concurrent spawn raced ahead we
         // keep the existing entry so `was_primed` reflects whichever call
         // actually delivered the preamble first.
