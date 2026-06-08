@@ -2,15 +2,18 @@ import { describe, expect, it } from "vitest";
 import { AgentStatus } from "@/lib/proto/amux_pb";
 import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
 import {
+  buildInterruptedStreamAnchor,
   isAgentActiveStatus,
   isTerminalAgentStatus,
   joinDistinctPendingReplyChunks,
+  isToolOnlyTurnAnchor,
   mergePendingAgentReplies,
   normalizeToolResultEvent,
   normalizeToolUseEvent,
   rememberLiveEventId,
   streamEntryHasVisibleContent,
 } from "@/lib/live-agent-stream";
+import type { AgentStreamEntry } from "@/stores/v2-streaming-store";
 
 describe("live agent stream event helpers", () => {
   it("normalizes execute tool uses into command tool calls", () => {
@@ -147,12 +150,32 @@ describe("live agent stream event helpers", () => {
     );
   });
 
-  it("treats parked empty agent replies as no reply", () => {
+  it("treats parked empty agent replies as no reply when the stream has no artifacts", () => {
     const pending = [
       { messageId: "m1", content: "" },
       { messageId: "m2", content: "   " },
     ] as TeamclawMessage[];
     expect(mergePendingAgentReplies(pending)).toBeNull();
+  });
+
+  it("keeps tool-only turn anchors even when agent_reply content is empty", () => {
+    const pending = [{ messageId: "m1", content: "" }] as TeamclawMessage[];
+    const streamEntry = {
+      outputText: "",
+      thinkingText: "",
+      toolCalls: [{ id: "sleep-tool" }],
+      parts: [
+        {
+          type: "tool-call",
+          toolCall: { id: "sleep-tool", status: "calling" },
+        },
+      ],
+    };
+    expect(mergePendingAgentReplies(pending, streamEntry)).toMatchObject({
+      messageId: "m1",
+      content: "",
+    });
+    expect(isToolOnlyTurnAnchor(pending, streamEntry)).toBe(true);
   });
 
   it("detects when a stream ended without any visible content", () => {
@@ -181,5 +204,36 @@ describe("live agent stream event helpers", () => {
         parts: [{ type: "text", text: "hello" }],
       }),
     ).toBe(true);
+  });
+
+  it("buildInterruptedStreamAnchor uses streamId for stable client ids", () => {
+    const snapshot: AgentStreamEntry = {
+      sessionId: "s1",
+      actorId: "a1",
+      outputText: "",
+      thinkingText: "",
+      parts: [{ type: "tool-call", toolCall: { id: "tool-1" } }],
+      toolCalls: [
+        {
+          id: "tool-1",
+          name: "bash",
+          status: "completed",
+          startTime: new Date("2026-06-08T07:38:00.000Z"),
+        },
+      ],
+      planEntries: [],
+      pendingPermission: null,
+      errorMessage: null,
+      errorDetails: null,
+      lastUpdate: 1_748_868_000_000,
+      active: false,
+      streamId: "s1::a1::stream-9",
+    };
+    const anchor = buildInterruptedStreamAnchor("s1", "a1", snapshot);
+    expect(anchor.messageId).toBe("interrupt-s1::a1::stream-9");
+    expect(anchor.turnId).toBe("interrupt-s1::a1::stream-9");
+    expect(Number(anchor.createdAt)).toBe(
+      Math.floor(new Date("2026-06-08T07:38:00.000Z").getTime() / 1000),
+    );
   });
 });

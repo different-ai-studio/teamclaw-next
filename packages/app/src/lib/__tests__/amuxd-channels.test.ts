@@ -92,14 +92,9 @@ describe("amuxd-channels", () => {
   it("migrates legacy single-bot WeCom daemon config on load", async () => {
     vi.mocked(tauri.invoke).mockResolvedValue({
       enabled: true,
-      bots: [
-        {
-          enabled: true,
-          bot_id: "bot",
-          secret: "sec",
-          encoding_aes_key: "aes",
-        },
-      ],
+      bot_id: "bot",
+      secret: "sec",
+      encoding_aes_key: "aes",
     });
 
     await expect(loadChannelConfig("wecom")).resolves.toEqual({

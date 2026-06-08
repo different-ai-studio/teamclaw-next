@@ -156,16 +156,16 @@ describe("RolesSkillsSection", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Skills pane")).toBeDefined()
+      expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Skills" }))
     })
-    expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Skills" }))
 
     const skillsTab = screen.getByRole("tab", { name: "Skills" })
     fireEvent.keyDown(skillsTab, { key: "ArrowLeft" })
 
     await waitFor(() => {
       expect(screen.getByText("Roles pane")).toBeDefined()
+      expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Roles" }))
     })
-    expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Roles" }))
   })
 
   it("shows a page-level loading state before the skills pane finishes switching in", async () => {

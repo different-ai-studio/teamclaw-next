@@ -5,6 +5,28 @@ import { useSessionSelectionStore } from "./session-selection-store";
 
 const EMPTY_MESSAGES: Message[] = [];
 
+function compareProtoMessages(a: Message, b: Message): number {
+  const ta = Number(a.createdAt) || 0;
+  const tb = Number(b.createdAt) || 0;
+  if (ta !== tb) return ta - tb;
+  return (a.messageId || "").localeCompare(b.messageId || "");
+}
+
+function insertProtoMessageSorted(messages: Message[], message: Message): Message[] {
+  if (messages.some((row) => row.messageId === message.messageId)) {
+    return messages;
+  }
+  if (messages.length === 0) return [message];
+  let lo = 0;
+  let hi = messages.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (compareProtoMessages(messages[mid], message) < 0) lo = mid + 1;
+    else hi = mid;
+  }
+  return [...messages.slice(0, lo), message, ...messages.slice(lo)];
+}
+
 type SessionMessageState = {
   messages: Record<string, Message[]>;
   messageRefreshTrigger: number;
@@ -13,6 +35,7 @@ type SessionMessageState = {
   appendMessage: (sessionId: string, message: Message) => void;
   /** One synthesized AGENT_REPLY per turn in the in-memory list (daemon may emit many). */
   replaceTurnAgentRepliesInStore: (sessionId: string, message: Message) => void;
+  removeMessageById: (sessionId: string, messageId: string) => void;
   setMessages: (sessionId: string, messages: Message[]) => void;
   currentMessages: () => Message[];
   reloadActiveSessionMessages: (opts?: { full?: boolean }) => Promise<void>;
@@ -44,7 +67,20 @@ export const useSessionMessageStore = create<SessionMessageState>((set, get) => 
         ),
     );
     const withoutSameId = rest.filter((row) => row.messageId !== message.messageId);
-    set({ messages: { ...get().messages, [sessionId]: [...withoutSameId, message] } });
+    set({
+      messages: {
+        ...get().messages,
+        [sessionId]: insertProtoMessageSorted(withoutSameId, message),
+      },
+    });
+  },
+  removeMessageById: (sessionId, messageId) => {
+    const trimmed = messageId.trim();
+    if (!trimmed) return;
+    const cur = get().messages[sessionId] ?? [];
+    const next = cur.filter((row) => row.messageId !== trimmed);
+    if (next.length === cur.length) return;
+    set({ messages: { ...get().messages, [sessionId]: next } });
   },
   setMessages: (sessionId, messages) => {
     set({ messages: { ...get().messages, [sessionId]: messages } });

@@ -18,6 +18,7 @@ import { useTeamModeStore } from "@/stores/team-mode";
 import { useCurrentTeamStore } from "@/stores/current-team";
 import { TEAMCLAW_DIR, CONFIG_FILE_NAME, TEAM_REPO_DIR } from "@/lib/build-config";
 import { adaptTeamclawMessages } from "@/lib/v2-message-adapter";
+import { logInterruptMsgDiag } from "@/lib/interrupt-msg-diag";
 import { useAuthStore } from "@/stores/auth-store";
 import { bumpSessionListLastMessage } from "@/lib/session-list-preview";
 import { useSessionListStore } from "@/stores/session-list-store";
@@ -1879,6 +1880,42 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     );
     return [...archived, ...current].sort((a, b) => a.lastUpdate - b.lastUpdate);
   }, [v2StreamsByKey, v2StreamsArchived, displaySessionId]);
+
+  const lastTimelineDiagSigRef = React.useRef<string>("");
+  React.useEffect(() => {
+    if (!displaySessionId) return;
+    const timelineMessages = displayMessages ?? [];
+    const sig = JSON.stringify({
+      messageListCount: timelineMessages.length,
+      messageTailIds: timelineMessages.slice(-5).map((message) => message.id),
+      bottomStreamCount: displayV2Streams.length,
+      bottomStreamIds: displayV2Streams.map((entry) => entry.streamId),
+    });
+    if (sig === lastTimelineDiagSigRef.current) return;
+    lastTimelineDiagSigRef.current = sig;
+    logInterruptMsgDiag("ui.timeline", {
+      sessionId: displaySessionId,
+      messageListCount: timelineMessages.length,
+      messageListTail: timelineMessages.slice(-5).map((message) => ({
+        id: message.id,
+        role: message.role,
+        contentLength: (message.content ?? "").trim().length,
+        toolCount: message.toolCalls?.length ?? 0,
+        partTypes: message.parts?.map((part) => part.type) ?? [],
+        timestamp: message.timestamp?.toISOString?.() ?? null,
+      })),
+      bottomStreamCount: displayV2Streams.length,
+      bottomStreams: displayV2Streams.map((entry) => ({
+        source: "archiveId" in entry ? "archived" : "byKey",
+        archiveId: "archiveId" in entry ? entry.archiveId : null,
+        streamId: entry.streamId,
+        active: entry.active,
+        toolCount: entry.toolCalls.length,
+        partTypes: entry.parts.map((part) => part.type),
+        lastUpdate: entry.lastUpdate,
+      })),
+    });
+  }, [displaySessionId, displayMessages, displayV2Streams]);
 
   const hasSessionNotices = useSessionNoticeStore((s) =>
     displaySessionId ? (s.bySession[displaySessionId]?.length ?? 0) > 0 : false,
