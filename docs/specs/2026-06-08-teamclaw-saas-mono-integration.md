@@ -49,16 +49,16 @@ saas-mono 自建 Supabase（唯一实例 / 唯一 GoTrue / 唯一 auth.users）
 |---|---|---|---|
 | **S1** | `public.orgs` + `plans` 桩 + `update_audit_columns()` | ✅ **已上 prod 47.x** | 迁移 `20260608000000` |
 | **S3A** | `public.users` 子集镜像 + `app.current_org_id()` + orgs RLS | ✅ **已上 prod 47.x** | 迁移 `20260608020000` |
-| **S2** | 35 业务表 public→amux + teams.oid + 重写 64 函数 | 🟡 写好+**干跑验证过**，未应用 | 迁移 `20260608010000` |
-| **S2d** | FC 默认 schema=amux + 41 个 .rpc→`.schema('public')` | 🟢 改好 + **typecheck 干净**（5 个错经还原对比证实 pre-existing） | FC 5 文件 |
-| **S3B** | provisioning 默认 team + hook 注 org_id + teams_org_guard | 🟡 写好+**干跑验证过**，未应用 | 迁移 `20260608030000` |
-| **S3-FC.1** | create_team 加 p_oid + FC createTeam 传 token org_id | 🟡 写好+**干跑(功能)验证**+typecheck 干净 | 迁移 `20260608040000` + supabase-repo.ts |
+| **S2** | 35 业务表 public→amux + teams.oid + 重写 64 函数 | ✅ **已应用 47.x**（35 表/64 函数，users 正确留 public） | 迁移 `20260608010000` |
+| **S2d** | FC 默认 schema=amux + 41 个 .rpc→`.schema('public')` | 🟢 改好 + typecheck 干净 —— ⬜ **待部署 FC** | FC 5 文件 |
+| **S3B** | provisioning 默认 team + hook 注 org_id + teams_org_guard | ✅ **已应用 47.x**（hook 实测返回正常） | 迁移 `20260608030000` |
+| **S3-FC.1** | create_team 加 p_oid + FC createTeam 传 token org_id | ✅ DB 已应用 47.x；FC 代码改好 ⬜ **待部署** | 迁移 `20260608040000` + supabase-repo.ts |
 | **S3-FC.2** | 匿名 lazy-provision 个人 org（createTeam 路径，无 org 时 ensure_personal_org） | ✅ **已上 prod**（public-only）+ 干跑功能验证 + FC typecheck 干净 | 迁移 `20260608050000` + supabase-repo.ts |
 | **S3-FC.3** | claim_team_invite 换 org（严格单 org，清理弃用个人 org） | ⬜ 未写（独立子项） | 迁移 + FC |
 | **S4** | 在 saas-mono 实例落地 + 切流 | ⬜ 未开始 | 跨实例 |
 
-**prod 47.x 此刻实况**：已永久存在 `public.orgs/plans/users` 镜像 + `app.current_org_id()` + orgs RLS。
-全是加法，对现有 teamclaw 和四端客户端**无感**。amux 搬迁与 S3B 守卫/钩子**尚未应用**。
+**47.x 此刻实况**（无活跃流量，已直接切 DB 侧）：35 张业务表已在 `amux`，`teams.oid`、`teams_org_guard`、org_id 注入的 `amux_access_token_hook`、`create_team(p_oid)`、`ensure_personal_org`/`ensure_org_default_team` 全部就位；`public` 留 orgs/plans/users 镜像 + 5 张 Better-Auth。
+⬜ **剩两个运维动作（你做），FC 才能跑通**：① 47.x PostgREST 容器 `PGRST_DB_SCHEMAS` 加 `amux`（保留 public）+ 重启 ② 部署本分支的 FC（含 S2d + S3-FC）。在这两步完成前，旧 FC 对 amux 表的 `.from()` 会失败（当前无流量故无影响）。
 
 ---
 

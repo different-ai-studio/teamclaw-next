@@ -12,9 +12,9 @@
 --    PGRST_DB_SCHEMAS (ops). Run all three together inside a maintenance window.
 --
 -- Stays in public (NOT moved):
---   - orgs, plans            : saas-mono tenant mirror (Stage 1)
+--   - orgs, plans, users     : saas-mono tenant mirror (Stage 1 / 3A)
 --   - account, session, user,
---     verification, jwks      : Better-Auth tables (retired in Stage 3, not moved)
+--     verification, jwks      : Better-Auth tables (kept, not moved)
 --
 -- RLS note: policies move with their tables and keep their team-scoped semantics.
 --   The `team.oid == jwt.org_id` org-consistency guard is deferred to Stage 3
@@ -39,7 +39,7 @@ begin
   select array_agg(table_name order by table_name) into v_move
   from information_schema.tables
   where table_schema='public' and table_type='BASE TABLE'
-    and table_name <> all (array['orgs','plans','account','session','user','verification','jwks']);
+    and table_name <> all (array['orgs','plans','users','account','session','user','verification','jwks']);
 
   if v_move is null then
     raise notice 'Stage 2: nothing to move (already applied)';
