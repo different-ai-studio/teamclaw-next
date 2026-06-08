@@ -95,6 +95,11 @@ struct AMUXApp: App {
             guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
                   let token = comps.queryItems?.first(where: { $0.name == "token" })?.value
             else { return }
+            // Persist before posting: on a cold launch the notification has no
+            // live listener (RootTabView isn't mounted until bootstrap finishes),
+            // so the token would be lost and bootstrap would auto-create a junk
+            // team. bootstrap() reads this key before its auto-create branch.
+            UserDefaults.standard.set(token, forKey: InviteDeepLink.pendingTokenDefaultsKey)
             NotificationCenter.default.post(
                 name: .amuxInviteTokenReceived, object: nil, userInfo: ["token": token]
             )

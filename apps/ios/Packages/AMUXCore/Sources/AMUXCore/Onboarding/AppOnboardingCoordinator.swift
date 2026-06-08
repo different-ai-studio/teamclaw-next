@@ -404,6 +404,20 @@ public final class AppOnboardingCoordinator {
             pendingCreatedTeam = nil
             var preferred = preferringTeamID
 
+            // Hydrate a cold-launch invite deeplink token. AMUXApp.handle(url)
+            // stashes it in UserDefaults because at cold launch the
+            // NotificationCenter listener isn't mounted yet (route is still
+            // .loading). Pull it into pendingInviteToken so the claim block below
+            // runs BEFORE the auto-create branch — otherwise we'd strand the user
+            // in a throwaway team next to the one the invite actually targets.
+            // Read-and-remove so it is consumed exactly once.
+            if let stashed = defaults.string(forKey: InviteDeepLink.pendingTokenDefaultsKey) {
+                defaults.removeObject(forKey: InviteDeepLink.pendingTokenDefaultsKey)
+                if (pendingInviteToken?.isEmpty ?? true) && !stashed.isEmpty {
+                    pendingInviteToken = stashed
+                }
+            }
+
             // If a pending invite token is sitting on the coordinator (the
             // user pasted it in ChooseAuthView before sign-in), claim it
             // now — BEFORE the anonymous auto-create branch — so we never
@@ -416,6 +430,18 @@ public final class AppOnboardingCoordinator {
                         try await store.claimInvite(token: token)
                     }
                     pendingInviteToken = nil
+                    // Agent and member re-invites (target_actor_id set) rotate
+                    // credentials onto an EXISTING actor and return a refresh
+                    // token bound to that actor's user. We must adopt that
+                    // session before reloading — otherwise we stay signed in as
+                    // the throwaway anonymous user that opened the link, find it
+                    // has no team, and auto-create a junk team instead of joining
+                    // the invited one. Mirrors RootTabView.claimAndSwitch.
+                    if let rt = result.refreshToken, !rt.isEmpty {
+                        try await store.setSession(refreshToken: rt)
+                        isAnonymous = await store.isAnonymous()
+                        currentUserEmail = await store.currentUserEmail()
+                    }
                     preferred = preferred ?? result.teamID
                     bootstrap = try await measureOnboarding("loadBootstrap.afterClaim") {
                         try await store.loadBootstrap()
@@ -487,6 +513,22 @@ public final class AppOnboardingCoordinator {
             isAnonymous = false
             route = .needsAuth
         } catch {
+            // A session whose user no longer exists server-side (e.g. an
+            // anonymous account that was deleted) keeps a locally-valid-looking
+            // JWT, so it slips past ensureSession and only fails when an
+            // authenticated call rejects it ("User from sub claim in JWT does
+            // not exist"). Dead-ending on the Setup-Failed/Retry screen loops
+            // forever because the stored token is permanently useless. Clear the
+            // session and bounce to auth so a fresh (anonymous) session can be
+            // minted instead.
+            if AuthErrorClassifier.isInvalidSession(error) {
+                try? await store.signOut()
+                persistActiveTeam(nil)
+                currentContext = nil
+                isAnonymous = false
+                route = .needsAuth
+                return
+            }
             currentContext = nil
             isAnonymous = false
             route = .failed
@@ -610,6 +652,10 @@ public final class AppOnboardingCoordinator {
         isBusy = true
         errorMessage = nil
 
+        // Claiming explicitly — drop any cold-launch deeplink stash so the
+        // bootstrap() call after a successful claim doesn't re-claim it.
+        defaults.removeObject(forKey: InviteDeepLink.pendingTokenDefaultsKey)
+
         do {
             try await store.signInAnonymously()
         } catch {
@@ -620,6 +666,13 @@ public final class AppOnboardingCoordinator {
 
         do {
             let result = try await store.claimInvite(token: token)
+            // Agent/member re-invites return a refresh token bound to the TARGET
+            // actor's user. Adopt it before bootstrapping — otherwise we stay
+            // signed in as the throwaway anonymous user we just created, find it
+            // has no team, and auto-create a junk team instead of joining.
+            if let rt = result.refreshToken, !rt.isEmpty {
+                try await store.setSession(refreshToken: rt)
+            }
             // Success → run bootstrap with the joined team preferred. The
             // transient `.loading` flicker here is fine because the sheet
             // is about to be dismissed by the caller anyway.
@@ -646,6 +699,12 @@ public final class AppOnboardingCoordinator {
         guard !isBusy else { return }
         isBusy = true
         errorMessage = nil
+
+        // We're claiming this token explicitly now, so drop any cold-launch
+        // deeplink stash for it — otherwise the bootstrap() call below would
+        // re-claim the (now consumed) token, fail, and sign out the session we
+        // just adopted.
+        defaults.removeObject(forKey: InviteDeepLink.pendingTokenDefaultsKey)
 
         // Make sure no stale session lingers — re-invite should land us on
         // the target's user_id, not whoever was signed in before.
