@@ -175,15 +175,15 @@ export function LocalDaemonRow({
             onClick={toggle}
             className="flex min-w-0 flex-1 items-center gap-[9px] rounded-md px-[9px] py-[5px] text-left"
           >
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-coral/15 text-coral">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-coral text-paper">
               <MonitorSmartphone className="h-3 w-3" />
             </span>
-            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="truncate text-[12.5px] font-medium text-foreground">
+            <span className="flex min-w-0 flex-1 flex-col gap-0">
+              <span className="truncate text-[12.5px] font-medium leading-tight text-foreground">
                 {actor.display_name}
               </span>
               <span
-                className="truncate font-mono text-[11px] text-faint"
+                className="truncate font-mono text-[10px] leading-tight text-faint"
                 title={currentWorkspacePath ?? undefined}
               >
                 {currentWorkspaceName || t('workspace.selectWorkspace', 'Select Workspace')}

@@ -22,6 +22,7 @@ pub enum RefreshChangeKind {
     ProviderCatalog,
     Permissions,
     OpencodeJson,
+    TeamclawConfig,
 }
 
 pub const INTERNAL_WRITE_SUPPRESS: Duration = Duration::from_secs(3);
@@ -336,7 +337,7 @@ impl RuntimeRefreshCoordinator {
 
 fn impact_for_kind(kind: RefreshChangeKind) -> RefreshImpact {
     match kind {
-        RefreshChangeKind::Mcp => RefreshImpact::IdleRestart,
+        RefreshChangeKind::Mcp | RefreshChangeKind::TeamclawConfig => RefreshImpact::IdleRestart,
         RefreshChangeKind::Skills
         | RefreshChangeKind::EnvVars
         | RefreshChangeKind::ProviderAuth
@@ -377,6 +378,7 @@ impl RefreshChangeKind {
             Self::ProviderCatalog => "provider_catalog",
             Self::Permissions => "permissions",
             Self::OpencodeJson => "opencode_json",
+            Self::TeamclawConfig => "teamclaw_config",
         }
     }
 }

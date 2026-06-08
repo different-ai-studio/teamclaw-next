@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { appShortName } from '@/lib/build-config'
 import { isTauri } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { encodeWorkspaceId, reloadDaemonRuntime } from '@/lib/daemon-local-client'
 
 // Legacy global storage key — kept only for one-time migration into
 // per-workspace teamclaw.json.
@@ -60,6 +61,23 @@ export const PromptSection = React.memo(function PromptSection() {
         t('settings.prompt.saveSuccess', 'System prompt saved successfully'),
         { duration: 2000 }
       )
+      if (workspacePath) {
+        try {
+          await reloadDaemonRuntime(encodeWorkspaceId(workspacePath))
+        } catch (reloadErr) {
+          toast.warning(
+            t(
+              'settings.prompt.saveReloadWarning',
+              'System prompt saved, but Agent runtime reload failed'
+            ),
+            {
+              description:
+                reloadErr instanceof Error ? reloadErr.message : String(reloadErr),
+              duration: 4000,
+            }
+          )
+        }
+      }
     } catch (err) {
       console.error('[PromptSection] Failed to save system prompt:', err)
       toast.error(
@@ -67,7 +85,7 @@ export const PromptSection = React.memo(function PromptSection() {
         { duration: 3000 }
       )
     }
-  }, [systemPrompt, t])
+  }, [systemPrompt, workspacePath, t])
 
   return (
     <div className="space-y-6">

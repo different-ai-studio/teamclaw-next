@@ -1,6 +1,7 @@
 mod daemon_config;
 mod member_store;
 mod roles_skills;
+mod workspace_instructions;
 pub mod team_mcp;
 mod session_store;
 mod workspace_store;
@@ -27,6 +28,9 @@ pub use roles_skills::{
 pub use provider_auth::{
     builtin_provider_auth_methods, merge_live_provider_auth_methods, ProviderAuthMethod,
     ProviderAuthMethodType, ProviderAuthMethodsResponse,
+};
+pub use workspace_instructions::{
+    claude_md_block_present_at, load_system_prompt, sync_teamclaw_claude_md,
 };
 pub use workspace_control::{
     decode_workspace_path, AllowlistDecision, AllowlistRule, ApplyOutcome, McpServerConfig, NullWorkspaceControlStore,

@@ -14,6 +14,9 @@ use tracing::{info, warn};
 /// Matches `apps/desktop/src/commands/introspect_api.rs` — desktop Tauri hosts the API.
 const INTROSPECT_API_PORT: u16 = 13144;
 const TEAM_SKILLS_PATH: &str = "teamclaw-team/skills";
+const INSTRUCTION_PLUGIN_TEMPLATE: &str = include_str!(
+    "../../../../packages/app/src/lib/opencode/templates/teamclaw-instruction-plugin.mjs.txt"
+);
 
 use crate::config::workspace_control::{ApplyOutcome, RuntimeStatus, WorkspaceControlError};
 use crate::proto::amux;
@@ -388,6 +391,65 @@ fn ensure_inherent_skills_in_dir(skills_dir: &Path) -> Result<(), WorkspaceContr
     Ok(())
 }
 
+/// Install the TeamClaw instruction OpenCode plugin and register it in `opencode.json`.
+pub fn ensure_instruction_plugin(workspace_path: &Path) -> Result<(), WorkspaceControlError> {
+    use crate::runtime::workspace_runtime::{
+        INSTRUCTION_PLUGIN_CONFIG_ENTRY, INSTRUCTION_PLUGIN_REL,
+    };
+
+    let plugin_path = workspace_path.join(INSTRUCTION_PLUGIN_REL);
+    if let Some(parent) = plugin_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
+    }
+
+    let should_write = match std::fs::read_to_string(&plugin_path) {
+        Ok(existing) => existing != INSTRUCTION_PLUGIN_TEMPLATE,
+        Err(_) => true,
+    };
+    if should_write {
+        std::fs::write(&plugin_path, INSTRUCTION_PLUGIN_TEMPLATE)
+            .map_err(|e| WorkspaceControlError::Io(e.to_string()))?;
+    }
+
+    let config_path = opencode_json_path(workspace_path);
+    let mut config = if config_path.exists() {
+        read_json_object(&config_path)?
+    } else {
+        serde_json::json!({ "$schema": "https://opencode.ai/config.json" })
+    };
+
+    let obj = config.as_object_mut().ok_or_else(|| {
+        WorkspaceControlError::Parse("opencode.json root is not an object".into())
+    })?;
+
+    if obj.get("$schema").is_none() {
+        obj.insert(
+            "$schema".to_string(),
+            serde_json::json!("https://opencode.ai/config.json"),
+        );
+    }
+
+    let plugins = obj
+        .entry("plugin")
+        .or_insert_with(|| serde_json::json!([]));
+    let plugin_list = plugins.as_array_mut().ok_or_else(|| {
+        WorkspaceControlError::Parse("opencode.json plugin field is not an array".into())
+    })?;
+
+    let already_registered = plugin_list.iter().any(|entry| {
+        entry
+            .as_str()
+            .map(|value| value.contains("teamclaw-instruction"))
+            .unwrap_or(false)
+    });
+    if !already_registered {
+        plugin_list.push(serde_json::json!(INSTRUCTION_PLUGIN_CONFIG_ENTRY));
+        write_json_pretty(&config_path, &config)?;
+    }
+
+    Ok(())
+}
+
 /// Prepare a workspace directory for OpenCode/ACP agent use.
 pub fn prepare_workspace(workspace_path: &Path) -> Result<(), WorkspaceControlError> {
     if !workspace_path.is_dir() {
@@ -398,6 +460,7 @@ pub fn prepare_workspace(workspace_path: &Path) -> Result<(), WorkspaceControlEr
 
     ensure_default_permissions(workspace_path)?;
     ensure_inherent_mcp(workspace_path)?;
+    ensure_instruction_plugin(workspace_path)?;
     ensure_inherent_skills_in_dir(&workspace_path.join(".teamclaw/skills"))?;
     ensure_inherent_skills_in_dir(&workspace_path.join(".opencode/skills"))?;
 
@@ -637,5 +700,30 @@ mod tests {
             .join(".teamclaw/skills/create-role/SKILL.md")
             .is_file());
         assert!(!dir.path().join(".opencode/data").exists());
+    }
+
+    #[test]
+    fn ensure_instruction_plugin_creates_file_and_registers() {
+        let dir = tempfile::tempdir().unwrap();
+        ensure_instruction_plugin(dir.path()).unwrap();
+
+        let plugin_path = dir.path().join(crate::runtime::workspace_runtime::INSTRUCTION_PLUGIN_REL);
+        assert!(plugin_path.is_file());
+        assert!(std::fs::read_to_string(plugin_path)
+            .unwrap()
+            .contains("experimental.chat.system.transform"));
+
+        let cfg: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("opencode.json")).unwrap(),
+        )
+        .unwrap();
+        let plugins = cfg["plugin"].as_array().unwrap();
+        assert!(plugins.iter().any(|entry| {
+            entry
+                .as_str()
+                .map(|value| value.contains("teamclaw-instruction"))
+                .unwrap_or(false)
+        }));
+        assert!(crate::runtime::instruction_plugin_installed(dir.path()));
     }
 }

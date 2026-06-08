@@ -41,7 +41,7 @@ use crate::history::EventHistory;
 use crate::mqtt::{publisher::Publisher, subscriber, MqttClient};
 use crate::proto::amux;
 use crate::provider_config::ProviderConfig;
-use crate::runtime::{AgentLaunchConfig, RuntimeManager};
+use crate::runtime::{apply_workspace_system_instructions, AgentLaunchConfig, RuntimeManager};
 use crate::team_shared_git::TeamSharedGitConfig;
 use teamclaw_gateway::{AcpHandle, ChannelStore};
 
@@ -208,6 +208,12 @@ enum SockCommand {
     /// snapshot of the six supported channels. `reply_tx` carries the JSON
     /// body back to the listener task so it can write it to the sock client.
     ChannelStatus {
+        reply_tx: oneshot::Sender<String>,
+    },
+    /// Reply with a JSON `[{botId, connected, error}, ...]` snapshot of the
+    /// per-bot WeCom gateway slots (one entry per `resolved_bots()`). `reply_tx`
+    /// carries the JSON body back to the listener task.
+    WecomBotsStatus {
         reply_tx: oneshot::Sender<String>,
     },
     /// Replace `daemon_config.channels.<platform>` with the JSON in `config_json`,
@@ -565,6 +571,41 @@ impl DaemonServer {
             }
         };
 
+        // Per-bot runtime registry: resolve each WeCom bot's workspace dir +
+        // agent type from `daemon.toml` so a bot's sessions spawn on its own
+        // workspace/agent instead of the daemon-wide gateway defaults. Bots not
+        // listed here (or with unresolved overrides) fall back to the defaults.
+        let bot_configs: std::collections::HashMap<String, crate::channels::BotRuntimeConfig> = {
+            use crate::channels::BotRuntimeConfig;
+            let mut m = std::collections::HashMap::new();
+            if let Some(wecom) = &cfg.channels.wecom {
+                for bot in wecom.resolved_bots() {
+                    let workspace_dir = bot.workspace_id.as_deref().and_then(|id| {
+                        let path = self.workspaces.find_by_id(id).map(|w| w.path.clone());
+                        if path.is_none() {
+                            warn!(
+                                bot_id = %bot.bot_id,
+                                workspace_id = %id,
+                                "wecom bot workspace not synced locally; \
+                                 its sessions fall back to the daemon default workspace"
+                            );
+                        }
+                        path
+                    });
+                    let agent_type = bot.agent_type.as_deref().and_then(agent_type_from_name);
+                    m.insert(
+                        bot.bot_id.clone(),
+                        BotRuntimeConfig {
+                            workspace_dir,
+                            agent_type,
+                            system_prompt: bot.system_prompt.clone(),
+                        },
+                    );
+                }
+            }
+            m
+        };
+
         let acp_handle: Arc<dyn AcpHandle> = Arc::new(AmuxdAcpHandle {
             manager: self.agents.clone(),
             logical_to_acp: Arc::new(AsyncMutex::new(HashMap::new())),
@@ -576,6 +617,7 @@ impl DaemonServer {
             agent_type_override: Arc::new(AsyncMutex::new(HashMap::new())),
             workspaces_path: self.workspaces_path.clone(),
             workspace_override: Arc::new(AsyncMutex::new(HashMap::new())),
+            bot_configs: Arc::new(bot_configs),
         });
         let store: Arc<dyn ChannelStore> = Arc::new(AmuxdChannelStore {
             client: self.backend.clone(),
@@ -682,6 +724,24 @@ impl DaemonServer {
             .collect();
 
         serde_json::to_string(&statuses).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Build the JSON response payload for the `wecom-bots-status` sock command:
+    /// `[{botId, connected, error}, ...]`, one entry per resolved WeCom bot.
+    /// Mirrors `channel_status_payload`'s shape; returns `[]` when no channel
+    /// manager is running.
+    async fn wecom_bots_status_payload(&self) -> String {
+        let rows = match self.channel_mgr.as_ref() {
+            Some(mgr) => mgr.wecom_bots_status().await,
+            None => vec![],
+        };
+        let json: Vec<serde_json::Value> = rows
+            .into_iter()
+            .map(|(bot_id, connected, error)| {
+                serde_json::json!({ "botId": bot_id, "connected": connected, "error": error })
+            })
+            .collect();
+        serde_json::to_string(&json).unwrap_or_else(|_| "[]".to_string())
     }
 
     /// Handle a `mcp-send` JSON envelope from the `amuxd mcp-server` bridge.
@@ -1402,6 +1462,10 @@ impl DaemonServer {
                                 let body = self.channel_status_payload().await;
                                 let _ = reply_tx.send(body);
                             }
+                            Some(SockCommand::WecomBotsStatus { reply_tx }) => {
+                                let body = self.wecom_bots_status_payload().await;
+                                let _ = reply_tx.send(body);
+                            }
                             Some(SockCommand::ChannelSave { platform, config_json }) => {
                                 self.save_channel_config(&platform, &config_json).await;
                             }
@@ -1708,6 +1772,10 @@ impl DaemonServer {
                             Some(SockCommand::ChannelReload) => self.reload_channels().await,
                             Some(SockCommand::ChannelStatus { reply_tx }) => {
                                 let body = self.channel_status_payload().await;
+                                let _ = reply_tx.send(body);
+                            }
+                            Some(SockCommand::WecomBotsStatus { reply_tx }) => {
+                                let body = self.wecom_bots_status_payload().await;
                                 let _ = reply_tx.send(body);
                             }
                             Some(SockCommand::ChannelSave { platform, config_json }) => {
@@ -4759,6 +4827,23 @@ impl DaemonServer {
             }
         };
 
+        {
+            let mut agents = self.agents.lock().await;
+            if let Err(e) = apply_workspace_system_instructions(
+                &mut agents,
+                &new_id,
+                Path::new(&resolved_worktree),
+                agent_type,
+            ) {
+                warn!(
+                    runtime_id = %new_id,
+                    session_id,
+                    err = %e,
+                    "apply_start_runtime: workspace system instructions failed"
+                );
+            }
+        }
+
         // STARTING retain — fleeting but observable by mid-spawn reconnects.
         let publisher = Publisher::new_from_handle(self.publisher_handle.clone(), &self.topics);
         let starting_info = amux::RuntimeInfo {
@@ -5280,6 +5365,37 @@ fn spawn_sock_listener(sock_path: PathBuf, tx: mpsc::Sender<SockCommand>) {
                                             }
                                             Err(_) => {
                                                 warn!("amuxd.sock: channel-status reply dropped");
+                                            }
+                                        }
+                                    }
+                                    "wecom-bots-status" => {
+                                        // Round-trip: ask the main loop to build a
+                                        // per-bot WeCom status snapshot, then write the
+                                        // JSON body back to the connected client.
+                                        let (reply_tx, reply_rx) = oneshot::channel();
+                                        if tx
+                                            .send(SockCommand::WecomBotsStatus { reply_tx })
+                                            .await
+                                            .is_err()
+                                        {
+                                            return;
+                                        }
+                                        match reply_rx.await {
+                                            Ok(body) => {
+                                                let mut stream = reader.into_inner();
+                                                if let Err(e) =
+                                                    stream.write_all(body.as_bytes()).await
+                                                {
+                                                    warn!(
+                                                        "amuxd.sock: wecom-bots-status write failed: {e}"
+                                                    );
+                                                    return;
+                                                }
+                                                let _ = stream.write_all(b"\n").await;
+                                                let _ = stream.shutdown().await;
+                                            }
+                                            Err(_) => {
+                                                warn!("amuxd.sock: wecom-bots-status reply dropped");
                                             }
                                         }
                                     }

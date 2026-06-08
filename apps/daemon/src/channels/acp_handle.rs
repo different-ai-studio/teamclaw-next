@@ -42,6 +42,17 @@ pub struct ResolvedSession {
     was_primed: bool,
 }
 
+/// Per-bot runtime defaults, keyed by WeCom `bot_id`. Populated once when
+/// the handle is built from `daemon.toml`; immutable for the handle's
+/// lifetime (a `channel-reload` rebuilds the whole handle).
+#[derive(Clone, Default)]
+pub struct BotRuntimeConfig {
+    /// Already-resolved local workspace directory (workspace_id -> path).
+    pub workspace_dir: Option<String>,
+    pub agent_type: Option<amux::AgentType>,
+    pub system_prompt: Option<String>,
+}
+
 pub struct AmuxdAcpHandle {
     pub manager: Arc<Mutex<RuntimeManager>>,
     /// Logical (SQL-minted) acp_session_id → resolved runtime metadata.
@@ -78,6 +89,9 @@ pub struct AmuxdAcpHandle {
     /// Per-session workspace override: logical_session_id → workspace_id.
     /// In-memory only — cleared across daemon restarts.
     pub workspace_override: Arc<Mutex<HashMap<String, String>>>,
+    /// Per-bot (WeCom) runtime config keyed by bot_id. Immutable after
+    /// construction; consulted in `resolve_or_spawn` and `send_prompt`.
+    pub bot_configs: Arc<HashMap<String, BotRuntimeConfig>>,
 }
 
 /// Returned by `resolve_or_spawn`. `spawned` is true iff this call was
@@ -90,6 +104,52 @@ struct ResolveOutcome {
 }
 
 impl AmuxdAcpHandle {
+    /// Resolve the workspace dir + agent type for a spawn, applying priority
+    /// **per-session override > per-bot config > daemon global default**.
+    /// `workspace_override` stores a workspace_id, resolved to a path here;
+    /// `bot_configs` already store a resolved path.
+    async fn resolve_spawn_target(
+        &self,
+        session: &str,
+        binding: &str,
+    ) -> (Option<String>, Option<amux::AgentType>) {
+        let bot = bot_id_from_binding(binding)
+            .and_then(|b| self.bot_configs.get(b))
+            .cloned()
+            .unwrap_or_default();
+
+        let agent_type = {
+            let ov = self.agent_type_override.lock().await;
+            ov.get(session).copied()
+        }
+        .or(bot.agent_type)
+        .or(self.default_agent_type);
+
+        let session_ws_dir = {
+            let ov = self.workspace_override.lock().await;
+            ov.get(session).cloned()
+        }
+        .and_then(|wid| self.workspace_dir_for_id(&wid));
+
+        let workspace_dir = session_ws_dir
+            .or(bot.workspace_dir.clone())
+            .or(self.default_workspace_dir.clone());
+
+        (workspace_dir, agent_type)
+    }
+
+    /// Resolve a workspace_id to its local path via workspaces.toml. None if
+    /// the store can't be read or the id isn't present/synced locally.
+    fn workspace_dir_for_id(&self, workspace_id: &str) -> Option<String> {
+        use crate::config::WorkspaceStore;
+        let store = WorkspaceStore::load(&self.workspaces_path).ok()?;
+        store
+            .workspaces
+            .iter()
+            .find(|w| w.workspace_id == workspace_id)
+            .map(|w| w.path.clone())
+    }
+
     /// Resolve the caller-supplied `session` (a logical id persisted on the
     /// `sessions` row) to a real ACP UUID, spawning a runtime on first use.
     /// On a fresh spawn, the matching `sessions.binding` is looked up from
@@ -135,6 +195,8 @@ impl AmuxdAcpHandle {
             let overrides = self.model_override.lock().await;
             overrides.get(session).cloned()
         };
+        let (workspace_dir, agent_type) =
+            self.resolve_spawn_target(session, &binding).await;
         let real = {
             let mut mgr = self.manager.lock().await;
             mgr.create_gateway_session_with_model(
@@ -144,16 +206,33 @@ impl AmuxdAcpHandle {
                 "Gateway session",
                 model_arg,
                 remote_session_id.as_deref(),
-                // Working directory + backend type come from the daemon agent's
-                // own configured defaults (resolved at channel-manager build).
-                // `None` for either falls back to a scratch dir / the daemon
-                // default agent type respectively.
-                self.default_workspace_dir.as_deref(),
-                self.default_agent_type,
+                workspace_dir.as_deref(),
+                agent_type,
             )
             .await
             .map_err(|e| AcpError::Create(e.to_string()))?
         };
+
+        // Durable persona for ClaudeCode: write CLAUDE.local.md into the
+        // bot's workspace. Non-fatal; the preamble already delivered it.
+        if matches!(agent_type, Some(amux::AgentType::ClaudeCode) | None) {
+            if let (Some(ws), Some(bot_id)) =
+                (workspace_dir.as_deref(), bot_id_from_binding(&binding))
+            {
+                if let Some(prompt) = self
+                    .bot_configs
+                    .get(bot_id)
+                    .and_then(|c| c.system_prompt.as_deref())
+                {
+                    if let Err(e) = super::bot_prompt_file::write_bot_instruction_file(
+                        std::path::Path::new(ws),
+                        prompt,
+                    ) {
+                        tracing::warn!(bot_id, error = %e, "write CLAUDE.local.md failed");
+                    }
+                }
+            }
+        }
 
         // Insert under a write lock; if a concurrent spawn raced ahead we
         // keep the existing entry so `was_primed` reflects whichever call
@@ -206,6 +285,36 @@ fn channel_name_from_binding(binding: &str) -> &str {
     }
 }
 
+/// Extract the WeCom bot id from a `wecom://<bot_id>/...` binding so the
+/// handle can pick the per-bot runtime config. Returns None for non-wecom
+/// or malformed bindings (callers fall back to the global default).
+pub fn bot_id_from_binding(binding: &str) -> Option<&str> {
+    let rest = binding.strip_prefix("wecom://")?;
+    rest.split('/').next().filter(|s| !s.is_empty())
+}
+
+/// Build the first-turn prompt for a freshly-spawned gateway session: the
+/// per-bot persona (if any), then the standard send-tool note, then the
+/// user's message. Subsequent turns use `[sender] text` only.
+pub fn build_first_turn_prompt(
+    channel: &str,
+    bot_system_prompt: Option<&str>,
+    sender_display: &str,
+    text: &str,
+) -> String {
+    let persona = match bot_system_prompt {
+        Some(p) if !p.trim().is_empty() => format!("[SYSTEM] {p}\n\n"),
+        _ => String::new(),
+    };
+    format!(
+        "{persona}[SYSTEM] You are connected to a {channel} chat via amuxd. To send a follow-up \
+message or upload a file back to this chat without waiting for the user to ask, call the `send` \
+MCP tool (server name `amuxd-send`). `target` and `channel` default to the current session's \
+bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report.pdf\")` is enough.\n\n\
+[{sender_display}] {text}"
+    )
+}
+
 #[async_trait]
 impl AcpHandle for AmuxdAcpHandle {
     async fn create_session(
@@ -238,13 +347,10 @@ impl AcpHandle for AmuxdAcpHandle {
         let needs_preamble = outcome.spawned && !self.already_primed(session).await;
         let prompt = if needs_preamble {
             let channel = channel_name_from_binding(&outcome.binding);
-            format!(
-                "[SYSTEM] You are connected to a {channel} chat via amuxd. To send a follow-up \
-message or upload a file back to this chat without waiting for the user to ask, call the `send` \
-MCP tool (server name `amuxd-send`). `target` and `channel` default to the current session's \
-bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report.pdf\")` is enough.\n\n\
-[{sender_display}] {text}"
-            )
+            let bot_prompt = bot_id_from_binding(&outcome.binding)
+                .and_then(|b| self.bot_configs.get(b))
+                .and_then(|c| c.system_prompt.as_deref());
+            build_first_turn_prompt(channel, bot_prompt, sender_display, text)
         } else {
             format!("[{sender_display}] {text}")
         };
@@ -361,7 +467,7 @@ bound chat, so a simple `send(message=\"…\")` or `send(file_path=\"/tmp/report
         text: &str,
     ) -> Result<(), AcpError> {
         let outcome = self.resolve_or_spawn(session).await?;
-        let mgr = self.manager.lock().await;
+        let mut mgr = self.manager.lock().await;
         mgr.inject_context(&outcome.real_acp_sid, sender_display, text)
             .await
             .map_err(|e| AcpError::Send(e.to_string()))
@@ -682,7 +788,61 @@ mod tests {
             agent_type_override: Arc::new(Mutex::new(HashMap::new())),
             workspaces_path: std::path::PathBuf::from("/tmp/test-workspaces.toml"),
             workspace_override: Arc::new(Mutex::new(HashMap::new())),
+            bot_configs: Arc::new(HashMap::new()),
         }
+    }
+
+    #[test]
+    fn bot_id_parsed_from_wecom_binding() {
+        assert_eq!(bot_id_from_binding("wecom://botX/botX/single/u1"), Some("botX"));
+        assert_eq!(bot_id_from_binding("wecom://botY/botY/group/c9"), Some("botY"));
+        assert_eq!(bot_id_from_binding("discord://g/c"), None);
+        assert_eq!(bot_id_from_binding(""), None);
+    }
+
+    #[tokio::test]
+    async fn resolution_priority_session_over_bot_over_global() {
+        use amux::AgentType;
+        let mut bots = HashMap::new();
+        bots.insert(
+            "botA".to_string(),
+            BotRuntimeConfig {
+                workspace_dir: Some("/ws/bot-a".into()),
+                agent_type: Some(AgentType::Opencode),
+                system_prompt: Some("A".into()),
+            },
+        );
+        let mut handle = make_handle();
+        handle.bot_configs = Arc::new(bots);
+        handle.default_workspace_dir = Some("/ws/global".into());
+        handle.default_agent_type = Some(AgentType::ClaudeCode);
+
+        let (ws, at) = handle.resolve_spawn_target("sess-A", "wecom://botA/botA/single/u").await;
+        assert_eq!(ws.as_deref(), Some("/ws/bot-a"));
+        assert_eq!(at, Some(AgentType::Opencode));
+
+        let (ws2, at2) = handle.resolve_spawn_target("sess-Z", "wecom://botZ/botZ/single/u").await;
+        assert_eq!(ws2.as_deref(), Some("/ws/global"));
+        assert_eq!(at2, Some(AgentType::ClaudeCode));
+
+        handle.agent_type_override.lock().await.insert("sess-A".into(), AgentType::Codex);
+        let (_ws3, at3) = handle.resolve_spawn_target("sess-A", "wecom://botA/botA/single/u").await;
+        assert_eq!(at3, Some(AgentType::Codex));
+    }
+
+    #[test]
+    fn preamble_includes_bot_system_prompt() {
+        let p = build_first_turn_prompt("wecom", Some("你是法务助手，只用中文回答。"), "Alice", "你好");
+        assert!(p.contains("你是法务助手"));
+        assert!(p.contains("[Alice] 你好"));
+        assert!(p.contains("amuxd-send"), "keeps the send-tool note");
+    }
+
+    #[test]
+    fn preamble_without_bot_prompt_matches_legacy() {
+        let p = build_first_turn_prompt("wecom", None, "Bob", "hi");
+        assert!(p.contains("amuxd-send"));
+        assert!(p.contains("[Bob] hi"));
     }
 
     /// Verify `set_model` stores `(provider, model)` as a tuple so the

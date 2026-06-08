@@ -806,25 +806,34 @@ impl RuntimeManager {
         std::mem::take(&mut self.evicted_pending_publish)
     }
 
-    /// Send a prompt to an existing agent via ACP, draining any pending_silent
-    /// messages as a `[Context …]` prefix first.
-    /// Returns the drained message IDs (empty when no pending context existed).
+    /// Send a prompt to an existing agent via ACP, draining buffered
+    /// `inject_context` instructions and `pending_silent` messages first.
+    /// Returns the drained silent message IDs (empty when none existed).
     pub async fn send_prompt(
         &mut self,
         agent_id: &str,
         text: &str,
         attachment_urls: Vec<String>,
     ) -> crate::error::Result<Vec<String>> {
-        let (final_text, drained_ids, drained_messages) =
+        let (final_text, drained_ids, drained_messages, drained_injected) =
             if let Some(handle) = self.agents.get_mut(agent_id) {
                 let drained_messages = handle.pending_silent.clone();
-                let (prefix, drained) = handle.flush_pending_silent();
+                let drained_injected = handle.injected_context.clone();
+                let (injected_prefix, _) = if super::instruction_delivery::skips_buffered_inject(
+                    handle.instruction_delivery,
+                ) {
+                    (String::new(), Vec::new())
+                } else {
+                    handle.flush_injected_context()
+                };
+                let (silent_prefix, drained) = handle.flush_pending_silent();
+                let prefix = format!("{injected_prefix}{silent_prefix}");
                 let final_text = if prefix.is_empty() {
                     text.to_string()
                 } else {
                     format!("{prefix}{text}")
                 };
-                (final_text, drained, drained_messages)
+                (final_text, drained, drained_messages, drained_injected)
             } else {
                 return Err(crate::error::AmuxError::Agent(format!(
                     "agent {} not found",
@@ -836,8 +845,11 @@ impl RuntimeManager {
             .send_prompt_raw(agent_id, &final_text, attachment_urls)
             .await
         {
-            if !drained_messages.is_empty() {
-                if let Some(handle) = self.agents.get_mut(agent_id) {
+            if let Some(handle) = self.agents.get_mut(agent_id) {
+                if !drained_injected.is_empty() {
+                    handle.injected_context = drained_injected;
+                }
+                if !drained_messages.is_empty() {
                     let mut restored = drained_messages;
                     restored.append(&mut handle.pending_silent);
                     handle.pending_silent = restored;
@@ -1568,6 +1580,23 @@ impl RuntimeManager {
                 "create_gateway_session: adapter did not report acp_session_id".into(),
             ));
         }
+
+        if working_directory.is_some() {
+            if let Err(e) = super::workspace_runtime::apply_workspace_system_instructions(
+                self,
+                &agent_id,
+                std::path::Path::new(&worktree),
+                agent_type,
+            ) {
+                warn!(
+                    agent_id = %agent_id,
+                    worktree = %worktree,
+                    error = %e,
+                    "create_gateway_session: workspace system instructions failed"
+                );
+            }
+        }
+
         Ok(acp_sid)
     }
 
@@ -1663,16 +1692,31 @@ impl RuntimeManager {
         }
     }
 
-    /// Inject context for the agent without driving a turn. Stub for now —
-    /// the underlying ACP adapter doesn't support a no-reply prompt yet, and
-    /// the gateway call sites don't currently invoke this path. Returns Ok
-    /// so the trait contract is satisfied.
+    /// Buffer context for the next `send_prompt` without driving an ACP turn.
     pub async fn inject_context(
-        &self,
-        _acp_session_id: &str,
-        _sender_display: &str,
-        _text: &str,
+        &mut self,
+        acp_session_id: &str,
+        sender_display: &str,
+        text: &str,
     ) -> crate::error::Result<()> {
+        let agent_id = self.agent_id_by_acp_session(acp_session_id).ok_or_else(|| {
+            crate::error::AmuxError::Agent(format!(
+                "no runtime for acp_session_id {acp_session_id}"
+            ))
+        })?;
+        self.inject_context_for_runtime(&agent_id, sender_display, text)
+    }
+
+    pub fn inject_context_for_runtime(
+        &mut self,
+        agent_id: &str,
+        sender_display: &str,
+        text: &str,
+    ) -> crate::error::Result<()> {
+        let handle = self.agents.get_mut(agent_id).ok_or_else(|| {
+            crate::error::AmuxError::Agent(format!("agent {agent_id} not found"))
+        })?;
+        handle.push_injected_context(sender_display, text);
         Ok(())
     }
 }
@@ -2055,6 +2099,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn inject_context_buffers_without_sending() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt1");
+        mgr.get_handle_mut("rt1").unwrap().acp_session_id = "acp-1".into();
+
+        mgr.inject_context("acp-1", "system", "请使用中文回答")
+            .await
+            .unwrap();
+
+        assert!(mgr.last_sent_to("rt1").is_none());
+        assert_eq!(
+            mgr.get_handle("rt1").unwrap().injected_context[0].content,
+            "请使用中文回答"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_prompt_skips_injected_when_native_delivery() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt1");
+        mgr.get_handle_mut("rt1").unwrap().instruction_delivery =
+            crate::runtime::InstructionDelivery::NativeClaudeMd;
+        mgr.inject_context_for_runtime("rt1", "system", "请使用中文回答")
+            .unwrap();
+
+        mgr.send_prompt("rt1", "hello", vec![]).await.unwrap();
+
+        assert_eq!(mgr.last_sent_to("rt1").as_deref(), Some("hello"));
+        assert_eq!(mgr.get_handle("rt1").unwrap().injected_context.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn send_prompt_drains_injected_before_pending_silent() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt1");
+        mgr.inject_context_for_runtime("rt1", "system", "请使用中文回答")
+            .unwrap();
+        {
+            let h = mgr.get_handle_mut("rt1").unwrap();
+            h.pending_silent.push(PendingMessage {
+                message_id: "m1".into(),
+                sender_display: "Ann".into(),
+                content: "earlier note".into(),
+                created_at: 100,
+            });
+        }
+
+        mgr.send_prompt("rt1", "hello", vec![]).await.unwrap();
+
+        let last = mgr.last_sent_to("rt1").unwrap();
+        let system_pos = last.find("请使用中文回答").unwrap();
+        let ann_pos = last.find("Ann: earlier note").unwrap();
+        let hello_pos = last.find("hello").unwrap();
+        assert!(system_pos < ann_pos);
+        assert!(ann_pos < hello_pos);
+    }
+
+    #[tokio::test]
     async fn send_prompt_drains_pending_silent_into_prefix() {
         let mut mgr = RuntimeManager::test_dummy_with_runtime("rt1");
         {
@@ -2089,6 +2188,22 @@ mod tests {
         let mut mgr = RuntimeManager::new(RuntimeManager::test_launch_configs(), None);
         let result = mgr.send_prompt("nonexistent", "hello", vec![]).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn send_prompt_restores_injected_when_send_fails() {
+        let mut mgr = RuntimeManager::test_dummy_with_runtime("rt1");
+        mgr.inject_context_for_runtime("rt1", "system", "请使用中文回答")
+            .unwrap();
+        mgr.fail_next_send_for("rt1", "boom");
+
+        let result = mgr.send_prompt("rt1", "real question", vec![]).await;
+
+        assert!(result.is_err());
+        let injected = &mgr.get_handle("rt1").unwrap().injected_context;
+        assert_eq!(injected.len(), 1);
+        assert_eq!(injected[0].content, "请使用中文回答");
+        assert!(mgr.last_sent_to("rt1").is_none());
     }
 
     #[tokio::test]

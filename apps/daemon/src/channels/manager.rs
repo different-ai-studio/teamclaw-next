@@ -25,7 +25,7 @@ use crate::config::{
 #[derive(Default)]
 struct RunningChannels {
     discord: Option<DiscordGateway>,
-    wecom: Option<WeComGateway>,
+    wecom: Vec<WeComGateway>,
     feishu: Option<FeishuGateway>,
     kook: Option<KookGateway>,
     wechat: Option<WeChatGateway>,
@@ -97,13 +97,7 @@ impl ChannelManager {
 
         if let Some(c) = &self.cfg.channels.wecom {
             if c.enabled {
-                match self.start_wecom(c).await {
-                    Ok(g) => {
-                        println!("[ChannelManager] wecom started");
-                        running.wecom = Some(g);
-                    }
-                    Err(e) => eprintln!("[ChannelManager] wecom start failed: {e}"),
-                }
+                running.wecom = self.start_wecom_bots(c).await;
             }
         }
 
@@ -177,10 +171,23 @@ impl ChannelManager {
         let running = self.running.lock().await;
         match channel {
             "wecom" => {
-                let g = running
-                    .wecom
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("wecom not running"))?;
+                if running.wecom.is_empty() {
+                    anyhow::bail!("wecom not running");
+                }
+                let (want_bot, target) = select_wecom_target(target);
+                let g = match want_bot {
+                    Some(want) => {
+                        let mut found = None;
+                        for gw in running.wecom.iter() {
+                            if gw.bot_id().await == want {
+                                found = Some(gw);
+                                break;
+                            }
+                        }
+                        found.ok_or_else(|| anyhow::anyhow!("no running wecom bot '{want}'"))?
+                    }
+                    None => &running.wecom[0],
+                };
                 let (kind, id) = parse_send_target(target)?;
                 let media: Option<(Vec<u8>, String)> = match file_path {
                     Some(p) => {
@@ -228,15 +235,17 @@ impl ChannelManager {
             }
             None => (false, None),
         };
-        let wecom = match running.wecom.as_ref() {
-            Some(g) => {
-                let status = g.get_status().await;
-                (
-                    status.status == WeComGatewayStatus::Connected,
-                    status.error_message,
-                )
+        let wecom = {
+            let mut connected = false;
+            let mut err = None;
+            for g in running.wecom.iter() {
+                let s = g.get_status().await;
+                connected |= s.status == WeComGatewayStatus::Connected;
+                if err.is_none() {
+                    err = s.error_message;
+                }
             }
-            None => (false, None),
+            (connected, err)
         };
         let feishu = match running.feishu.as_ref() {
             Some(g) => {
@@ -289,6 +298,21 @@ impl ChannelManager {
         ]
     }
 
+    /// Per-bot WeCom status: `(bot_id, connected, last_error)`.
+    pub async fn wecom_bots_status(&self) -> Vec<(String, bool, Option<String>)> {
+        let running = self.running.lock().await;
+        let mut out = Vec::new();
+        for g in running.wecom.iter() {
+            let s = g.get_status().await;
+            out.push((
+                g.bot_id().await,
+                s.status == WeComGatewayStatus::Connected,
+                s.error_message,
+            ));
+        }
+        out
+    }
+
     /// Stop every running channel. Takes `self` by value so each gateway's
     /// consuming `shutdown(self)` can be invoked.
     pub async fn shutdown(self) {
@@ -296,7 +320,7 @@ impl ChannelManager {
         if let Some(g) = running.discord.take() {
             g.shutdown().await;
         }
-        if let Some(g) = running.wecom.take() {
+        for g in std::mem::take(&mut running.wecom) {
             g.shutdown().await;
         }
         if let Some(g) = running.feishu.take() {
@@ -342,25 +366,38 @@ impl ChannelManager {
         Ok(gw)
     }
 
-    async fn start_wecom(&self, c: &WeComChannel) -> anyhow::Result<WeComGateway> {
-        let gw = WeComGateway::new(
-            self.acp.clone(),
-            self.store.clone(),
-            self.team_id.clone(),
-            self.primary_agent_actor_id.clone(),
-            self.agent_owner_actor_ids.clone(),
-            self.workspace_path.clone(),
-        );
-        let cfg = WeComConfig {
-            enabled: true,
-            bot_id: c.bot_id.clone(),
-            secret: c.secret.clone(),
-            encoding_aes_key: c.encoding_aes_key.clone(),
-            owner_id: None,
-        };
-        gw.set_config(cfg).await;
-        gw.start().await.map_err(|e| anyhow::anyhow!(e))?;
-        Ok(gw)
+    /// Boot one `WeComGateway` (one WSS connection) per enabled bot. Per-bot
+    /// workspace/agent/prompt are applied inside the shared `AcpHandle` via
+    /// the bot_configs registry; the gateway itself only needs
+    /// bot_id/secret/encoding_aes_key to connect.
+    async fn start_wecom_bots(&self, c: &WeComChannel) -> Vec<WeComGateway> {
+        let mut started = Vec::new();
+        for bot in c.resolved_bots().into_iter().filter(|b| b.enabled) {
+            let gw = WeComGateway::new(
+                self.acp.clone(),
+                self.store.clone(),
+                self.team_id.clone(),
+                self.primary_agent_actor_id.clone(),
+                self.agent_owner_actor_ids.clone(),
+                self.workspace_path.clone(),
+            );
+            let cfg = WeComConfig {
+                enabled: true,
+                bot_id: bot.bot_id.clone(),
+                secret: bot.secret.clone(),
+                encoding_aes_key: bot.encoding_aes_key.clone(),
+                owner_id: None,
+            };
+            gw.set_config(cfg).await;
+            match gw.start().await {
+                Ok(()) => {
+                    println!("[ChannelManager] wecom bot {} started", bot.bot_id);
+                    started.push(gw);
+                }
+                Err(e) => eprintln!("[ChannelManager] wecom bot {} start failed: {e}", bot.bot_id),
+            }
+        }
+        started
     }
 
     async fn start_feishu(&self, c: &FeishuChannel) -> anyhow::Result<FeishuGateway> {
@@ -460,6 +497,18 @@ impl ChannelManager {
     }
 }
 
+/// Choose which WeCom bot gateway handles a send. A `bot:<bot_id>/<rest>`
+/// prefix pins a specific bot; otherwise the first running bot is used.
+/// Returns the optional bot id and the remaining target string.
+fn select_wecom_target(target: &str) -> (Option<&str>, &str) {
+    if let Some(rest) = target.strip_prefix("bot:") {
+        if let Some((bot_id, rest)) = rest.split_once('/') {
+            return (Some(bot_id), rest);
+        }
+    }
+    (None, target)
+}
+
 /// Parse a `user:<id>` / `chat:<id>` target string into `(kind, id)`.
 fn parse_send_target(target: &str) -> anyhow::Result<(&str, &str)> {
     target
@@ -469,7 +518,17 @@ fn parse_send_target(target: &str) -> anyhow::Result<(&str, &str)> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_send_target;
+    use super::{parse_send_target, select_wecom_target};
+
+    #[test]
+    fn select_wecom_target_strips_bot_prefix() {
+        let (bot, rest) = select_wecom_target("bot:botA/user:alice");
+        assert_eq!(bot, Some("botA"));
+        assert_eq!(parse_send_target(rest).unwrap(), ("user", "alice"));
+        let (bot2, rest2) = select_wecom_target("user:bob");
+        assert_eq!(bot2, None);
+        assert_eq!(rest2, "user:bob");
+    }
 
     #[test]
     fn parses_user_target() {

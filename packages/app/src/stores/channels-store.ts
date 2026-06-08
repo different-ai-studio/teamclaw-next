@@ -135,6 +135,7 @@ export const useChannelsStore = create<ChannelsState>((set) => ({
   wecom: null,
   wecomIsLoading: false,
   wecomGatewayStatus: { status: 'disconnected' },
+  wecomBotStatuses: [],
   wecomHasChanges: false,
   wecomIsTesting: false,
   wecomTestResult: null,
