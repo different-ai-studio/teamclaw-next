@@ -531,7 +531,7 @@ export async function handleSyncUploadComplete(
   }
 
   const { data: rpcResult, error: rpcErr } = await supabase
-    .rpc('amuxc_complete_upload', {
+    .schema("public").rpc('amuxc_complete_upload', {
       p_session_id: uploadSessionId,
       p_actor_id: actorId,
     });
@@ -677,7 +677,7 @@ export async function handleSyncDelete(
   const supabase = createServiceRoleClient();
 
   const { data: rpcResult, error: rpcErr } = await supabase
-    .rpc('amuxc_complete_delete', {
+    .schema("public").rpc('amuxc_complete_delete', {
       p_team_id:       teamId,
       p_path:          path,
       p_parent_version: parentVersion,
@@ -872,7 +872,7 @@ export async function handleSyncSetMode(
   const supabase = createServiceRoleClient();
 
   const { data, error } = await supabase
-    .rpc('set_team_sync_mode', { p_team_id: teamId, p_mode: mode });
+    .schema("public").rpc('set_team_sync_mode', { p_team_id: teamId, p_mode: mode });
 
   if (error) {
     const code = error.code;
@@ -915,7 +915,7 @@ export async function handleSyncTeamMode(
   // --- supabase path (unchanged) ---
   const supabase = createServiceRoleClient();
   const { data, error } = await supabase
-    .rpc('get_team_sync_mode', { p_team_id: teamId });
+    .schema("public").rpc('get_team_sync_mode', { p_team_id: teamId });
 
   if (error) {
     return json(500, { error: error.message });

@@ -7,11 +7,11 @@ export async function dispatchPush(msg, deps) {
 
   if (kind === 'system') return { skipped: 'system_kind' };
 
-  const claimRes = await sb.rpc('push_idempotency_claim', { p_message_id: messageId });
+  const claimRes = await sb.schema("public").rpc('push_idempotency_claim', { p_message_id: messageId });
   const claimed = claimRes?.data?.[0]?.claimed ?? false;
   if (!claimed) return { skipped: 'duplicate' };
 
-  const ctxRes = await sb.rpc('list_session_push_targets', {
+  const ctxRes = await sb.schema("public").rpc('list_session_push_targets', {
     p_session_id: session_id, p_exclude_actor_id: sender_actor_id,
   });
   const ctx = ctxRes?.data ?? { recipients: [], sender_display_name: 'Someone' };

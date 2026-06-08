@@ -133,7 +133,7 @@ export async function authenticateSyncCall(
   const userId = userData.user.id;
 
   const { data: rows, error } = await supabase
-    .rpc('actor_id_for_user_in_team', { p_user_id: userId, p_team_id: teamId });
+    .schema("public").rpc('actor_id_for_user_in_team', { p_user_id: userId, p_team_id: teamId });
 
   if (error) {
     return { ok: false, status: 403, error: `actor lookup failed: ${error.message}` };
