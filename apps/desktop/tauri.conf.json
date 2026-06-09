@@ -57,7 +57,7 @@
       "requireLiteralLeadingDot": false
     },
     "updater": {
-      "pubkey": "ZFc1MGNuVnpkR1ZrSUdOdmJXMWxiblE2SUcxcGJtbHphV2R1SUhCMVlteHBZeUJyWlhrNklERkVNRGczUkVZNU1FSTJSREF5TXpNS1VsZFJla0Z0TUV3cldEQkpTRmhUZEhZdmJTdGtjbEV2VEVWUk5GbHBaRXh4U0hOVFNUQTJWMlpIUzB4UFVFWjRXbkY1ZDJSeFEwZ0s=",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFEMDg3REY5MEI2RDAyMzMKUldRekFtMEwrWDBJSFhTdHYvbStkclEvTEVRNFlpZExxSHNTSTA2V2ZHS0xPUEZ4WnF5d2RxQ0gK",
       "endpoints": [
         "https://teamclaw.ucar.cc/releases/latest.json",
         "https://github.com/different-ai-studio/teamclaw/releases/latest/download/latest.json"
