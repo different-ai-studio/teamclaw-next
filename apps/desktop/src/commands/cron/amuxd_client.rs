@@ -5,8 +5,12 @@
 
 use serde::Serialize;
 use std::path::Path;
+#[cfg(unix)]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(unix)]
 use tokio::net::UnixStream;
+
+const AMUXD_UNSUPPORTED: &str = "amuxd is not available on Windows";
 
 #[derive(Serialize)]
 pub struct PromptAwaitRequest<'a> {
@@ -55,11 +59,28 @@ pub struct PromptAwaitResponse {
 /// via `crate::commands::gateway::sock_path()`), run a `prompt-await`
 /// round-trip.
 pub async fn prompt_await(req: PromptAwaitRequest<'_>) -> Result<PromptAwaitResponse, String> {
-    let path = crate::commands::gateway::sock_path();
-    prompt_await_at(&path, req).await
+    #[cfg(windows)]
+    {
+        let _ = req;
+        return Err(AMUXD_UNSUPPORTED.into());
+    }
+    #[cfg(unix)]
+    {
+        let path = crate::commands::gateway::sock_path();
+        prompt_await_at(&path, req).await
+    }
 }
 
 /// Test-friendly variant: takes the sock path explicitly.
+#[cfg(windows)]
+pub async fn prompt_await_at(
+    _sock_path: &Path,
+    _req: PromptAwaitRequest<'_>,
+) -> Result<PromptAwaitResponse, String> {
+    Err(AMUXD_UNSUPPORTED.into())
+}
+
+#[cfg(unix)]
 pub async fn prompt_await_at(
     sock_path: &Path,
     req: PromptAwaitRequest<'_>,
@@ -150,10 +171,29 @@ pub async fn prompt_await_at(
 /// Send a proactive message through amuxd's running channel gateway.
 /// `target` must use the daemon dispatch shape: `user:<id>` or `chat:<id>`.
 pub async fn channel_send(channel: &str, target: &str, message: &str) -> Result<(), String> {
-    let path = crate::commands::gateway::sock_path();
-    channel_send_at(&path, channel, target, message).await
+    #[cfg(windows)]
+    {
+        let _ = (channel, target, message);
+        return Err(AMUXD_UNSUPPORTED.into());
+    }
+    #[cfg(unix)]
+    {
+        let path = crate::commands::gateway::sock_path();
+        channel_send_at(&path, channel, target, message).await
+    }
 }
 
+#[cfg(windows)]
+pub async fn channel_send_at(
+    _sock_path: &Path,
+    _channel: &str,
+    _target: &str,
+    _message: &str,
+) -> Result<(), String> {
+    Err(AMUXD_UNSUPPORTED.into())
+}
+
+#[cfg(unix)]
 pub async fn channel_send_at(
     sock_path: &Path,
     channel: &str,
@@ -171,6 +211,7 @@ pub async fn channel_send_at(
     amuxd_json_roundtrip(sock_path, &payload).await
 }
 
+#[cfg(unix)]
 async fn amuxd_json_roundtrip(sock_path: &Path, payload: &serde_json::Value) -> Result<(), String> {
     let mut stream = UnixStream::connect(sock_path)
         .await
@@ -223,7 +264,7 @@ async fn amuxd_json_roundtrip(sock_path: &Path, payload: &serde_json::Value) -> 
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use serde_json::Value;
