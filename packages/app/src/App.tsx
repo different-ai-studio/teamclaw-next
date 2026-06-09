@@ -73,7 +73,6 @@ import { WelcomeScreen } from "@/components/auth/WelcomeScreen";
 import { hasSeenWelcome, markWelcomeSeen } from "@/stores/deps";
 import { TelemetryConsentDialog } from "@/components/telemetry/TelemetryConsentDialog";
 import { WorkspacePrompt } from "@/components/workspace";
-import { WorkspaceTypeDialog } from "@/components/workspace/WorkspaceTypeDialog";
 import { RuntimeRefreshWorkspaceBanner } from "@/components/workspace/RuntimeRefreshBanner";
 import { useSessionStore } from "@/stores/session";
 import { useSessionListStore } from "@/stores/session-list-store";
@@ -619,9 +618,6 @@ function AppContent() {
   const authSession = useAuthStore((s) => s.session);
   const loadCurrentTeam = useCurrentTeamStore((s) => s.load);
   const mainContentLayout = useUIStore((s) => s.mainContentLayout);
-  const openSettings = useUIStore((s) => s.openSettings);
-  const isNewWorkspace = useWorkspaceStore((s) => s.isNewWorkspace);
-  const setIsNewWorkspace = useWorkspaceStore((s) => s.setIsNewWorkspace);
   const { state, open: sidebarOpen, setOpen: setSidebarOpen } = useSidebar();
   const hasActiveFileTab = !!useTabsStore(selectActiveTab);
   const hasHiddenTabs = useTabsStore(selectHasHiddenTabs);
@@ -2069,14 +2065,6 @@ function AppContent() {
           </div>
         </div>
       </SidebarInset>
-      <WorkspaceTypeDialog
-        open={isNewWorkspace}
-        onSelectPersonal={() => setIsNewWorkspace(false)}
-        onSelectTeam={() => {
-          setIsNewWorkspace(false);
-          openSettings('team');
-        }}
-      />
       {settingsModal}
     </>
   );
