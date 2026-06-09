@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import React from 'react'
-
-const uiVariantMocks = vi.hoisted(() => ({ workspaceShell: false }))
 
 const uiStoreMocks = vi.hoisted(() => ({
   defaultNavTab: 'session',
@@ -143,11 +141,6 @@ vi.mock('@/stores/current-team', () => ({
     sel(currentTeamStoreMocks as unknown as Record<string, unknown>),
 }))
 
-// Mock sidebar UI components
-vi.mock('@/lib/ui-variant', () => ({
-  isWorkspaceUIVariant: () => uiVariantMocks.workspaceShell,
-}))
-
 vi.mock('@/components/ui/sidebar', () => ({
   Sidebar: ({ children, ...props }: any) => <div data-testid="sidebar" {...props}>{children}</div>,
   SidebarContent: ({ children, className }: any) => (
@@ -156,13 +149,7 @@ vi.mock('@/components/ui/sidebar', () => ({
     </div>
   ),
   SidebarFooter: ({ children }: any) => <div>{children}</div>,
-  SidebarGroup: ({ children, className }: any) => <div className={className}>{children}</div>,
   SidebarHeader: ({ children }: any) => <div>{children}</div>,
-  SidebarMenu: ({ children }: any) => <div>{children}</div>,
-  SidebarMenuButton: ({ children, onClick, isActive: _isActive, ...props }: any) => (
-    <button onClick={onClick} {...props}>{children}</button>
-  ),
-  SidebarMenuItem: ({ children }: any) => <div>{children}</div>,
   useSidebar: () => ({ toggleSidebar: vi.fn(), state: 'expanded' }),
 }))
 
@@ -189,38 +176,6 @@ vi.mock('@/components/ui/tooltip', () => ({
   Tooltip: ({ children }: any) => <div>{children}</div>,
   TooltipContent: ({ children }: any) => <div>{children}</div>,
   TooltipTrigger: ({ children }: any) => <div>{children}</div>,
-}))
-
-vi.mock('@/components/ui/command', () => ({
-  CommandDialog: ({ children, open }: any) => open ? <div data-testid="session-search-dialog">{children}</div> : null,
-  CommandInput: ({ placeholder }: any) => <input aria-label={placeholder} placeholder={placeholder} />,
-  CommandList: ({ children, className }: any) => <div className={className}>{children}</div>,
-  CommandEmpty: ({ children }: any) => <div>{children}</div>,
-  CommandGroup: ({ children, heading }: any) => (
-    <section aria-label={heading}>
-      <h2>{heading}</h2>
-      {children}
-    </section>
-  ),
-  CommandItem: ({ children, onSelect, value }: any) => (
-    <button type="button" data-value={value} onClick={() => onSelect?.(value)}>
-      {children}
-    </button>
-  ),
-}))
-
-vi.mock('@/components/navigation/DefaultBottomNav', () => ({
-  DefaultBottomNav: () => <div data-testid="default-bottom-nav">default-bottom-nav</div>,
-}))
-
-vi.mock('@/components/panel/ShortcutsPanel', () => ({
-  ShortcutsPanel: () => <div data-testid="shortcuts-panel">shortcuts-panel</div>,
-}))
-
-vi.mock('@/components/panel/RightPanel', () => ({
-  RightPanel: ({ defaultTab }: { defaultTab?: string }) => (
-    <div data-testid="right-panel">{defaultTab}</div>
-  ),
 }))
 
 vi.mock('@/components/sidebar/NavRail', () => ({
@@ -250,7 +205,6 @@ describe('AppSidebar', () => {
     sessionStoreMocks.pendingQuestions = []
     sessionStoreMocks.loadArchivedSessions = vi.fn(() => Promise.resolve())
     sessionStoreMocks.openArchivedSession = vi.fn(() => Promise.resolve())
-    uiVariantMocks.workspaceShell = false
     uiStoreMocks.defaultNavTab = 'session'
     uiStoreMocks.switchToSession = vi.fn(() => Promise.resolve())
     uiStoreMocks.openSettings = vi.fn()
@@ -277,65 +231,12 @@ describe('AppSidebar', () => {
     }
   })
 
-  it('renders session titles in sidebar', () => {
-    render(<AppSidebar />)
-    expect(screen.getByText('Session One')).toBeDefined()
-    expect(screen.getByText('Session Two')).toBeDefined()
-  })
-
-  it('shows pinned sessions before newer unpinned sessions', () => {
-    render(<AppSidebar />)
-    expect(screen.getByText('Pinned')).toBeDefined()
-    expect(screen.getByText('All sessions')).toBeDefined()
-    const sessionOne = screen.getByText('Session One')
-    const sessionTwo = screen.getByText('Session Two')
-    const sessionOneButton = sessionOne.closest('button')
-    const sessionTwoButton = sessionTwo.closest('button')
-
-    expect(sessionOneButton).not.toBeNull()
-    expect(sessionTwoButton).not.toBeNull()
-    expect(
-      sessionOneButton!.compareDocumentPosition(sessionTwoButton!) &
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy()
-  })
-
-  it('hides child sessions from the homepage sidebar session list', () => {
-    sessionStoreMocks.sessions = [
-      ...sessionStoreMocks.sessions,
-      {
-        id: 'child-1',
-        title: 'Child Session',
-        updatedAt: new Date('2025-01-03'),
-        messages: [],
-        parentID: 's1',
-      },
-    ]
-
-    render(<AppSidebar />)
-
-    expect(screen.queryByText('Child Session')).toBeNull()
-    expect(screen.getByText('Session One')).toBeDefined()
-    expect(screen.getByText('Session Two')).toBeDefined()
-  })
-
   it('renders sidebar container', () => {
     render(<AppSidebar />)
     expect(screen.getByTestId('sidebar')).toBeDefined()
   })
 
-  it('renders session date information', () => {
-    render(<AppSidebar />)
-    // The dates should be rendered (using the formatDate function in the component)
-    // The component uses its own formatDate, not the mocked formatSessionDate
-    // Just verify we have session items rendered
-    const buttons = screen.getAllByRole('button')
-    // Should have session buttons + settings + workspace selector + sidebar toggle + search + new chat
-    expect(buttons.length).toBeGreaterThan(2)
-  })
-
-  it('workspace variant renders NavRail (SessionListColumn lives outside AppSidebar)', () => {
-    uiVariantMocks.workspaceShell = true
+  it('renders NavRail (SessionListColumn lives outside AppSidebar)', () => {
     render(<AppSidebar />)
     expect(screen.getByTestId('nav-rail')).toBeDefined()
     // SessionListColumn is now rendered as a sibling of AppSidebar in App.tsx,
@@ -343,221 +244,31 @@ describe('AppSidebar', () => {
     expect(screen.queryByTestId('session-list-column')).toBeNull()
   })
 
-  it('default mode renders the default bottom navigation instead of the mixed quick access list', () => {
-    uiVariantMocks.workspaceShell = false
+  it('does not render a bottom Knowledge entry', () => {
     render(<AppSidebar />)
-    expect(screen.getByTestId('default-bottom-nav')).toBeDefined()
-  })
-
-  it('default mode replaces the session list with the shortcuts content', () => {
-    uiVariantMocks.workspaceShell = false
-    uiStoreMocks.defaultNavTab = 'shortcuts'
-    render(<AppSidebar />)
-    expect(screen.getByTestId('shortcuts-panel')).toBeDefined()
-    expect(screen.queryByText('Session One')).toBeNull()
-  })
-
-  it('default mode uses the session header controls for the session tab', () => {
-    uiVariantMocks.workspaceShell = false
-    uiStoreMocks.defaultNavTab = 'session'
-
-    render(<AppSidebar />)
-
-    expect(screen.getByTitle('Collapse sidebar')).toBeDefined()
-    expect(screen.getByTitle('Search (⌘K)')).toBeDefined()
-    expect(screen.getByTitle('Show scheduled sessions')).toBeDefined()
-    expect(screen.getByTitle('New Chat')).toBeDefined()
-  })
-
-  it("session search defaults to active sessions and can switch to archived results", async () => {
-    sessionStoreMocks.archivedSessions = [
-      {
-        id: "archived-1",
-        title: "Archived Todo Chat",
-        updatedAt: new Date("2026-05-01T10:00:00.000Z"),
-        archivedAt: new Date("2026-05-02T10:00:00.000Z"),
-        isArchived: true,
-        messages: [],
-      },
-    ]
-
-    render(<AppSidebar />)
-
-    fireEvent.click(screen.getByTitle("Search (⌘K)"))
-
-    const dialog = screen.getByTestId("session-search-dialog")
-    expect(dialog).toBeDefined()
-    expect(within(dialog).getByText("Session One")).toBeDefined()
-    expect(within(dialog).queryByText("Archived Todo Chat")).toBeNull()
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "Archived" }))
-
-    expect(sessionStoreMocks.loadArchivedSessions).toHaveBeenCalledWith("/workspace")
-    expect(within(dialog).getByText("Archived Todo Chat")).toBeDefined()
-    expect(within(dialog).queryByText("Session One")).toBeNull()
-  })
-
-  it("selecting an archived search result opens archived read-only mode", async () => {
-    let resolveOpenArchivedSession: () => void
-    const openArchivedSessionPromise = new Promise<void>((resolve) => {
-      resolveOpenArchivedSession = resolve
-    })
-    sessionStoreMocks.openArchivedSession = vi.fn(() => openArchivedSessionPromise)
-    sessionStoreMocks.archivedSessions = [
-      {
-        id: "archived-1",
-        title: "Archived Todo Chat",
-        updatedAt: new Date("2026-05-01T10:00:00.000Z"),
-        archivedAt: new Date("2026-05-02T10:00:00.000Z"),
-        isArchived: true,
-        messages: [],
-      },
-    ]
-
-    render(<AppSidebar />)
-
-    fireEvent.click(screen.getByTitle("Search (⌘K)"))
-    const dialog = screen.getByTestId("session-search-dialog")
-    fireEvent.click(within(dialog).getByRole("button", { name: "Archived" }))
-    fireEvent.click(within(dialog).getByText("Archived Todo Chat"))
-
-    expect(screen.queryByTestId("session-search-dialog")).toBeNull()
-    expect(sessionStoreMocks.openArchivedSession).toHaveBeenCalledWith("archived-1")
-    expect(uiStoreMocks.switchToSession).not.toHaveBeenCalledWith("archived-1")
-
-    resolveOpenArchivedSession!()
-    await waitFor(() => {
-      expect(sessionStoreMocks.openArchivedSession).toHaveBeenCalledWith("archived-1")
-    })
-  })
-
-  it("session search All mode shows active and archived sessions", () => {
-    sessionStoreMocks.archivedSessions = [
-      {
-        id: "archived-1",
-        title: "Archived Todo Chat",
-        updatedAt: new Date("2026-05-01T10:00:00.000Z"),
-        archivedAt: new Date("2026-05-02T10:00:00.000Z"),
-        isArchived: true,
-        messages: [],
-      },
-    ]
-
-    render(<AppSidebar />)
-
-    fireEvent.click(screen.getByTitle("Search (⌘K)"))
-    const dialog = screen.getByTestId("session-search-dialog")
-    fireEvent.click(within(dialog).getByRole("button", { name: "All" }))
-
-    expect(sessionStoreMocks.loadArchivedSessions).toHaveBeenCalledWith("/workspace")
-    expect(within(dialog).getByText("Session One")).toBeDefined()
-    expect(within(dialog).getByText("Archived Todo Chat")).toBeDefined()
-  })
-
-  it("selecting an active search result from All switches sessions without opening archived mode", () => {
-    sessionStoreMocks.archivedSessions = [
-      {
-        id: "archived-1",
-        title: "Archived Todo Chat",
-        updatedAt: new Date("2026-05-01T10:00:00.000Z"),
-        archivedAt: new Date("2026-05-02T10:00:00.000Z"),
-        isArchived: true,
-        messages: [],
-      },
-    ]
-
-    render(<AppSidebar />)
-
-    fireEvent.click(screen.getByTitle("Search (⌘K)"))
-    const dialog = screen.getByTestId("session-search-dialog")
-    fireEvent.click(within(dialog).getByRole("button", { name: "All" }))
-    fireEvent.click(within(dialog).getByText("Session One"))
-
-    expect(uiStoreMocks.switchToSession).toHaveBeenCalledWith("s1")
-    expect(sessionStoreMocks.openArchivedSession).not.toHaveBeenCalledWith("s1")
-  })
-
-  it("selecting an archived search result from All opens archived mode without switching active sessions", () => {
-    sessionStoreMocks.archivedSessions = [
-      {
-        id: "archived-1",
-        title: "Archived Todo Chat",
-        updatedAt: new Date("2026-05-01T10:00:00.000Z"),
-        archivedAt: new Date("2026-05-02T10:00:00.000Z"),
-        isArchived: true,
-        messages: [],
-      },
-    ]
-
-    render(<AppSidebar />)
-
-    fireEvent.click(screen.getByTitle("Search (⌘K)"))
-    const dialog = screen.getByTestId("session-search-dialog")
-    fireEvent.click(within(dialog).getByRole("button", { name: "All" }))
-    fireEvent.click(within(dialog).getByText("Archived Todo Chat"))
-
-    expect(sessionStoreMocks.openArchivedSession).toHaveBeenCalledWith("archived-1")
-    expect(uiStoreMocks.switchToSession).not.toHaveBeenCalledWith("archived-1")
-  })
-
-  it('default mode uses only the collapse control for the shortcuts tab', () => {
-    uiVariantMocks.workspaceShell = false
-    uiStoreMocks.defaultNavTab = 'shortcuts'
-
-    const { container } = render(<AppSidebar />)
-
-    expect(screen.getByTitle('Collapse sidebar')).toBeDefined()
-    expect(screen.getByTitle('New Shortcut')).toBeDefined()
-    expect(screen.queryByTitle('New Chat')).toBeNull()
-    expect(screen.queryByTitle('Search (⌘K)')).toBeNull()
-    expect(screen.queryByTitle('Filter files...')).toBeNull()
-    expect(container.querySelector('.border-t.border-border\\/60')).toBeNull()
-  })
-
-  it('default mode shortcuts new button opens the shortcuts settings page', () => {
-    uiVariantMocks.workspaceShell = false
-    uiStoreMocks.defaultNavTab = 'shortcuts'
-
-    render(<AppSidebar />)
-
-    fireEvent.click(screen.getByTitle('New Shortcut'))
-    expect(uiStoreMocks.openSettings).toHaveBeenCalledWith('shortcuts')
-  })
-
-  it('workspace mode does not render bottom Knowledge entry', () => {
-    uiVariantMocks.workspaceShell = true
-    render(<AppSidebar />)
-    // workspace mode has its own quick links but NOT "Knowledge"
     expect(screen.queryByText('Knowledge')).toBeNull()
   })
 
-  it('workspace mode renders settings entry with english fallback text', () => {
-    uiVariantMocks.workspaceShell = true
+  it('renders settings entry with english fallback text', () => {
     render(<AppSidebar />)
     expect(screen.getByText('Settings')).toBeDefined()
     expect(screen.queryByText('设置')).toBeNull()
   })
 
-  it('workspace variant preserves the settings footer row', () => {
-    uiVariantMocks.workspaceShell = true
+  it('preserves the settings footer row', () => {
     render(<AppSidebar />)
     expect(screen.getByText('Settings')).toBeDefined()
   })
 
-  it('workspace variant removes the footer workspace selector', () => {
-    uiVariantMocks.workspaceShell = true
+  it('does not render a footer workspace selector', () => {
     render(<AppSidebar />)
-
     expect(screen.queryByTestId('workspace-name')).toBeNull()
   })
 
-  it('workspace variant renders the user account menu in the footer', () => {
-    uiVariantMocks.workspaceShell = true
+  it('renders the user account menu in the footer', () => {
     render(<AppSidebar />)
-
     expect(screen.getAllByText('Matt').length).toBeGreaterThan(0)
     expect(screen.getByText('matt@example.com')).toBeDefined()
     expect(screen.getByText('OpenBeta')).toBeDefined()
   })
-
 })

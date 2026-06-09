@@ -48,12 +48,8 @@ import {
 } from "@/hooks/useFileEditorState";
 import { useMCPFileWatcher } from "@/hooks/useMCPFileWatcher";
 
-import {
-  AppSidebar,
-  SidebarIconGroup,
-} from "@/components/app-sidebar";
+import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarSecondColumn } from "@/components/sidebar/SidebarSecondColumn";
-import { isWorkspaceUIVariant } from "@/lib/ui-variant";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { NewSessionDialog } from "@/components/chat/NewSessionDialog";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -169,7 +165,6 @@ import {
   hasTeamSessionLiveSubscription,
   resetSessionLiveSubscriptionState,
 } from "@/lib/session-live-subscriptions";
-import { Separator } from "@/components/ui/separator";
 import { TrafficLights } from "@/components/ui/traffic-lights";
 import {
   SidebarInset,
@@ -621,7 +616,6 @@ function AppContent() {
   const { state, open: sidebarOpen, setOpen: setSidebarOpen } = useSidebar();
   const hasActiveFileTab = !!useTabsStore(selectActiveTab);
   const hasHiddenTabs = useTabsStore(selectHasHiddenTabs);
-  const workspaceUIVariant = isWorkspaceUIVariant();
   /** Shortcuts open in the left dock for both shells.
    * Only the workspace shell temporarily replaces the sidebar with that dock.
    * Knowledge pops out from the right (via the top-right Knowledge icon). */
@@ -629,9 +623,6 @@ function AppContent() {
     isPanelOpen &&
     activeTab === "shortcuts";
   const showRightWorkspacePanel = isPanelOpen && !leftDockActive;
-  const isCollapsed = state === "collapsed";
-  /** Native traffic lights sit over the left column; spare inset header when left dock owns that strip. */
-  const hideInsetChromeForLeftDock = leftDockActive;
   const settingsOpen = currentView === "settings";
 
   useEffect(() => {
@@ -641,18 +632,7 @@ function AppContent() {
   // In workspace mode, SessionListColumn always sits to the left of SidebarInset
   // and renders its own traffic-light + collapse strip when the sidebar is
   // closed, so the chat header should NOT re-render that strip there.
-  const collapsedInsetLeading = isCollapsed && !workspaceUIVariant ? (
-    hideInsetChromeForLeftDock ? null : (
-      <>
-        {(!leftDockActive || currentView === "settings") && <TrafficLights />}
-        <SidebarIconGroup className="mr-2" />
-        <Separator
-          orientation="vertical"
-          className="data-[orientation=vertical]:h-4 mr-2"
-        />
-      </>
-    )
-  ) : null;
+  const collapsedInsetLeading = null;
   const [isRefreshingMessages, setIsRefreshingMessages] = useState(false);
   // Resolved by the MQTT-connect effect; passed to the notification dispatcher.
   const [myActorId, setMyActorId] = useState<string | null>(null);
@@ -1777,7 +1757,7 @@ function AppContent() {
   /** When left dock opens, hide the main sidebar; restore prior expansion when it closes. */
   const restoreSidebarAfterLeftDockRef = useRef<boolean | null>(null);
   useEffect(() => {
-    if (leftDockActive && workspaceUIVariant) {
+    if (leftDockActive) {
       if (restoreSidebarAfterLeftDockRef.current === null) {
         restoreSidebarAfterLeftDockRef.current = sidebarOpen;
         if (sidebarOpen) {
@@ -1794,7 +1774,7 @@ function AppContent() {
         setSidebarOpen(true);
       }
     }
-  }, [leftDockActive, workspaceUIVariant, sidebarOpen, setSidebarOpen, closePanel]);
+  }, [leftDockActive, sidebarOpen, setSidebarOpen, closePanel]);
 
   const settingsModal = (
     <Dialog
@@ -1892,11 +1872,9 @@ function AppContent() {
   return (
     <>
       <AppSidebar />
-      {workspaceUIVariant && (
-        <div className="w-(--session-list-width) shrink-0 h-svh overflow-hidden">
-          <SidebarSecondColumn />
-        </div>
-      )}
+      <div className="w-(--session-list-width) shrink-0 h-svh overflow-hidden">
+        <SidebarSecondColumn />
+      </div>
       <SidebarInset className="flex flex-row h-svh overflow-hidden relative">
         <div
           className={cn(
@@ -2165,7 +2143,7 @@ function App() {
           <SidebarProvider
             style={
               {
-                "--sidebar-width": isWorkspaceUIVariant() ? "220px" : "320px",
+                "--sidebar-width": "220px",
                 "--session-list-width": "280px",
               } as React.CSSProperties
             }

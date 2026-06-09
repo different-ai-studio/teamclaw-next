@@ -12,7 +12,7 @@
          renders it for both variants and CSS hides it for "default".
          Palette mirrors the Editorial Calm tokens in styles/globals.css —
          hard-coded here because that stylesheet is not loaded yet at first
-         paint. __UI_VARIANT__ is replaced by Vite transformIndexHtml. */
+         paint. The app ships the workspace shell only. */
 
       /* Editorial Calm — light theme (default) */
       :root {
@@ -143,7 +143,7 @@
   </head>
   <body>
     <div id="root"></div>
-    <div id="skeleton" data-variant="__UI_VARIANT__">
+    <div id="skeleton" data-variant="workspace">
       <!-- Column 1: primary sidebar -->
       <div class="sk-sidebar">
         <div class="bone" style="height:24px;width:60%"></div>
