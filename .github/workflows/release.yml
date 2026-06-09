@@ -106,7 +106,7 @@ jobs:
           (
             set -e
             echo "Building teamclaw-introspect for ${{ matrix.target }}..."
-            cargo build --release --locked --manifest-path apps/desktop/Cargo.toml -p teamclaw-introspect --target ${{ matrix.target }}
+            cargo build --release --locked --manifest-path apps/desktop/Cargo.toml -p teamclaw-introspect --target ${{ matrix.target }} --target-dir apps/desktop/target
             cp apps/desktop/target/${{ matrix.target }}/release/teamclaw-introspect apps/desktop/binaries/teamclaw-introspect-${{ matrix.target }}
             chmod +x apps/desktop/binaries/teamclaw-introspect-${{ matrix.target }}
             echo "teamclaw-introspect ready"
@@ -117,7 +117,7 @@ jobs:
           (
             set -e
             echo "Building amuxd for ${{ matrix.target }}..."
-            cargo build --release --locked --manifest-path apps/daemon/Cargo.toml -p amuxd --target ${{ matrix.target }}
+            cargo build --release --locked --manifest-path apps/daemon/Cargo.toml -p amuxd --target ${{ matrix.target }} --target-dir apps/desktop/target
             cp apps/desktop/target/${{ matrix.target }}/release/amuxd apps/desktop/binaries/amuxd-${{ matrix.target }}
             chmod +x apps/desktop/binaries/amuxd-${{ matrix.target }}
             echo "amuxd ready"
@@ -371,14 +371,14 @@ jobs:
       - name: Build teamclaw-introspect sidecar
         shell: bash
         run: |
-          cargo build --release --locked --manifest-path apps/desktop/Cargo.toml -p teamclaw-introspect
+          cargo build --release --locked --manifest-path apps/desktop/Cargo.toml -p teamclaw-introspect --target-dir apps/desktop/target
           cp apps/desktop/target/release/teamclaw-introspect.exe apps/desktop/binaries/teamclaw-introspect-x86_64-pc-windows-msvc.exe
           echo "teamclaw-introspect ready"
 
       - name: Build amuxd sidecar
         shell: bash
         run: |
-          cargo build --release --locked --manifest-path apps/daemon/Cargo.toml -p amuxd
+          cargo build --release --locked --manifest-path apps/daemon/Cargo.toml -p amuxd --target-dir apps/desktop/target
           cp apps/desktop/target/release/amuxd.exe apps/desktop/binaries/amuxd-x86_64-pc-windows-msvc.exe
           echo "amuxd ready"
 
