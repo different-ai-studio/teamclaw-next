@@ -11,6 +11,8 @@ import {
   normalizeToolResultEvent,
   normalizeToolUseEvent,
   rememberLiveEventId,
+  streamTranscriptHasText,
+  streamTranscriptRevision,
   streamEntryHasVisibleContent,
 } from "@/lib/live-agent-stream";
 import type { AgentStreamEntry } from "@/stores/v2-streaming-store";
@@ -204,6 +206,56 @@ describe("live agent stream event helpers", () => {
         parts: [{ type: "text", text: "hello" }],
       }),
     ).toBe(true);
+  });
+
+  it("streamTranscriptHasText ignores tool-only streams", () => {
+    expect(
+      streamTranscriptHasText({
+        outputText: "",
+        thinkingText: "",
+        toolCalls: [{ id: "tool-1" }],
+        parts: [{ type: "tool-call", toolCall: { id: "tool-1" } }],
+      }),
+    ).toBe(false);
+    expect(
+      streamTranscriptHasText({
+        outputText: "",
+        thinkingText: "",
+        toolCalls: [],
+        parts: [{ type: "text", text: "hello" }],
+      }),
+    ).toBe(true);
+  });
+
+  it("streamTranscriptRevision ignores tool status changes", () => {
+    const base = {
+      outputText: "",
+      thinkingText: "",
+      toolCalls: [{ id: "tool-1", name: "bash", status: "waiting" }],
+      parts: [{ type: "tool-call", toolCall: { id: "tool-1", status: "waiting" } }],
+    };
+    expect(streamTranscriptRevision(base)).toBe(
+      streamTranscriptRevision({
+        ...base,
+        toolCalls: [{ id: "tool-1", name: "bash", status: "completed", result: "ok" }],
+        parts: [
+          {
+            type: "tool-call",
+            toolCall: { id: "tool-1", status: "completed", result: "ok" },
+          },
+        ],
+      }),
+    );
+  });
+
+  it("streamTranscriptRevision changes when transcript content grows", () => {
+    const before = streamTranscriptRevision({
+      parts: [{ type: "text", text: "Hello" }],
+    });
+    const after = streamTranscriptRevision({
+      parts: [{ type: "text", text: "Hello world" }],
+    });
+    expect(before).not.toBe(after);
   });
 
   it("buildInterruptedStreamAnchor uses streamId for stable client ids", () => {

@@ -145,6 +145,42 @@ export function streamEntryHasVisibleContent(
   });
 }
 
+/** Text/thinking transcript only — excludes tool calls and permission metadata. */
+export function streamTranscriptHasText(
+  entry: StreamVisibilityEntry | undefined,
+): boolean {
+  if (!entry) return false;
+  if (entry.outputText?.trim()) return true;
+  if (entry.thinkingText?.trim()) return true;
+  return (entry.parts ?? []).some((part) => {
+    if (part.type === "tool-call") return false;
+    return Boolean(part.text?.trim() || part.content?.trim());
+  });
+}
+
+function textPartRevision(part: {
+  type?: string;
+  text?: string;
+  content?: string;
+}): string {
+  const text = part.text ?? part.content ?? "";
+  return `${part.type ?? "part"}:${text.length}:${text.slice(-48)}`;
+}
+
+/** Transcript-only revision for pause loading — ignores tool status / permission metadata. */
+export function streamTranscriptRevision(entry: StreamVisibilityEntry): string {
+  const partSigs = (entry.parts ?? [])
+    .filter((part) => part.type !== "tool-call")
+    .map((part) => textPartRevision(part));
+  const out = entry.outputText ?? "";
+  const think = entry.thinkingText ?? "";
+  return [
+    `out:${out.length}:${out.slice(-48)}`,
+    `think:${think.length}:${think.slice(-48)}`,
+    ...partSigs,
+  ].join("\0");
+}
+
 function stringField(record: Record<string, unknown>, ...keys: string[]): string {
   for (const key of keys) {
     const value = record[key];

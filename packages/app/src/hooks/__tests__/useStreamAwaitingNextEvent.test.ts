@@ -19,10 +19,10 @@ describe("useStreamAwaitingNextEvent", () => {
     expect(result.current).toBe(false);
   });
 
-  it("becomes true after idleMs without a lastUpdate bump", () => {
+  it("becomes true after idleMs without a content revision bump", () => {
     const { result, rerender } = renderHook(
-      ({ lastUpdate }) => useStreamAwaitingNextEvent(true, lastUpdate),
-      { initialProps: { lastUpdate: 1000 } },
+      ({ revision }) => useStreamAwaitingNextEvent(true, revision),
+      { initialProps: { revision: "a" } },
     );
     expect(result.current).toBe(false);
     act(() => {
@@ -30,7 +30,7 @@ describe("useStreamAwaitingNextEvent", () => {
     });
     expect(result.current).toBe(true);
 
-    rerender({ lastUpdate: 2000 });
+    rerender({ revision: "b" });
     expect(result.current).toBe(false);
     act(() => {
       vi.advanceTimersByTime(STREAM_AWAITING_NEXT_EVENT_MS);
@@ -38,16 +38,29 @@ describe("useStreamAwaitingNextEvent", () => {
     expect(result.current).toBe(true);
   });
 
-  it("clears when the stream becomes inactive", () => {
+  it("does not reset when revision is unchanged", () => {
     const { result, rerender } = renderHook(
-      ({ active, lastUpdate }) => useStreamAwaitingNextEvent(active, lastUpdate),
-      { initialProps: { active: true, lastUpdate: 1000 } },
+      ({ revision }) => useStreamAwaitingNextEvent(true, revision),
+      { initialProps: { revision: "same" } },
     );
     act(() => {
       vi.advanceTimersByTime(STREAM_AWAITING_NEXT_EVENT_MS);
     });
     expect(result.current).toBe(true);
-    rerender({ active: false, lastUpdate: 1000 });
+    rerender({ revision: "same" });
+    expect(result.current).toBe(true);
+  });
+
+  it("clears when the stream becomes inactive", () => {
+    const { result, rerender } = renderHook(
+      ({ active, revision }) => useStreamAwaitingNextEvent(active, revision),
+      { initialProps: { active: true, revision: "a" } },
+    );
+    act(() => {
+      vi.advanceTimersByTime(STREAM_AWAITING_NEXT_EVENT_MS);
+    });
+    expect(result.current).toBe(true);
+    rerender({ active: false, revision: "a" });
     expect(result.current).toBe(false);
   });
 });
