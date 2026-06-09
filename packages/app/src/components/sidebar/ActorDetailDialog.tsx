@@ -78,10 +78,20 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
   const subtitleText = isAgent
     ? (visibilityLabel ? `${actorTypeLabel} · ${visibilityLabel}` : actorTypeLabel)
     : (roleLabel ?? actorTypeLabel)
-  // An agent's supported-types row is noise when it just repeats the default type.
-  const extraAgentTypes = isAgent && displayActor.agent_types
-    ? displayActor.agent_types.filter((tp) => tp !== displayActor.default_agent_type)
+  // The full set of agent types this agent supports, with the active default
+  // always included (even if the daemon's advertised agent_types happens to omit
+  // it) so the current type never looks "unsupported". The default is marked in
+  // the UI. Hidden when it would just repeat the single default type as noise.
+  const supportedAgentTypes = isAgent
+    ? Array.from(
+        new Set(
+          [displayActor.default_agent_type, ...(displayActor.agent_types ?? [])].filter(
+            (tp): tp is string => !!tp,
+          ),
+        ),
+      )
     : []
+  const showSupportedAgentTypes = supportedAgentTypes.length > 1
 
   const copyId = async () => {
     try {
@@ -249,19 +259,28 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
                   <dd className="min-w-0 truncate text-foreground">{displayActor.default_agent_type}</dd>
                 </>
               )}
-              {isAgent && extraAgentTypes.length > 0 && (
+              {isAgent && showSupportedAgentTypes && (
                 <>
                   <dt className="text-muted-foreground">{t('actors.detail.supportedAgentTypes', 'Supported types')}</dt>
                   <dd className="min-w-0 text-foreground">
                     <div className="flex flex-wrap gap-1.5">
-                      {extraAgentTypes.map((tp) => (
-                        <span
-                          key={tp}
-                          className="rounded-md border border-border-soft bg-paper px-2 py-0.5 font-mono text-[11.5px] text-ink-2"
-                        >
-                          {tp}
-                        </span>
-                      ))}
+                      {supportedAgentTypes.map((tp) => {
+                        const isDefault = tp === displayActor.default_agent_type
+                        return (
+                          <span
+                            key={tp}
+                            className={cn(
+                              'rounded-md border px-2 py-0.5 font-mono text-[11.5px]',
+                              isDefault
+                                ? 'border-coral text-coral'
+                                : 'border-border-soft bg-paper text-ink-2',
+                            )}
+                            title={isDefault ? t('actors.detail.agentType', 'Agent type') : undefined}
+                          >
+                            {tp}
+                          </span>
+                        )
+                      })}
                     </div>
                   </dd>
                 </>
