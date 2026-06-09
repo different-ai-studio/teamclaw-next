@@ -164,11 +164,11 @@ describe('daemon-onboarding refresh() orchestration', () => {
   it('matched-but-token-invalid that never heals → error with retry hint', async () => {
     h.currentTeam = { id: 't1' }
     h.daemonTeam = 't1'
-    // Every probe stays unhealthy; recovery exhausts its 12 polls.
+    // Every probe stays unhealthy; recovery exhausts two ensureHealthy rounds.
     h.probeQueue = [{ ok: false, reason: 'token_invalid' }]
     vi.useFakeTimers()
     const p = useDaemonOnboardingStore.getState().refresh()
-    await vi.advanceTimersByTimeAsync(12 * 500 + 100) // drain all poll ticks
+    await vi.advanceTimersByTimeAsync(2 * 12 * 500 + 100) // drain both poll rounds
     await p
     const s = useDaemonOnboardingStore.getState()
     expect(s.status).toBe('error')
@@ -176,7 +176,27 @@ describe('daemon-onboarding refresh() orchestration', () => {
     // the i18n start-failure string with a retry hint.
     expect(s.error).toBe(i18n.t('settings.daemonOnboarding.startFailed'))
     expect(s.error).not.toMatch(/amuxd/)
-    expect(h.invokeCalls).toContain('daemon_install_service')
+    expect(h.invokeCalls.filter((c) => c === 'daemon_install_service')).toHaveLength(2)
+  })
+
+  it('matched-but-down → auto-retries once before surfacing error', async () => {
+    h.currentTeam = { id: 't1' }
+    h.daemonTeam = 't1'
+    // First ensureHealthy round exhausts all polls; second succeeds on first poll.
+    h.probeQueue = [
+      { ok: false, reason: 'not_running' },
+      ...Array.from({ length: 13 }, () => ({ ok: false, reason: 'not_running' })),
+      { ok: false, reason: 'not_running' },
+      { ok: true, baseUrl: 'http://127.0.0.1:1' },
+    ]
+    vi.useFakeTimers()
+    const p = useDaemonOnboardingStore.getState().refresh()
+    await vi.advanceTimersByTimeAsync(13 * 500 + 100)
+    await p
+    const s = useDaemonOnboardingStore.getState()
+    expect(s.status).toBe('ready')
+    expect(s.error).toBeNull()
+    expect(h.invokeCalls.filter((c) => c === 'daemon_install_service')).toHaveLength(2)
   })
 
   it('recovery survives install-service throwing (falls through to polling)', async () => {
