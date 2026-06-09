@@ -145,6 +145,62 @@ export function streamEntryHasVisibleContent(
   });
 }
 
+function toolCallRevision(toolCall: unknown): string {
+  if (!toolCall || typeof toolCall !== "object") return "tool:unknown";
+  const tc = toolCall as Record<string, unknown>;
+  const result = tc.result;
+  const resultLen = typeof result === "string" ? result.length : 0;
+  return [
+    "tool",
+    String(tc.id ?? ""),
+    String(tc.status ?? ""),
+    String(resultLen),
+  ].join(":");
+}
+
+/** Revision key including tool lifecycle — use for diagnostics only. */
+export function streamContentRevision(entry: StreamVisibilityEntry): string {
+  const partSigs = (entry.parts ?? []).map((part) => {
+    if (part.type === "tool-call" && part.toolCall) {
+      return toolCallRevision(part.toolCall);
+    }
+    const text = part.text ?? part.content ?? "";
+    return `${part.type ?? "part"}:${text.length}:${text.slice(-48)}`;
+  });
+  const fallbackTools = (entry.toolCalls ?? []).map((toolCall) =>
+    toolCallRevision(toolCall),
+  );
+  return [
+    `out:${entry.outputText?.length ?? 0}`,
+    `think:${entry.thinkingText?.length ?? 0}`,
+    ...partSigs,
+    ...fallbackTools,
+  ].join("\0");
+}
+
+function textPartRevision(part: {
+  type?: string;
+  text?: string;
+  content?: string;
+}): string {
+  const text = part.text ?? part.content ?? "";
+  return `${part.type ?? "part"}:${text.length}:${text.slice(-48)}`;
+}
+
+/** Transcript-only revision for pause loading — ignores tool status / permission metadata. */
+export function streamTranscriptRevision(entry: StreamVisibilityEntry): string {
+  const partSigs = (entry.parts ?? [])
+    .filter((part) => part.type !== "tool-call")
+    .map((part) => textPartRevision(part));
+  const out = entry.outputText ?? "";
+  const think = entry.thinkingText ?? "";
+  return [
+    `out:${out.length}:${out.slice(-48)}`,
+    `think:${think.length}:${think.slice(-48)}`,
+    ...partSigs,
+  ].join("\0");
+}
+
 function stringField(record: Record<string, unknown>, ...keys: string[]): string {
   for (const key of keys) {
     const value = record[key];

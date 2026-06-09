@@ -42,6 +42,8 @@ export interface MessageListHandle {
   handleInputHeightChange: (height: number) => void;
   /** Pin the viewport to the latest user message row (call right after optimistic append). */
   scrollToLatestMessage: (messageId?: string) => void;
+  /** Stop stick-to-bottom while the user is reading above the composer. */
+  pauseAutoFollowIfReading: () => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -234,6 +236,7 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
       observeContentResize,
       onScroll,
       enableAutoFollow,
+      pauseAutoFollowIfReading,
     } = useChatStickToBottom(scrollRef);
 
     /**
@@ -253,15 +256,13 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
     // ── Imperative handle ────────────────────────────────────────────────
     const handleInputHeightChange = React.useCallback(
       (height: number) => {
-        setInputAreaHeight((prev) => {
-          if (prev === height) return prev;
-          if (height > prev) {
-            scrollToBottom();
-          }
-          return height;
+        setInputAreaHeight((prev) => (prev === height ? prev : height));
+        // Composer chrome (approval, multiline) must not yank readers back to bottom.
+        requestAnimationFrame(() => {
+          scrollToBottomIfAtBottom();
         });
       },
-      [scrollToBottom],
+      [scrollToBottomIfAtBottom],
     );
 
     React.useImperativeHandle(
@@ -269,8 +270,9 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
       () => ({
         handleInputHeightChange,
         scrollToLatestMessage,
+        pauseAutoFollowIfReading,
       }),
-      [handleInputHeightChange, scrollToLatestMessage],
+      [handleInputHeightChange, scrollToLatestMessage, pauseAutoFollowIfReading],
     );
 
     React.useLayoutEffect(() => {
@@ -358,6 +360,7 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
         prevSessionIdRef.current = activeSessionId;
         enableAutoFollow();
         setShowScrollButton(false);
+        setInputAreaHeight(160);
         needsScrollAfterLoadRef.current = true;
       }
     }, [activeSessionId, enableAutoFollow]);

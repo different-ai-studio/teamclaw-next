@@ -12,6 +12,8 @@ export function agentIdsNeedingRuntimeWake(
 }
 
 const FOCUS_ENSURE_MIN_INTERVAL_MS = 3_000
+/** Retry while pill stays connecting/offline on the same session (idle runtime drop). */
+const STALE_RUNTIME_RETRY_MS = 15_000
 
 export function useEnsureEngagedRuntimesOnSessionFocus(args: {
   sessionId: string | null
@@ -20,6 +22,8 @@ export function useEnsureEngagedRuntimesOnSessionFocus(args: {
 }): void {
   const prevSessionIdRef = React.useRef<string | null>(null)
   const lastEnsureRef = React.useRef<{ key: string; at: number } | null>(null)
+  const engagedUiEntriesRef = React.useRef(args.engagedUiEntries)
+  engagedUiEntriesRef.current = args.engagedUiEntries
 
   const engagedSignature = React.useMemo(
     () =>
@@ -30,30 +34,61 @@ export function useEnsureEngagedRuntimesOnSessionFocus(args: {
     [args.engagedUiEntries],
   )
 
+  const tryEnsure = React.useCallback(
+    (reason: string, opts?: { bypassThrottle?: boolean }) => {
+      const sessionId = args.sessionId?.trim() || null
+      const teamId = args.teamId?.trim() || null
+      if (!sessionId || !teamId) return
+
+      const agentActorIds = agentIdsNeedingRuntimeWake(engagedUiEntriesRef.current)
+      if (agentActorIds.length === 0) return
+
+      const key = `${sessionId}::${agentActorIds.slice().sort().join(',')}`
+      const now = Date.now()
+      const last = lastEnsureRef.current
+      if (
+        !opts?.bypassThrottle &&
+        last &&
+        last.key === key &&
+        now - last.at < FOCUS_ENSURE_MIN_INTERVAL_MS
+      ) {
+        return
+      }
+      lastEnsureRef.current = { key, at: now }
+
+      void ensureAgentRuntimesForSession({
+        sessionId,
+        teamId,
+        agentActorIds,
+        reason,
+      })
+    },
+    [args.sessionId, args.teamId],
+  )
+
+  React.useEffect(() => {
+    const sessionId = args.sessionId?.trim() || null
+    const focusChanged = prevSessionIdRef.current !== sessionId
+    if (focusChanged) {
+      lastEnsureRef.current = null
+    }
+    prevSessionIdRef.current = sessionId
+
+    if (!sessionId || !args.teamId?.trim()) return
+
+    tryEnsure(focusChanged ? 'session_focus' : 'session_runtime_wake')
+  }, [args.sessionId, args.teamId, engagedSignature, tryEnsure])
+
   React.useEffect(() => {
     const sessionId = args.sessionId?.trim() || null
     const teamId = args.teamId?.trim() || null
-    const focusChanged = prevSessionIdRef.current !== sessionId
-    prevSessionIdRef.current = sessionId
+    if (!sessionId || !teamId) return
+    if (agentIdsNeedingRuntimeWake(args.engagedUiEntries).length === 0) return
 
-    if (!focusChanged || !sessionId || !teamId) return
+    const timer = window.setInterval(() => {
+      tryEnsure('session_runtime_retry')
+    }, STALE_RUNTIME_RETRY_MS)
 
-    const agentActorIds = agentIdsNeedingRuntimeWake(args.engagedUiEntries)
-    if (agentActorIds.length === 0) return
-
-    const key = `${sessionId}::${agentActorIds.slice().sort().join(',')}`
-    const now = Date.now()
-    const last = lastEnsureRef.current
-    if (last && last.key === key && now - last.at < FOCUS_ENSURE_MIN_INTERVAL_MS) {
-      return
-    }
-    lastEnsureRef.current = { key, at: now }
-
-    void ensureAgentRuntimesForSession({
-      sessionId,
-      teamId,
-      agentActorIds,
-      reason: 'session_focus',
-    })
-  }, [args.sessionId, args.teamId, engagedSignature, args.engagedUiEntries])
+    return () => window.clearInterval(timer)
+  }, [args.sessionId, args.teamId, engagedSignature, args.engagedUiEntries, tryEnsure])
 }

@@ -994,6 +994,10 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
     messageListRef.current?.handleInputHeightChange(height);
   }, []);
 
+  const handleComposerFocus = React.useCallback(() => {
+    messageListRef.current?.pauseAutoFollowIfReading();
+  }, []);
+
   // ── File handling ─────────────────────────────────────────────────────
 
   const handleFilesChange = (paths: string[]) => {
@@ -2189,8 +2193,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             messageQueue={messageQueue}
             onRemoveFromQueue={removeFromQueue}
             onHeightChange={handleInputHeightChange}
+            onComposerFocus={handleComposerFocus}
             bottomOffsetPx={terminalBottomOffset}
-            stackTodos={hasComposerPlanData ? (combinedTodos as Todo[]) : []}
             stackQueue={hasComposerPlanData ? messageQueue : []}
             planSlotHidden={hasComposerPlanData && !showInlineTodo}
           />

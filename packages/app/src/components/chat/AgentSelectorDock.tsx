@@ -55,23 +55,21 @@ interface AgentSelectorDockProps {
 
 export { resolveAgentAvailableModels } from '@/lib/agent-available-models'
 
-/** Gray = waiting for init / unknown. Green = idle. Red = active or errored. */
+/** Connected = green. Starting = yellow. Error = red. Stopped/unknown = gray. */
 function dotClasses(info: RuntimeInfo | undefined): { color: string; pulse: boolean } {
   if (!info) return { color: 'bg-muted-foreground/40', pulse: false }
   switch (info.state) {
     case RuntimeLifecycle.FAILED:
       return { color: 'bg-red-500', pulse: false }
     case RuntimeLifecycle.STARTING:
+      return { color: 'bg-amber-400', pulse: false }
+    case RuntimeLifecycle.ACTIVE:
+      if (info.status === AgentStatus.ERROR) {
+        return { color: 'bg-red-500', pulse: false }
+      }
+      return { color: 'bg-emerald-500', pulse: false }
     case RuntimeLifecycle.STOPPED:
     case RuntimeLifecycle.UNKNOWN:
-      return { color: 'bg-muted-foreground/40', pulse: false }
-    case RuntimeLifecycle.ACTIVE:
-      switch (info.status) {
-        case AgentStatus.ACTIVE: return { color: 'bg-red-500', pulse: true }
-        case AgentStatus.IDLE:   return { color: 'bg-emerald-500', pulse: false }
-        case AgentStatus.ERROR:  return { color: 'bg-red-500', pulse: false }
-        default:                  return { color: 'bg-muted-foreground/40', pulse: false }
-      }
     default:
       return { color: 'bg-muted-foreground/40', pulse: false }
   }

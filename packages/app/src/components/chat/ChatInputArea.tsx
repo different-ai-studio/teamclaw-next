@@ -159,6 +159,8 @@ interface ChatInputAreaProps {
   messageQueue: QueuedMessage[];
   onRemoveFromQueue: (id: string) => void;
   onHeightChange?: (height: number) => void;
+  /** Called when the composer editor receives focus (used to pause scroll follow while reading). */
+  onComposerFocus?: () => void;
   bottomOffsetPx?: number;
   /** Plan + queue rows rendered inside the unified composer stack (above input). */
   stackTodos?: Todo[];
@@ -196,6 +198,7 @@ export function ChatInputArea({
   messageQueue: _messageQueue,
   onRemoveFromQueue: _onRemoveFromQueue,
   onHeightChange,
+  onComposerFocus,
   bottomOffsetPx = 0,
   stackTodos = [],
   stackQueue = [],
@@ -321,6 +324,17 @@ export function ChatInputArea({
       editor?.focus();
     });
   }, [composerFocusRequestId]);
+
+  React.useEffect(() => {
+    if (!onComposerFocus) return;
+    const editor = rootRef.current?.querySelector<HTMLElement>(
+      '[data-testid="v2-composer-editor"]',
+    );
+    if (!editor) return;
+    const handleFocus = () => onComposerFocus();
+    editor.addEventListener("focus", handleFocus);
+    return () => editor.removeEventListener("focus", handleFocus);
+  }, [onComposerFocus]);
 
   React.useEffect(() => {
     const el = rootRef.current;

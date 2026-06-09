@@ -122,6 +122,86 @@ describe("StreamingAgentBubble", () => {
     vi.useRealTimers();
   });
 
+  it("keeps pause dots visible when only tool status changes after approval", () => {
+    vi.useFakeTimers();
+    const baseEntry = {
+      sessionId: "s1",
+      actorId: "agent-a",
+      outputText: "",
+      thinkingText: "",
+      parts: [
+        {
+          id: "tool-1",
+          type: "tool-call" as const,
+          toolCall: {
+            id: "tool-1",
+            name: "bash",
+            status: "waiting",
+            args: { command: "ls" },
+          },
+        },
+      ],
+      toolCalls: [
+        {
+          id: "tool-1",
+          name: "bash",
+          status: "waiting",
+          args: { command: "ls" },
+        },
+      ],
+      planEntries: [],
+      pendingPermission: null,
+      errorMessage: null,
+      errorDetails: null,
+      lastUpdate: 1000,
+      active: true,
+      streamId: "s1::agent-a::stream-1",
+    };
+
+    const { getByTestId, rerender } = render(
+      <StreamingAgentBubble entry={baseEntry} />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(STREAM_AWAITING_NEXT_EVENT_MS);
+    });
+    expect(getByTestId("v2-streaming-planning").querySelectorAll(".stream-loading-dot")).toHaveLength(3);
+
+    rerender(
+      <StreamingAgentBubble
+        entry={{
+          ...baseEntry,
+          lastUpdate: 5000,
+          toolCalls: [
+            {
+              id: "tool-1",
+              name: "bash",
+              status: "completed",
+              args: { command: "ls" },
+              result: "ok",
+            },
+          ],
+          parts: [
+            {
+              id: "tool-1",
+              type: "tool-call",
+              toolCall: {
+                id: "tool-1",
+                name: "bash",
+                status: "completed",
+                args: { command: "ls" },
+                result: "ok",
+              },
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(getByTestId("v2-streaming-planning").querySelectorAll(".stream-loading-dot")).toHaveLength(3);
+    vi.useRealTimers();
+  });
+
   it("does not render an archived text-only stream after persisted reply takes over", () => {
     const { container } = render(
       <StreamingAgentBubble

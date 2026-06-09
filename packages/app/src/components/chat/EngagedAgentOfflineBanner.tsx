@@ -125,7 +125,7 @@ export function dotClassesForUiState(uiState: SessionAgentUiState): {
     case 'connecting':
       return { color: 'bg-amber-400', pulse: false }
     case 'stale':
-      return { color: 'bg-muted-foreground/40', pulse: false }
+      return { color: 'bg-red-500', pulse: false }
     case 'offline':
     default:
       return { color: 'bg-muted-foreground/40', pulse: false }

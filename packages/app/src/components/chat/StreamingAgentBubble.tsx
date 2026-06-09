@@ -1,9 +1,11 @@
+import * as React from "react";
 import { AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   streamEntryHasVisibleContent,
-  type AgentStreamEntry,
-} from "@/stores/v2-streaming-store";
+  streamTranscriptRevision,
+} from "@/lib/live-agent-stream";
+import type { AgentStreamEntry } from "@/stores/v2-streaming-store";
 import { Message, MessageContent, MessageResponse } from "@/packages/ai/message";
 import { useStreamAwaitingNextEvent } from "@/hooks/useStreamAwaitingNextEvent";
 import { useStreamRevealText } from "@/hooks/useStreamRevealText";
@@ -148,12 +150,34 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
     }
   }
 
-  const awaitingNextEvent = useStreamAwaitingNextEvent(entry.active, entry.lastUpdate);
+  const transcriptRevision = streamTranscriptRevision(entry);
+  const awaitingNextEvent = useStreamAwaitingNextEvent(
+    entry.active,
+    transcriptRevision,
+  );
   const hasVisibleContent = streamEntryHasVisibleContent(entry);
+
+  const [pauseDotsLatched, setPauseDotsLatched] = React.useState(false);
+  React.useEffect(() => {
+    setPauseDotsLatched(false);
+  }, [transcriptRevision]);
+  React.useEffect(() => {
+    if (!entry.active) {
+      setPauseDotsLatched(false);
+      return;
+    }
+    if (awaitingNextEvent && hasVisibleContent) {
+      setPauseDotsLatched(true);
+    }
+  }, [entry.active, awaitingNextEvent, hasVisibleContent]);
+
   // Align with agent bar on statusChange ACTIVE — show immediately, no idle debounce.
   const showPlanningInitial = entry.active && !hasError && !hasVisibleContent;
   const showPlanningAfterPause =
-    entry.active && !hasError && hasVisibleContent && awaitingNextEvent;
+    entry.active &&
+    !hasError &&
+    hasVisibleContent &&
+    (awaitingNextEvent || pauseDotsLatched);
 
   if (
     !showPlanningInitial &&
@@ -178,7 +202,14 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
       <ActorLabel senderActorId={entry.actorId} isUser={false} />
       <Message from="assistant">
         <div className="min-w-0 flex-1">
-          {showPlanningInitial && <AgentStreamLoadingDots />}
+          {entry.active && !hasError && !hasVisibleContent ? (
+            <div
+              className="flex h-[22px] items-center"
+              data-testid="v2-streaming-planning-slot"
+            >
+              {showPlanningInitial ? <AgentStreamLoadingDots /> : null}
+            </div>
+          ) : null}
 
           {hasThinking && (
             <ThinkingBlock
@@ -224,11 +255,14 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
             <StreamRevealedResponse text={entry.outputText} reveal={entry.active} />
           )}
 
-          {showPlanningAfterPause && (
-            <div className="mt-1.5">
-              <AgentStreamLoadingDots />
+          {entry.active && hasVisibleContent ? (
+            <div
+              className="mt-1.5 flex h-[22px] items-center"
+              data-testid="v2-streaming-planning-pause-slot"
+            >
+              {showPlanningAfterPause ? <AgentStreamLoadingDots /> : null}
             </div>
-          )}
+          ) : null}
 
           {hasError && (
             <ErrorCard message={entry.errorMessage!} details={entry.errorDetails ?? ""} />

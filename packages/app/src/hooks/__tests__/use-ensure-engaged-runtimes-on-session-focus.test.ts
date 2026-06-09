@@ -73,7 +73,7 @@ describe('useEnsureEngagedRuntimesOnSessionFocus', () => {
     })
   })
 
-  it('does not ensure when focus unchanged or all agents ready', () => {
+  it('ensures when an agent becomes connecting on the same session', () => {
     const { rerender } = renderHook(
       (props: {
         sessionId: string | null
@@ -97,6 +97,63 @@ describe('useEnsureEngagedRuntimesOnSessionFocus', () => {
       engagedUiEntries: [entry('agent-1', 'connecting')],
     })
 
+    expect(ensureMock).toHaveBeenCalledWith({
+      sessionId: 'session-a',
+      teamId: 'team-1',
+      agentActorIds: ['agent-1'],
+      reason: 'session_runtime_wake',
+    })
+  })
+
+  it('does not ensure when focus unchanged and all agents ready', () => {
+    const { rerender } = renderHook(
+      (props: {
+        sessionId: string | null
+        teamId: string | null
+        engagedUiEntries: EngagedAgentUiEntry[]
+      }) => useEnsureEngagedRuntimesOnSessionFocus(props),
+      {
+        initialProps: {
+          sessionId: 'session-a',
+          teamId: 'team-1',
+          engagedUiEntries: [entry('agent-1', 'ready')],
+        },
+      },
+    )
+
     expect(ensureMock).not.toHaveBeenCalled()
+
+    rerender({
+      sessionId: 'session-a',
+      teamId: 'team-1',
+      engagedUiEntries: [entry('agent-1', 'ready')],
+    })
+
+    expect(ensureMock).not.toHaveBeenCalled()
+  })
+
+  it('retries on an interval while agents stay connecting', () => {
+    vi.useFakeTimers()
+
+    renderHook(() =>
+      useEnsureEngagedRuntimesOnSessionFocus({
+        sessionId: 'session-a',
+        teamId: 'team-1',
+        engagedUiEntries: [entry('agent-1', 'connecting')],
+      }),
+    )
+
+    expect(ensureMock).toHaveBeenCalledTimes(1)
+    ensureMock.mockClear()
+
+    vi.advanceTimersByTime(15_000)
+    expect(ensureMock).toHaveBeenCalledWith({
+      sessionId: 'session-a',
+      teamId: 'team-1',
+      agentActorIds: ['agent-1'],
+      reason: 'session_runtime_retry',
+    })
+
+    vi.useRealTimers()
   })
 })

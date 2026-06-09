@@ -13,9 +13,11 @@ import { NEAR_BOTTOM_THRESHOLD } from "@/components/chat/layout-constants";
  *
  * Rules:
  *   - On send:        force isAtBottom=true and scroll to bottom after React commits.
- *   - On content grow: if isAtBottom, scroll to bottom (ResizeObserver).
+ *   - On content grow: if isAtBottom, scroll to bottom (ResizeObserver, grow-only).
  *   - On user scroll up: isAtBottom=false → stop auto-follow.
  *   - On reaching bottom: isAtBottom=true.
+ *   - Composer chrome resize: only follow if already at bottom (never force-follow).
+ *   - Composer focus while reading: pauseAutoFollowIfReading() clears follow.
  */
 export function useChatStickToBottom(
   scrollRef: React.RefObject<HTMLElement | null>,
@@ -78,8 +80,16 @@ export function useChatStickToBottom(
     ): (() => void) | undefined => {
       const el = contentRef.current;
       if (!el) return;
+      let lastHeight = el.getBoundingClientRect().height;
       const observer = new ResizeObserver(() => {
         if (!isAtBottomRef.current) return;
+        const nextHeight = el.getBoundingClientRect().height;
+        // Ignore shrink-only updates (loading slot collapse, etc.) while following.
+        if (nextHeight <= lastHeight) {
+          lastHeight = nextHeight;
+          return;
+        }
+        lastHeight = nextHeight;
         scrollContainerToBottom();
       });
       observer.observe(el);
@@ -87,6 +97,16 @@ export function useChatStickToBottom(
     },
     [scrollContainerToBottom],
   );
+
+  /** Stop auto-follow when the user is reading above the composer overlay. */
+  const pauseAutoFollowIfReading = React.useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (dist >= NEAR_BOTTOM_THRESHOLD) {
+      isAtBottomRef.current = false;
+    }
+  }, [scrollRef]);
 
   /** Called from the scroll container's scroll handler. Returns atBottom. */
   const onScroll = React.useCallback((): boolean => {
@@ -109,5 +129,6 @@ export function useChatStickToBottom(
     observeContentResize,
     onScroll,
     enableAutoFollow,
+    pauseAutoFollowIfReading,
   };
 }
