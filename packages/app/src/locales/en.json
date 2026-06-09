@@ -1,4 +1,54 @@
 {
+  "teamShare": {
+    "skills": "Skills",
+    "mcp": "MCP",
+    "env": "Team Env",
+    "knowledge": "Knowledge",
+    "toggle": "Team shared",
+    "empty": "Nothing shared with the team yet.",
+    "manageInSettings": "Manage in settings",
+    "selectPrompt": "Select a {{section}} item to view it here.",
+    "save": "Save",
+    "saved": "Saved",
+    "saveFailed": "Save failed: {{msg}}",
+    "readFailed": "Could not read file: {{msg}}",
+    "edit": "Edit",
+    "knowledgeRoot": "Root",
+    "scope": {
+      "label": "Scope",
+      "team": "Team"
+    },
+    "mcpDetail": {
+      "server": "MCP Server",
+      "connected": "Connected",
+      "failed": "Needs attention",
+      "idle": "Idle",
+      "toolCount": "{{count}} tools",
+      "resync": "Re-sync",
+      "connection": "Connection",
+      "transport": "Transport",
+      "endpoint": "Endpoint",
+      "command": "Command",
+      "scope": "Scope",
+      "env": "Env",
+      "headers": "Headers",
+      "tools": "Tools",
+      "probeHint": "Re-sync to load tools.",
+      "noTools": "No tools reported.",
+      "config": "Configuration"
+    },
+    "envDetail": {
+      "secret": "Secret",
+      "value": "Value",
+      "encryptedHint": "Team values are encrypted and not shown here. Use Edit to replace.",
+      "details": "Details",
+      "key": "Key",
+      "category": "Category",
+      "createdBy": "Created by",
+      "updatedBy": "Updated by",
+      "updatedAt": "Updated at"
+    }
+  },
   "common": {
     "save": "Save",
     "expand": "Expand",
