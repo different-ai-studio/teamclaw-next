@@ -108,6 +108,27 @@ fn progress(event: &str, message: &str) {
     println!("{}", serde_json::json!({ "event": event, "message": message }));
 }
 
+/// Minimal system PATH for subprocesses spawned from a GUI/sidecar context.
+/// Dock-launched apps (and their sidecars) often inherit an empty PATH; the
+/// official opencode install script calls `mkdir`, `curl`, `unzip`, etc. by name.
+fn minimal_system_path() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
+    } else if cfg!(target_os = "linux") {
+        "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    } else {
+        ""
+    }
+}
+
+fn install_command_path() -> String {
+    let base = minimal_system_path();
+    match std::env::var("PATH") {
+        Ok(existing) if !existing.trim().is_empty() => format!("{existing}:{base}"),
+        _ => base.to_string(),
+    }
+}
+
 /// Install or upgrade opencode to satisfy the required version using opencode's
 /// OFFICIAL installer (installs latest into ~/.opencode/bin). Latest always
 /// satisfies our minimum. On Windows the official path is a package manager, so
@@ -136,12 +157,24 @@ pub fn run_install(force: bool) -> anyhow::Result<()> {
     }
     #[cfg(not(windows))]
     {
-        let status = std::process::Command::new("sh")
+        let output = std::process::Command::new("sh")
             .arg("-c")
             .arg("curl -fsSL https://opencode.ai/install | bash")
-            .status()
+            .env("PATH", install_command_path())
+            .output()
             .map_err(|e| anyhow::anyhow!("failed to run opencode installer: {e}"))?;
-        anyhow::ensure!(status.success(), "opencode installer exited with {status}");
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let detail = if !stderr.is_empty() {
+                stderr
+            } else if !stdout.is_empty() {
+                stdout
+            } else {
+                format!("opencode installer exited with {}", output.status)
+            };
+            anyhow::bail!("{detail}");
+        }
         progress("ok", &format!("opencode installed/upgraded (require >= {want})"));
         Ok(())
     }
@@ -306,6 +339,19 @@ mod tests {
         let p = dir.path().join("opencode");
         std::fs::write(&p, b"x").unwrap();
         assert_eq!(resolve_binary_with(None, Some(p.clone())), p.to_string_lossy().to_string());
+    }
+
+    #[test]
+    fn install_command_path_includes_system_dirs_when_empty() {
+        let prev = std::env::var("PATH").ok();
+        std::env::remove_var("PATH");
+        let p = install_command_path();
+        assert!(p.contains("/usr/bin"), "got {p}");
+        assert!(p.contains("/bin"), "got {p}");
+        match prev {
+            Some(v) => std::env::set_var("PATH", v),
+            None => std::env::remove_var("PATH"),
+        }
     }
 
     #[test]
