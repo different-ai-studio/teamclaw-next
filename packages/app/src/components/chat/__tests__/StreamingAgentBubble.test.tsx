@@ -32,9 +32,8 @@ async function flushStreamReveal() {
 }
 
 describe("StreamingAgentBubble", () => {
-  it("renders planning label for an empty active stream after idle gap", () => {
-    vi.useFakeTimers();
-    const { getByTestId, queryByTestId } = render(
+  it("renders planning dots immediately for an empty active stream", () => {
+    const { getByTestId } = render(
       <StreamingAgentBubble
         entry={{
           sessionId: "s1",
@@ -54,13 +53,8 @@ describe("StreamingAgentBubble", () => {
       />,
     );
 
-    expect(queryByTestId("v2-streaming-planning")).toBeNull();
-    act(() => {
-      vi.advanceTimersByTime(STREAM_AWAITING_NEXT_EVENT_MS);
-    });
     const planning = getByTestId("v2-streaming-planning");
     expect(planning.querySelectorAll(".stream-loading-dot")).toHaveLength(3);
-    vi.useRealTimers();
   });
 
   it("renders planning label after a mid-stream pause", () => {

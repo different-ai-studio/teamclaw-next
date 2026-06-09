@@ -47,6 +47,7 @@ import { ChatInputArea } from "./ChatInputArea";
 import { SessionNoticeList } from "./SessionNoticeList";
 import { useEngagedAgentRuntimeMap } from "@/hooks/use-engaged-agent-runtime-map";
 import { useEngagedAgentUiStates } from "@/hooks/use-engaged-agent-ui-states";
+import { useEnsureEngagedRuntimesOnSessionFocus } from "@/hooks/use-ensure-engaged-runtimes-on-session-focus";
 import { getCurrentDaemonAgent } from "@/lib/daemon-agent-admin";
 import { buildPostSendSessionNotice } from "@/lib/session-agent-notice-text";
 import { useSessionNoticeStore } from "@/stores/session-notice-store";
@@ -534,6 +535,20 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
           id: soleAgent.id,
           displayName: soleAgent.display_name || "AI",
         }]);
+        const teamId =
+          useSessionListStore.getState().rows.find((r) => r.id === activeSessionId)?.team_id ??
+          useCurrentTeamStore.getState().team?.id ??
+          null;
+        if (teamId) {
+          void import("@/lib/teamclaw/ensure-agent-runtime").then(({ ensureAgentRuntimesForSession }) => {
+            void ensureAgentRuntimesForSession({
+              sessionId: activeSessionId,
+              teamId,
+              agentActorIds: [soleAgent.id],
+              reason: "session_auto_engage",
+            });
+          });
+        }
       }
     })();
 
@@ -549,6 +564,11 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const currentTeamId = useCurrentTeamStore(s => s.team?.id ?? null);
   const fallbackTeamId = useSessionListStore(s => s.rows[0]?.team_id ?? null);
   const sheetTeamId = sessionRow?.team_id ?? fallbackTeamId ?? currentTeamId;
+  useEnsureEngagedRuntimesOnSessionFocus({
+    sessionId: activeSessionId,
+    teamId: sheetTeamId,
+    engagedUiEntries,
+  });
   const [localDaemonAgent, setLocalDaemonAgent] = React.useState<AttachedAgent | null>(null);
   const [localDaemonAgentLoading, setLocalDaemonAgentLoading] = React.useState(false);
   const [welcomeSessionStarting, setWelcomeSessionStarting] = React.useState(false);

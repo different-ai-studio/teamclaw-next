@@ -150,8 +150,8 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
 
   const awaitingNextEvent = useStreamAwaitingNextEvent(entry.active, entry.lastUpdate);
   const hasVisibleContent = streamEntryHasVisibleContent(entry);
-  const showPlanningInitial =
-    entry.active && !hasError && !hasVisibleContent && awaitingNextEvent;
+  // Align with agent bar on statusChange ACTIVE — show immediately, no idle debounce.
+  const showPlanningInitial = entry.active && !hasError && !hasVisibleContent;
   const showPlanningAfterPause =
     entry.active && !hasError && hasVisibleContent && awaitingNextEvent;
 
