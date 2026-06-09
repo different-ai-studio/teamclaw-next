@@ -18,7 +18,7 @@ import { TrafficLights } from '@/components/ui/traffic-lights'
 import { useSidebar } from '@/components/ui/sidebar'
 import { getBackend } from '@/lib/backend'
 import { actorAvatarColor } from '@/lib/actor-color'
-import { formatRelativeTime } from '@/lib/date-format'
+import { formatRelativeTimeShort } from '@/lib/date-format'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { useUIStore } from '@/stores/ui'
 import { cn, isTauri } from '@/lib/utils'
@@ -216,7 +216,7 @@ function ActorRowView({ actor, teamId, onViewProfile }: { actor: ActorRow; teamI
   const initial = actor.display_name?.trim().slice(0, 1).toUpperCase() || ''
   const enterActorDraft = useUIStore((s) => s.enterActorDraft)
   const colors = actorAvatarColor(actor.id)
-  const lastActive = actor.last_active_at ? formatRelativeTime(new Date(actor.last_active_at)) : ''
+  const lastActive = actor.last_active_at ? formatRelativeTimeShort(new Date(actor.last_active_at)) : ''
   // Subtitle: an agent shows its Team/Personal visibility; a member shows their
   // team role. Both fall back to the generic type label while the live fetch is
   // still in flight (the offline cache doesn't carry role/visibility).

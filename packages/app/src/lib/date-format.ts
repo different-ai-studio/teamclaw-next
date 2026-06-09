@@ -92,6 +92,38 @@ export function formatSessionDate(dateInput: string | Date): string {
 }
 
 /**
+ * Format relative time as an ultra-compact, locale-aware string suitable for
+ * tight list rows (e.g. "刚刚" / "2分", "now" / "2m" / "3h" / "2d").
+ * Unlike formatRelativeTime ("2 minutes ago"), this stays a few characters wide
+ * so it never crowds out the adjacent name in narrow columns.
+ */
+export const formatRelativeTimeShort = (date: Date | string | number): string => {
+  const lang = getPreferredLanguage();
+  const isZh = lang === 'zh' || lang === 'zh-CN';
+  const dateObj = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date;
+  const diffInSeconds = Math.floor((Date.now() - dateObj.getTime()) / 1000);
+
+  if (diffInSeconds < 60) {
+    return isZh ? '刚刚' : 'now';
+  } else if (diffInSeconds < 3600) {
+    const m = Math.floor(diffInSeconds / 60);
+    return isZh ? `${m}分` : `${m}m`;
+  } else if (diffInSeconds < 86400) {
+    const h = Math.floor(diffInSeconds / 3600);
+    return isZh ? `${h}时` : `${h}h`;
+  } else if (diffInSeconds < 2592000) { // 30 days
+    const d = Math.floor(diffInSeconds / 86400);
+    return isZh ? `${d}天` : `${d}d`;
+  } else if (diffInSeconds < 31536000) { // 365 days
+    const mo = Math.floor(diffInSeconds / 2592000);
+    return isZh ? `${mo}月` : `${mo}mo`;
+  } else {
+    const y = Math.floor(diffInSeconds / 31536000);
+    return isZh ? `${y}年` : `${y}y`;
+  }
+};
+
+/**
  * Format relative time (e.g., "2 hours ago")
  */
 export const formatRelativeTime = (date: Date | string | number): string => {
