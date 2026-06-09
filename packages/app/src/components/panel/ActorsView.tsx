@@ -16,178 +16,24 @@ import { useMemberPreferencesStore } from '@/stores/member-preferences-store'
 import { SidebarCollapseToggle } from '@/components/app-sidebar'
 import { TrafficLights } from '@/components/ui/traffic-lights'
 import { useSidebar } from '@/components/ui/sidebar'
-import { getBackend } from '@/lib/backend'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { formatRelativeTimeShort } from '@/lib/date-format'
-import { useCurrentTeamStore } from '@/stores/current-team'
 import { useUIStore } from '@/stores/ui'
-import { cn, isTauri } from '@/lib/utils'
-import { loadActorsForTeam, upsertActorsBatch, type ActorRow as CachedActorRow } from '@/lib/local-cache'
+import { cn } from '@/lib/utils'
 import { useActorPresenceStore } from '@/stores/actor-presence-store'
+import {
+  useActorDirectory,
+  isActorOnline,
+  type ActorRow,
+} from '@/stores/actor-directory-store'
 
-export type ActorRow = {
-  id: string
-  actor_type: 'member' | 'agent'
-  display_name: string
-  member_status: string | null
-  agent_status: string | null
-  last_active_at: string | null
-  agent_types?: string[] | null
-  default_agent_type?: string | null
-  default_workspace_id?: string | null
-  user_id?: string | null
-  created_at?: string | null
-  // Member: 'owner' | 'admin' | 'member'. Agent: undefined.
-  team_role?: string | null
-  // Agent: 'team' | 'personal'. Member: undefined.
-  visibility?: string | null
-  // Member contact — null for agents and anonymous members. Only carried on the
-  // network directory row (the libsql first-paint cache does not persist it).
-  email?: string | null
-  phone?: string | null
-}
-
-export interface UseActorsForTeamResult {
-  actors: ActorRow[]
-  loading: boolean
-  error: boolean
-  teamId: string | null
-  refetch: () => void
-}
-
-export function useActorsForTeam(): UseActorsForTeamResult {
-  const currentTeamId = useCurrentTeamStore((s) => s.team?.id ?? null)
-  const [fallbackTeamId, setFallbackTeamId] = React.useState<string | null>(null)
-  const [actors, setActors] = React.useState<ActorRow[]>([])
-  const [loading, setLoading] = React.useState(false)
-  const [error, setError] = React.useState(false)
-  const [refreshTick, setRefreshTick] = React.useState(0)
-  const teamId = currentTeamId ?? fallbackTeamId
-
-  React.useEffect(() => {
-    if (currentTeamId) {
-      setFallbackTeamId(null)
-      return
-    }
-    let cancelled = false
-    void (async () => {
-      const session = await getBackend().auth.getSession()
-      if (!session?.user || cancelled) return
-      const actorRow = await getBackend().directory.resolveFirstMemberActorForUser(session.user.id)
-      if (!cancelled) setFallbackTeamId(actorRow?.team_id ?? null)
-    })()
-    return () => { cancelled = true }
-  }, [currentTeamId])
-
-  React.useEffect(() => {
-    if (!teamId) return
-    let cancelled = false
-    setError(false)
-
-    void (async () => {
-      let hadLocal = false
-      if (isTauri()) {
-        const local = await loadActorsForTeam(teamId)
-        if (cancelled) return
-        if (local.length > 0) {
-          // Order the cached rows the SAME way the server (FC listTeamActors) does
-          // — last_active_at desc (nulls last), then display_name asc. Otherwise the
-          // first paint (cache) and the network result would be sorted differently,
-          // making the whole list visibly reshuffle when the fetch lands.
-          const sorted = [...local].sort((a, b) => {
-            const at = a.lastActiveAt
-            const bt = b.lastActiveAt
-            if (at !== bt) {
-              if (!at) return 1
-              if (!bt) return -1
-              return at < bt ? 1 : -1
-            }
-            return a.displayName.localeCompare(b.displayName)
-          })
-          setActors(sorted.map((r): ActorRow => ({
-            id: r.id,
-            actor_type: r.actorType === 'agent' ? 'agent' : 'member',
-            display_name: r.displayName,
-            member_status: r.memberStatus ?? null,
-            agent_status: r.agentStatus ?? null,
-            last_active_at: r.lastActiveAt ?? null,
-            team_role: r.teamRole ?? null,
-            visibility: r.agentVisibility ?? null,
-          })))
-          hadLocal = true
-          setLoading(false)
-        }
-      }
-      if (!hadLocal) setLoading(true)
-
-      let data
-      try {
-        data = await getBackend().actors.listActorDirectory(teamId)
-      } catch (fetchError) {
-        console.error('[useActorsForTeam] fetch failed', fetchError)
-        if (!hadLocal) setError(true)
-        setLoading(false)
-        return
-      }
-      if (cancelled) return
-      const rows = (data ?? []).map((row): ActorRow => ({
-        id: row.id,
-        actor_type: row.actor_type === 'agent' ? 'agent' : 'member',
-        display_name: row.display_name || row.id,
-        member_status: row.member_status ?? null,
-        agent_status: row.agent_status ?? null,
-        last_active_at: row.last_active_at ?? null,
-        agent_types: row.agent_types ?? null,
-        default_agent_type: row.default_agent_type ?? null,
-        default_workspace_id: row.default_workspace_id ?? null,
-        user_id: row.user_id ?? null,
-        created_at: row.created_at ?? null,
-        team_role: row.team_role ?? null,
-        visibility: row.visibility ?? null,
-        email: row.email ?? null,
-        phone: row.phone ?? null,
-      }))
-      setActors(rows)
-      setLoading(false)
-
-      if (isTauri() && rows.length > 0) {
-        const now = new Date().toISOString()
-        const cached: CachedActorRow[] = rows.map((r) => ({
-          id: r.id,
-          teamId,
-          actorType: r.actor_type,
-          displayName: r.display_name,
-          memberStatus: r.member_status,
-          agentStatus: r.agent_status,
-          lastActiveAt: r.last_active_at,
-          teamRole: r.team_role,
-          agentVisibility: r.visibility,
-          createdAt: now,
-          updatedAt: now,
-          syncedAt: now,
-        }))
-        await upsertActorsBatch(cached).catch((e) => {
-          console.warn('[useActorsForTeam] upsertActorsBatch failed', e)
-        })
-      }
-    })()
-
-    return () => { cancelled = true }
-  }, [teamId, refreshTick])
-
-  const refetch = React.useCallback(() => {
-    setRefreshTick((n) => n + 1)
-  }, [])
-
-  return { actors, loading, error, teamId, refetch }
-}
-
-export function isActorOnline(lastActiveAt: string | null): boolean {
-  if (!lastActiveAt) return false
-  const t = Date.parse(lastActiveAt)
-  if (Number.isNaN(t)) return false
-  return Date.now() - t < 5 * 60 * 1000
-}
+// The actor directory now lives in a single reactive store
+// (`@/stores/actor-directory-store`). These re-exports keep the historical
+// import sites (`@/components/panel/ActorsView`) working unchanged.
+export { isActorOnline }
+export type { ActorRow }
+export type { UseActorDirectoryResult as UseActorsForTeamResult } from '@/stores/actor-directory-store'
+export const useActorsForTeam = useActorDirectory
 
 type ActorTypeFilter = 'all' | 'agent' | 'member'
 

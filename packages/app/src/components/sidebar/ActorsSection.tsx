@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useUIStore } from '@/stores/ui'
 import { useMemberPreferencesStore } from '@/stores/member-preferences-store'
+import { useActorPresenceStore } from '@/stores/actor-presence-store'
 import { cn } from '@/lib/utils'
 import { getRecentContactActors } from '@/components/sidebar/sidebar-list-helpers'
 
@@ -50,9 +51,12 @@ export function ActorsSection() {
     return () => { cancelled = true }
   }, [teamId])
 
+  // Live agent presence (online/offline) overlays the server's last_active_at so
+  // an agent appears/reorders in RECENTS the instant it connects.
+  const presence = useActorPresenceStore((s) => s.byActorId)
   const recentActors = React.useMemo(
-    () => getRecentContactActors(actors, defaultAgentId).filter((a) => a.id !== localDaemonAgentId),
-    [actors, defaultAgentId, localDaemonAgentId],
+    () => getRecentContactActors(actors, defaultAgentId, presence).filter((a) => a.id !== localDaemonAgentId),
+    [actors, defaultAgentId, presence, localDaemonAgentId],
   )
 
   // The local daemon's full actor row (for the pinned LocalDaemonRow + its
