@@ -12,6 +12,7 @@ import { getBackend } from "@/lib/backend";
 import type { ActorDirectorySyncRow } from "@/lib/backend/types";
 import * as cache from "@/lib/local-cache";
 import { isTauri } from "@/lib/utils";
+import { notifyActorDirectorySynced } from "@/stores/actor-directory-store";
 
 function mapRow(r: ActorDirectorySyncRow): cache.ActorRow {
   return {
@@ -79,6 +80,12 @@ export async function syncActorsForTeam(
         await cache.softDeleteActor(localRow.id, now);
       }
     }
+  }
+
+  // Tell the reactive directory store fresh data landed so the live UI
+  // (second column + RECENTS) re-reconciles without waiting for a restart.
+  if (rows.length > 0 || opts?.full) {
+    notifyActorDirectorySynced(teamId);
   }
 
   return rows.length;

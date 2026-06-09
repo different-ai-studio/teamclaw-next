@@ -11,9 +11,8 @@ import { useCurrentTeamStore } from '@/stores/current-team'
 import { useSessionListStore } from '@/stores/session-list-store'
 import { useSessionStore } from '@/stores/session'
 import { resolveCurrentMemberActorId } from '@/lib/current-actor'
-import { loadActorsForTeam } from '@/lib/local-cache'
 import { syncActorsForTeam } from '@/lib/sync/actor-sync'
-import { getBackend } from '@/lib/backend'
+import { useActorDirectory } from '@/stores/actor-directory-store'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { createSessionWithFirstMessage } from '@/lib/session-create'
 import { ensureSessionLiveSubscribed } from '@/lib/session-live-subscriptions'
@@ -35,9 +34,10 @@ export function NewSessionDialog() {
   const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
   const currentMemberId = useCurrentTeamStore((s) => s.currentMember?.id ?? null)
 
-  const [candidates, setCandidates] = React.useState<Candidate[]>([])
-  const [loading, setLoading] = React.useState(false)
-  const [loadError, setLoadError] = React.useState(false)
+  // Candidates come from the shared reactive actor directory store (same source
+  // as the second column + RECENTS), so the picker is never stale and reuses the
+  // store's cache-first + network reconcile instead of its own bespoke loader.
+  const { actors, loading, error: loadError, refetch } = useActorDirectory()
   const [picked, setPicked] = React.useState<Set<string>>(new Set())
   const [query, setQuery] = React.useState('')
   const [message, setMessage] = React.useState('')
@@ -47,68 +47,29 @@ export function NewSessionDialog() {
     if (open) setMessage(initialMessage ?? '')
   }, [open, initialMessage])
 
+  // On open: reset the picker, pull a fresh reconcile, and kick a full background
+  // sync (soft-deletes actors that left the team out of the libsql cache; it also
+  // notifies the directory store on completion).
   React.useEffect(() => {
-    if (!open || !teamId) {
-      setCandidates([])
-      setPicked(new Set())
-      setQuery('')
-      return
-    }
-    let cancelled = false
-    setLoading(true)
-    setLoadError(false)
+    if (!open) return
     setPicked(new Set())
+    setQuery('')
+    if (!teamId) return
+    refetch()
+    void syncActorsForTeam(teamId, { full: true }).catch((e) =>
+      console.warn('[NewSessionDialog] full sync failed (non-fatal):', e),
+    )
+  }, [open, teamId, refetch])
 
-    function applyRows(rows: { id: string; actorType: string; displayName: string }[]) {
-      const mapped = rows
-        .filter((r) => r.id !== currentMemberId)
-        .filter((r) => r.actorType === 'member' || r.actorType === 'agent')
-        .map<Candidate>((r) => ({
-          id: r.id,
-          actor_type: r.actorType as 'member' | 'agent',
-          display_name: r.displayName,
-        }))
-      setCandidates(mapped)
-      return mapped.length
-    }
-
-    void (async () => {
-      try {
-        const local = await loadActorsForTeam(teamId)
-        if (cancelled) return
-        const localCount = applyRows(local)
-        setLoading(false)
-
-        const synced = await syncActorsForTeam(teamId, { full: true })
-        if (cancelled) return
-        if (synced === 0 && localCount === 0) {
-          const data = await getBackend().actors.listActorDirectory(teamId)
-          if (cancelled) return
-          const remote = data
-            .filter((r) => r.id !== currentMemberId)
-            .filter((r) => r.actor_type === 'member' || r.actor_type === 'agent')
-            .sort((a, b) => (a.display_name || '').localeCompare(b.display_name || ''))
-            .map<Candidate>((r) => ({
-              id: r.id,
-              actor_type: r.actor_type as 'member' | 'agent',
-              display_name: r.display_name || '',
-            }))
-          setCandidates(remote)
-          return
-        }
-        if (synced === 0) return
-        const fresh = await loadActorsForTeam(teamId)
-        if (cancelled) return
-        applyRows(fresh)
-      } catch (e) {
-        if (cancelled) return
-        console.error('[NewSessionDialog] load failed', e)
-        setLoadError(true)
-        setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [open, teamId, currentMemberId])
+  const candidates = React.useMemo<Candidate[]>(
+    () =>
+      actors
+        .filter((a) => a.id !== currentMemberId)
+        .filter((a) => a.actor_type === 'member' || a.actor_type === 'agent')
+        .map((a) => ({ id: a.id, actor_type: a.actor_type, display_name: a.display_name }))
+        .sort((a, b) => a.display_name.localeCompare(b.display_name)),
+    [actors, currentMemberId],
+  )
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase()

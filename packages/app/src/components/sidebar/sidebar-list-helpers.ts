@@ -1,5 +1,6 @@
 import type { ActorRow } from '@/components/panel/ActorsView'
 import type { IdeaRow } from '@/components/panel/IdeasView'
+import type { ActorPresenceEntry } from '@/stores/actor-presence-store'
 
 export function getTopIdeas(ideas: IdeaRow[]): IdeaRow[] {
   return [...ideas]
@@ -13,11 +14,31 @@ export function getTopIdeas(ideas: IdeaRow[]): IdeaRow[] {
     .slice(0, 10)
 }
 
-export function getRecentContactActors(actors: ActorRow[], defaultAgentId?: string | null): ActorRow[] {
+export function getRecentContactActors(
+  actors: ActorRow[],
+  defaultAgentId?: string | null,
+  presence?: Record<string, ActorPresenceEntry>,
+): ActorRow[] {
+  // Live presence (agents only — members don't publish MQTT state) overlays the
+  // server's `last_active_at`. An online agent counts as "active now" and an
+  // agent whose retained presence we just received counts from that instant —
+  // so RECENTS fills/reorders the moment an agent connects, without waiting for
+  // the next directory reconcile or an app restart.
+  const effectiveLastActive = (actor: ActorRow): string => {
+    const fromDb = actor.last_active_at ?? ''
+    const p = presence?.[actor.id]
+    if (!p) return fromDb
+    if (p.online) return new Date().toISOString()
+    const fromPresence = new Date(p.lastUpdated).toISOString()
+    return fromPresence > fromDb ? fromPresence : fromDb
+  }
+  const isRecent = (actor: ActorRow): boolean =>
+    !!actor.last_active_at || !!presence?.[actor.id]?.online
+
   const recents = [...actors]
-    .filter((actor) => !!actor.last_active_at)
+    .filter(isRecent)
     .sort((a, b) => {
-      const byLastActive = (b.last_active_at ?? '').localeCompare(a.last_active_at ?? '')
+      const byLastActive = effectiveLastActive(b).localeCompare(effectiveLastActive(a))
       if (byLastActive !== 0) return byLastActive
       return a.display_name.localeCompare(b.display_name)
     })
