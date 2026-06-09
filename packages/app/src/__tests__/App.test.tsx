@@ -131,6 +131,7 @@ vi.mock('@/lib/ui-variant', () => ({
   isWorkspaceUIVariant: () => uiVariantState.workspace,
 }))
 vi.mock('@/components/chat/ChatPanel', () => ({ ChatPanel: () => <div data-testid="chat-panel">chat</div> }))
+vi.mock('@/components/chat/NewSessionDialog', () => ({ NewSessionDialog: () => null }))
 vi.mock('@/components/voice/VoiceInputFloatingButton', () => ({ VoiceInputFloatingButton: () => null }))
 vi.mock('@/components/ErrorBoundary', () => ({ ErrorBoundary: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
 vi.mock('@/components/updater/UpdateDialog', () => ({ UpdateDialogContainer: () => null }))
