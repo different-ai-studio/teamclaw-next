@@ -161,7 +161,8 @@ export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get)
       return
     }
     set({ status: 'starting', loaded: true, error: null })
-    const ok = await ensureHealthy()
+    let ok = await ensureHealthy()
+    if (!ok) ok = await ensureHealthy()
     set({
       status: ok ? 'ready' : 'error',
       loaded: true,
