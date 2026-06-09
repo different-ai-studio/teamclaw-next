@@ -72,7 +72,6 @@ import { SetupGuide } from "@/components/SetupGuide";
 import { WelcomeScreen } from "@/components/auth/WelcomeScreen";
 import { hasSeenWelcome, markWelcomeSeen } from "@/stores/deps";
 import { TelemetryConsentDialog } from "@/components/telemetry/TelemetryConsentDialog";
-import { WorkspacePrompt } from "@/components/workspace";
 import { WorkspaceTypeDialog } from "@/components/workspace/WorkspaceTypeDialog";
 import { RuntimeRefreshWorkspaceBanner } from "@/components/workspace/RuntimeRefreshBanner";
 import { useSessionStore } from "@/stores/session";
@@ -704,12 +703,11 @@ function AppContent() {
     void useSessionListStore.getState().load();
   }, []);
 
-  // Hand off from the static #skeleton the moment the workspace resolves — to
-  // real three-column content (workspacePath set) or the workspace picker
-  // (none). AuthGate keeps the skeleton up through every loading gate and lets
-  // App own the final removal, so the cold-start hand-off is skeleton → real UI
-  // with no intermediate blank or spinner. Also stamp first-content for the perf
-  // timeline on the happy path.
+  // Hand off from the static #skeleton the moment the workspace resolves to
+  // real three-column content. AuthGate keeps the skeleton up through every
+  // loading gate and lets App own the final removal, so the cold-start hand-off
+  // is skeleton → real UI with no intermediate blank or spinner. Also stamp
+  // first-content for the perf timeline on the happy path.
   useEffect(() => {
     if (!initialWorkspaceResolved) return;
     removeStartupSkeleton();
@@ -1864,28 +1862,6 @@ function AppContent() {
           </header>
           <div className="flex flex-1 items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        </SidebarInset>
-        {settingsModal}
-      </>
-    );
-  }
-
-  // If no workspace selected, show workspace prompt
-  if (!workspacePath) {
-    return (
-      <>
-        <AppSidebar />
-        <SidebarInset className="flex h-svh flex-col overflow-hidden">
-          <header
-            className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 bg-background px-4"
-            data-tauri-drag-region
-          >
-            {collapsedInsetLeading}
-            <span className="font-medium">{buildConfig.app.name}</span>
-          </header>
-          <div className="flex-1 overflow-hidden">
-            <WorkspacePrompt />
           </div>
         </SidebarInset>
         {settingsModal}

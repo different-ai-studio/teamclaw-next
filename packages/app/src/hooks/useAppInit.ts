@@ -30,7 +30,7 @@ import { useWorkspaceRuntimeRefreshStore } from "@/stores/workspace-runtime-refr
 import { useTeamModeStore } from "@/stores/team-mode";
 import { useOssSyncStore } from "@/stores/oss-sync";
 import { getSkillDirectories, loadAllSkills } from "@/lib/git/skill-loader";
-import { appShortName, TEAM_REPO_DIR } from "@/lib/build-config";
+import { appShortName, DEFAULT_WORKSPACE_PATH, TEAM_REPO_DIR } from "@/lib/build-config";
 import { markStartup } from "@/lib/startup-perf";
 
 export const SKILLS_CHANGED_EVENT = "skills-files-changed";
@@ -106,10 +106,12 @@ export function useWorkspaceInit() {
             }
 
             if (!restored) {
-              console.log("[App] No saved workspace — prompting user to pick one");
+              console.log("[App] No saved workspace — using default:", DEFAULT_WORKSPACE_PATH);
+              await setWorkspace(DEFAULT_WORKSPACE_PATH);
             }
           } catch (error) {
-            console.warn("[App] Workspace restore failed; falling through to picker:", error);
+            console.warn("[App] Workspace restore failed; using default workspace:", error);
+            await setWorkspace(DEFAULT_WORKSPACE_PATH);
           }
         }
       }

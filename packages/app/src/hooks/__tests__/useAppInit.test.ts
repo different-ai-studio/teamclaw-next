@@ -204,7 +204,7 @@ describe('useWorkspaceInit', () => {
     })
   })
 
-  it('clears a saved workspace when it no longer exists in Tauri and leaves the picker to handle it', async () => {
+  it('clears a saved workspace when it no longer exists in Tauri and falls back to default', async () => {
     mockIsTauri.mockReturnValue(true)
     mockExists.mockResolvedValue(false)
     localStorage.setItem('teamclaw-workspace-path', '/tmp/missing-workspace')
@@ -216,23 +216,20 @@ describe('useWorkspaceInit', () => {
       expect(localStorage.getItem('teamclaw-workspace-path')).toBeNull()
       expect(result.current.initialWorkspaceResolved).toBe(true)
     })
-    // The stale saved path is cleared, but we deliberately do NOT fall back
-    // to a default workspace — the user must pick one explicitly so a freshly
-    // joined team doesn't silently land in an unrelated directory.
-    expect(mockSetWorkspace).not.toHaveBeenCalled()
+    expect(mockSetWorkspace).toHaveBeenCalledWith('~/TeamClaw')
   })
 
-  it('does not set a default workspace when nothing is saved (picker handles it)', async () => {
+  it('uses the default workspace when nothing is saved', async () => {
     const { useWorkspaceInit } = await import('@/hooks/useAppInit')
     const { result } = renderHook(() => useWorkspaceInit())
 
     await waitFor(() => {
       expect(result.current.initialWorkspaceResolved).toBe(true)
     })
-    expect(mockSetWorkspace).not.toHaveBeenCalled()
+    expect(mockSetWorkspace).toHaveBeenCalledWith('~/TeamClaw')
   })
 
-  it('does not auto-use the daemon team dir on first launch even when a team is known', async () => {
+  it('uses the default workspace on first launch even when a team is known', async () => {
     mockIsTauri.mockReturnValue(true)
     currentTeamState.team = { id: 'team-xyz' }
 
@@ -242,13 +239,11 @@ describe('useWorkspaceInit', () => {
     await waitFor(() => {
       expect(result.current.initialWorkspaceResolved).toBe(true)
     })
-    // Workspace selection is explicit — a known team must not silently land the
-    // user in ~/.amuxd/teams/<id> without choosing a project directory.
-    expect(mockSetWorkspace).not.toHaveBeenCalled()
+    expect(mockSetWorkspace).toHaveBeenCalledWith('~/TeamClaw')
     expect(mockSetIsNewWorkspace).not.toHaveBeenCalled()
   })
 
-  it('falls back to the picker on first launch in Tauri when no team is known', async () => {
+  it('uses the default workspace on first launch in Tauri when no team is known', async () => {
     mockIsTauri.mockReturnValue(true)
     currentTeamState.team = null
 
@@ -258,7 +253,7 @@ describe('useWorkspaceInit', () => {
     await waitFor(() => {
       expect(result.current.initialWorkspaceResolved).toBe(true)
     })
-    expect(mockSetWorkspace).not.toHaveBeenCalled()
+    expect(mockSetWorkspace).toHaveBeenCalledWith('~/TeamClaw')
   })
 })
 
