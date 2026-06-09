@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import {
   agentIdsNeedingRuntimeWake,
+  hasConnectingEngagedAgent,
   useEnsureEngagedRuntimesOnSessionFocus,
 } from '../use-ensure-engaged-runtimes-on-session-focus'
 import type { EngagedAgentUiEntry } from '../use-engaged-agent-ui-states'
@@ -26,6 +27,18 @@ describe('agentIdsNeedingRuntimeWake', () => {
         entry('a4', 'stale'),
       ]),
     ).toEqual(['a2', 'a3'])
+  })
+
+  it('hasConnectingEngagedAgent is true only for connecting pills', () => {
+    expect(
+      hasConnectingEngagedAgent([
+        entry('a1', 'ready'),
+        entry('a2', 'offline'),
+      ]),
+    ).toBe(false)
+    expect(
+      hasConnectingEngagedAgent([entry('a1', 'connecting')]),
+    ).toBe(true)
   })
 })
 
@@ -153,6 +166,26 @@ describe('useEnsureEngagedRuntimesOnSessionFocus', () => {
       agentActorIds: ['agent-1'],
       reason: 'session_runtime_retry',
     })
+
+    vi.useRealTimers()
+  })
+
+  it('does not retry on an interval while agents stay offline only', () => {
+    vi.useFakeTimers()
+
+    renderHook(() =>
+      useEnsureEngagedRuntimesOnSessionFocus({
+        sessionId: 'session-a',
+        teamId: 'team-1',
+        engagedUiEntries: [entry('agent-1', 'offline')],
+      }),
+    )
+
+    expect(ensureMock).toHaveBeenCalledTimes(1)
+    ensureMock.mockClear()
+
+    vi.advanceTimersByTime(15_000)
+    expect(ensureMock).not.toHaveBeenCalled()
 
     vi.useRealTimers()
   })

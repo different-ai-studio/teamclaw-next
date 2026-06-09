@@ -327,13 +327,16 @@ export function ChatInputArea({
 
   React.useEffect(() => {
     if (!onComposerFocus) return;
-    const editor = rootRef.current?.querySelector<HTMLElement>(
-      '[data-testid="v2-composer-editor"]',
-    );
-    if (!editor) return;
-    const handleFocus = () => onComposerFocus();
-    editor.addEventListener("focus", handleFocus);
-    return () => editor.removeEventListener("focus", handleFocus);
+    const root = rootRef.current;
+    if (!root) return;
+    const handleFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (!target.closest('[data-testid="v2-composer-editor"]')) return;
+      onComposerFocus();
+    };
+    root.addEventListener("focusin", handleFocusIn);
+    return () => root.removeEventListener("focusin", handleFocusIn);
   }, [onComposerFocus]);
 
   React.useEffect(() => {

@@ -11,7 +11,7 @@ import { useV2StreamingStore } from "@/stores/v2-streaming-store";
 import { Button } from "@/components/ui/button";
 import { ChatMessage } from "./ChatMessage";
 import { useChatStickToBottom } from "@/hooks/use-chat-stick-to-bottom";
-import { SAFE_BOTTOM_SPACING } from "./layout-constants";
+import { DEFAULT_INPUT_AREA_HEIGHT, SAFE_BOTTOM_SPACING } from "./layout-constants";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -222,7 +222,7 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
 
     // ── Local state ──────────────────────────────────────────────────────
     const [showScrollButton, setShowScrollButton] = React.useState(false);
-    const [inputAreaHeight, setInputAreaHeight] = React.useState(160);
+    const [inputAreaHeight, setInputAreaHeight] = React.useState(DEFAULT_INPUT_AREA_HEIGHT);
     const [messageAreaWidth, setMessageAreaWidth] = React.useState(0);
     // ── Refs ─────────────────────────────────────────────────────────────
     const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -360,7 +360,7 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
         prevSessionIdRef.current = activeSessionId;
         enableAutoFollow();
         setShowScrollButton(false);
-        setInputAreaHeight(160);
+        setInputAreaHeight(DEFAULT_INPUT_AREA_HEIGHT);
         needsScrollAfterLoadRef.current = true;
       }
     }, [activeSessionId, enableAutoFollow]);

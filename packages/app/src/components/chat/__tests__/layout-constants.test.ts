@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { SAFE_BOTTOM_SPACING, NEAR_BOTTOM_THRESHOLD } from '../layout-constants'
+import { SAFE_BOTTOM_SPACING, NEAR_BOTTOM_THRESHOLD, DEFAULT_INPUT_AREA_HEIGHT } from '../layout-constants'
 
 describe('layout-constants', () => {
   it('SAFE_BOTTOM_SPACING should be at least 32px to prevent overlap', () => {
@@ -17,7 +17,9 @@ describe('layout-constants', () => {
   it('constants should be positive integers', () => {
     expect(SAFE_BOTTOM_SPACING).toBeGreaterThan(0)
     expect(NEAR_BOTTOM_THRESHOLD).toBeGreaterThan(0)
+    expect(DEFAULT_INPUT_AREA_HEIGHT).toBeGreaterThan(0)
     expect(Number.isInteger(SAFE_BOTTOM_SPACING)).toBe(true)
     expect(Number.isInteger(NEAR_BOTTOM_THRESHOLD)).toBe(true)
+    expect(Number.isInteger(DEFAULT_INPUT_AREA_HEIGHT)).toBe(true)
   })
 })

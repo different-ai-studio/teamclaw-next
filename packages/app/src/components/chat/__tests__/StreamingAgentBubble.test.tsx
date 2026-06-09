@@ -57,6 +57,48 @@ describe("StreamingAgentBubble", () => {
     expect(planning.querySelectorAll(".stream-loading-dot")).toHaveLength(3);
   });
 
+  it("keeps planning dots visible for tool-first streams before text arrives", () => {
+    const { getByTestId } = render(
+      <StreamingAgentBubble
+        entry={{
+          sessionId: "s1",
+          actorId: "agent-a",
+          outputText: "",
+          thinkingText: "",
+          parts: [
+            {
+              id: "tool-1",
+              type: "tool-call",
+              toolCall: {
+                id: "tool-1",
+                name: "bash",
+                status: "waiting",
+                args: { command: "ls" },
+              },
+            },
+          ],
+          toolCalls: [
+            {
+              id: "tool-1",
+              name: "bash",
+              status: "waiting",
+              args: { command: "ls" },
+            },
+          ],
+          planEntries: [],
+          pendingPermission: null,
+          errorMessage: null,
+          errorDetails: null,
+          lastUpdate: Date.now(),
+          active: true,
+          streamId: "s1::agent-a::stream-1",
+        }}
+      />,
+    );
+
+    expect(getByTestId("v2-streaming-planning").querySelectorAll(".stream-loading-dot")).toHaveLength(3);
+  });
+
   it("renders planning label after a mid-stream pause", () => {
     vi.useFakeTimers();
     const { getByTestId, queryByTestId, rerender } = render(

@@ -145,37 +145,17 @@ export function streamEntryHasVisibleContent(
   });
 }
 
-function toolCallRevision(toolCall: unknown): string {
-  if (!toolCall || typeof toolCall !== "object") return "tool:unknown";
-  const tc = toolCall as Record<string, unknown>;
-  const result = tc.result;
-  const resultLen = typeof result === "string" ? result.length : 0;
-  return [
-    "tool",
-    String(tc.id ?? ""),
-    String(tc.status ?? ""),
-    String(resultLen),
-  ].join(":");
-}
-
-/** Revision key including tool lifecycle — use for diagnostics only. */
-export function streamContentRevision(entry: StreamVisibilityEntry): string {
-  const partSigs = (entry.parts ?? []).map((part) => {
-    if (part.type === "tool-call" && part.toolCall) {
-      return toolCallRevision(part.toolCall);
-    }
-    const text = part.text ?? part.content ?? "";
-    return `${part.type ?? "part"}:${text.length}:${text.slice(-48)}`;
+/** Text/thinking transcript only — excludes tool calls and permission metadata. */
+export function streamTranscriptHasText(
+  entry: StreamVisibilityEntry | undefined,
+): boolean {
+  if (!entry) return false;
+  if (entry.outputText?.trim()) return true;
+  if (entry.thinkingText?.trim()) return true;
+  return (entry.parts ?? []).some((part) => {
+    if (part.type === "tool-call") return false;
+    return Boolean(part.text?.trim() || part.content?.trim());
   });
-  const fallbackTools = (entry.toolCalls ?? []).map((toolCall) =>
-    toolCallRevision(toolCall),
-  );
-  return [
-    `out:${entry.outputText?.length ?? 0}`,
-    `think:${entry.thinkingText?.length ?? 0}`,
-    ...partSigs,
-    ...fallbackTools,
-  ].join("\0");
 }
 
 function textPartRevision(part: {

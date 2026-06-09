@@ -1,6 +1,6 @@
 import * as React from "react";
 
-/** After this gap without a new ACP delta (`lastUpdate`), show the planning hint. */
+/** After this gap without a new transcript revision, show the planning hint. */
 export const STREAM_AWAITING_NEXT_EVENT_MS = 500;
 
 /** True when a live stream is active but no content envelope has arrived recently. */

@@ -32,6 +32,9 @@
  */
 export const SAFE_BOTTOM_SPACING = 32;
 
+/** Default composer height before ResizeObserver reports the real value. */
+export const DEFAULT_INPUT_AREA_HEIGHT = 160;
+
 /**
  * Threshold for "near bottom" detection in scroll behavior.
  * Used to determine if user has scrolled up or is at the bottom.

@@ -11,7 +11,7 @@ import {
   normalizeToolResultEvent,
   normalizeToolUseEvent,
   rememberLiveEventId,
-  streamContentRevision,
+  streamTranscriptHasText,
   streamTranscriptRevision,
   streamEntryHasVisibleContent,
 } from "@/lib/live-agent-stream";
@@ -208,16 +208,23 @@ describe("live agent stream event helpers", () => {
     ).toBe(true);
   });
 
-  it("streamContentRevision ignores permission-only metadata changes", () => {
-    const base = {
-      outputText: "",
-      thinkingText: "",
-      toolCalls: [{ id: "tool-1", name: "bash", status: "completed" }],
-      parts: [{ type: "tool-call", toolCall: { id: "tool-1", status: "completed" } }],
-    };
-    expect(streamContentRevision(base)).toBe(
-      streamContentRevision({ ...base, pendingPermission: { requestId: "perm-1" } }),
-    );
+  it("streamTranscriptHasText ignores tool-only streams", () => {
+    expect(
+      streamTranscriptHasText({
+        outputText: "",
+        thinkingText: "",
+        toolCalls: [{ id: "tool-1" }],
+        parts: [{ type: "tool-call", toolCall: { id: "tool-1" } }],
+      }),
+    ).toBe(false);
+    expect(
+      streamTranscriptHasText({
+        outputText: "",
+        thinkingText: "",
+        toolCalls: [],
+        parts: [{ type: "text", text: "hello" }],
+      }),
+    ).toBe(true);
   });
 
   it("streamTranscriptRevision ignores tool status changes", () => {

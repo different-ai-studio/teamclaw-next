@@ -2,7 +2,7 @@ import * as React from "react";
 import { AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
-  streamEntryHasVisibleContent,
+  streamTranscriptHasText,
   streamTranscriptRevision,
 } from "@/lib/live-agent-stream";
 import type { AgentStreamEntry } from "@/stores/v2-streaming-store";
@@ -155,7 +155,8 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
     entry.active,
     transcriptRevision,
   );
-  const hasVisibleContent = streamEntryHasVisibleContent(entry);
+
+  const hasTranscriptText = streamTranscriptHasText(entry);
 
   const [pauseDotsLatched, setPauseDotsLatched] = React.useState(false);
   React.useEffect(() => {
@@ -166,17 +167,17 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
       setPauseDotsLatched(false);
       return;
     }
-    if (awaitingNextEvent && hasVisibleContent) {
+    if (awaitingNextEvent && hasTranscriptText) {
       setPauseDotsLatched(true);
     }
-  }, [entry.active, awaitingNextEvent, hasVisibleContent]);
+  }, [entry.active, awaitingNextEvent, hasTranscriptText]);
 
   // Align with agent bar on statusChange ACTIVE — show immediately, no idle debounce.
-  const showPlanningInitial = entry.active && !hasError && !hasVisibleContent;
+  const showPlanningInitial = entry.active && !hasError && !hasTranscriptText;
   const showPlanningAfterPause =
     entry.active &&
     !hasError &&
-    hasVisibleContent &&
+    hasTranscriptText &&
     (awaitingNextEvent || pauseDotsLatched);
 
   if (
@@ -202,12 +203,12 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
       <ActorLabel senderActorId={entry.actorId} isUser={false} />
       <Message from="assistant">
         <div className="min-w-0 flex-1">
-          {entry.active && !hasError && !hasVisibleContent ? (
+          {showPlanningInitial ? (
             <div
               className="flex h-[22px] items-center"
               data-testid="v2-streaming-planning-slot"
             >
-              {showPlanningInitial ? <AgentStreamLoadingDots /> : null}
+              <AgentStreamLoadingDots />
             </div>
           ) : null}
 
@@ -255,7 +256,7 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
             <StreamRevealedResponse text={entry.outputText} reveal={entry.active} />
           )}
 
-          {entry.active && hasVisibleContent ? (
+          {entry.active && hasTranscriptText ? (
             <div
               className="mt-1.5 flex h-[22px] items-center"
               data-testid="v2-streaming-planning-pause-slot"

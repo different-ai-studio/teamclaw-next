@@ -11,8 +11,14 @@ export function agentIdsNeedingRuntimeWake(
     .map((e) => e.agent.id)
 }
 
+export function hasConnectingEngagedAgent(
+  entries: ReadonlyArray<EngagedAgentUiEntry>,
+): boolean {
+  return entries.some((e) => e.uiState === 'connecting')
+}
+
 const FOCUS_ENSURE_MIN_INTERVAL_MS = 3_000
-/** Retry while pill stays connecting/offline on the same session (idle runtime drop). */
+/** Retry while pill stays connecting on the same session (idle runtime drop). */
 const STALE_RUNTIME_RETRY_MS = 15_000
 
 export function useEnsureEngagedRuntimesOnSessionFocus(args: {
@@ -35,7 +41,7 @@ export function useEnsureEngagedRuntimesOnSessionFocus(args: {
   )
 
   const tryEnsure = React.useCallback(
-    (reason: string, opts?: { bypassThrottle?: boolean }) => {
+    (reason: string) => {
       const sessionId = args.sessionId?.trim() || null
       const teamId = args.teamId?.trim() || null
       if (!sessionId || !teamId) return
@@ -47,7 +53,6 @@ export function useEnsureEngagedRuntimesOnSessionFocus(args: {
       const now = Date.now()
       const last = lastEnsureRef.current
       if (
-        !opts?.bypassThrottle &&
         last &&
         last.key === key &&
         now - last.at < FOCUS_ENSURE_MIN_INTERVAL_MS
@@ -83,12 +88,12 @@ export function useEnsureEngagedRuntimesOnSessionFocus(args: {
     const sessionId = args.sessionId?.trim() || null
     const teamId = args.teamId?.trim() || null
     if (!sessionId || !teamId) return
-    if (agentIdsNeedingRuntimeWake(args.engagedUiEntries).length === 0) return
+    if (!hasConnectingEngagedAgent(args.engagedUiEntries)) return
 
     const timer = window.setInterval(() => {
       tryEnsure('session_runtime_retry')
     }, STALE_RUNTIME_RETRY_MS)
 
     return () => window.clearInterval(timer)
-  }, [args.sessionId, args.teamId, engagedSignature, args.engagedUiEntries, tryEnsure])
+  }, [args.sessionId, args.teamId, engagedSignature, tryEnsure])
 }

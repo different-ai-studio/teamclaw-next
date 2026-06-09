@@ -219,17 +219,17 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // above the prompt input (v1 style) rather than inline in the message
   // bubble. Render only the most-recently-updated stream's plan to avoid
   // stacking plans from multiple engaged agents — typical sessions have
-  // one planner at a time. Mapped to the Todo shape the TodoList consumes;
-  // status/content carry over, priority is dropped (Todo has no slot).
-  const planTodos = React.useMemo(() => {
+  // one planner at a time. Mapped to the Todo shape the TodoList consumes.
+  const planTodos = React.useMemo((): Todo[] => {
     const mapPlan = (
       entries: StreamingPlanEntry[],
       actorId: string,
-    ): Array<{ id: string; status: string; content: string }> =>
+    ): Todo[] =>
       entries.map((e, i) => ({
         id: `plan:${actorId}:${i}`,
         status: e.status,
         content: e.content,
+        priority: e.priority,
       }));
 
     const latestWithPlan = [...v2Streams]
@@ -2195,6 +2195,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             onHeightChange={handleInputHeightChange}
             onComposerFocus={handleComposerFocus}
             bottomOffsetPx={terminalBottomOffset}
+            stackTodos={hasComposerPlanData ? (combinedTodos as Todo[]) : []}
             stackQueue={hasComposerPlanData ? messageQueue : []}
             planSlotHidden={hasComposerPlanData && !showInlineTodo}
           />
