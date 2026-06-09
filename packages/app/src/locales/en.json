@@ -318,8 +318,8 @@
     "inputPlaceholderDescription": "Add a description...",
     "inputPlaceholderMention": "Mention with @, reference files with #...",
     "permissionMode": {
-      "default": "Default permissions",
-      "fullAccess": "Full access"
+      "default": "Default Permissions",
+      "fullAccess": "Full Access"
     },
     "mentionPopoverTitle": "Mention people or agents",
     "mentionEmptyState": "No one to mention in this session yet",

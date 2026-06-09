@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildEmptyThreadStarters,
   formatEmptyThreadRosterNames,
+  isSoloAgentSession,
   resolveEmptyThreadRoutingKind,
   type EmptyThreadParticipant,
 } from '../session-empty-thread-starters'
@@ -28,6 +29,23 @@ const member = (id: string, name: string): EmptyThreadParticipant => ({
 })
 
 describe('session-empty-thread-starters', () => {
+  it('isSoloAgentSession is true for human + agent pair', () => {
+    expect(isSoloAgentSession([you(), agent('a1', 'MAC')])).toBe(true)
+  })
+
+  it('isSoloAgentSession is false when a second human joins', () => {
+    expect(isSoloAgentSession([you(), member('m1', 'Matt'), agent('a1', 'MAC')])).toBe(false)
+  })
+
+  it('isSoloAgentSession accepts session member rows with actor_type', () => {
+    expect(
+      isSoloAgentSession([
+        { actor_type: 'member' },
+        { actor_type: 'agent' },
+      ]),
+    ).toBe(true)
+  })
+
   it('resolveEmptyThreadRoutingKind detects solo agent pair', () => {
     expect(resolveEmptyThreadRoutingKind([you(), agent('a1', 'MAC')])).toBe('soloAgent')
   })

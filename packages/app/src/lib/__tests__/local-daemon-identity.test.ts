@@ -3,6 +3,7 @@ import {
   __resetLocalDaemonIdentityForTest,
   isSupersededLocalAgent,
   noteLocalDaemonActorId,
+  wasEverLocalDaemonIdentity,
 } from '@/lib/local-daemon-identity'
 import { appShortName } from '@/lib/build-config'
 
@@ -24,5 +25,28 @@ describe('local-daemon-identity', () => {
     noteLocalDaemonActorId('old-macpro')
     noteLocalDaemonActorId('new-local')
     expect(isSupersededLocalAgent('old-macpro')).toBe(true)
+  })
+
+  it('wasEverLocalDaemonIdentity is false for remote teammate agents', () => {
+    localStorage.setItem(STORAGE_KEY, 'invitee-local')
+    noteLocalDaemonActorId('invitee-local')
+    expect(wasEverLocalDaemonIdentity('creator-gg-bot')).toBe(false)
+  })
+
+  it('wasEverLocalDaemonIdentity is true for superseded local ids', () => {
+    noteLocalDaemonActorId('old-macpro')
+    noteLocalDaemonActorId('new-local')
+    expect(wasEverLocalDaemonIdentity('old-macpro')).toBe(true)
+  })
+
+  it('wasEverLocalDaemonIdentity catches transition window before superseded set', () => {
+    localStorage.setItem(STORAGE_KEY, 'old-macpro')
+    noteLocalDaemonActorId('new-local')
+    expect(wasEverLocalDaemonIdentity('old-macpro')).toBe(true)
+  })
+
+  it('wasEverLocalDaemonIdentity is false for current local id', () => {
+    noteLocalDaemonActorId('current-local')
+    expect(wasEverLocalDaemonIdentity('current-local')).toBe(false)
   })
 })

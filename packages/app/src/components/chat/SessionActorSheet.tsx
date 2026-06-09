@@ -751,19 +751,12 @@ export function SessionActorPanel({ sessionId, teamId }: SessionActorPanelProps)
   return (
     <>
       <div className="flex h-full flex-col bg-paper text-foreground">
-        <div className="flex h-[46px] shrink-0 items-center justify-between border-b border-border px-[22px]">
+        <div className="flex h-[46px] shrink-0 items-center border-b border-border px-[22px]">
           <div className="flex items-baseline gap-3">
             <h2 className="text-[13.5px] font-bold">{t('chat.actorSheet.title', '参与者')}</h2>
             <span className="font-mono text-[12px] text-faint">·</span>
             <span className="font-mono text-[12px] text-faint">{rows.length}</span>
           </div>
-          <button
-            type="button"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-selected/70 hover:text-foreground"
-            aria-label={t('common.close', 'Close')}
-          >
-            <X className="h-4 w-4" />
-          </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
             {loading && (

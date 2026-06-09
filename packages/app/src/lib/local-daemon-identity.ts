@@ -48,6 +48,25 @@ export function isSupersededLocalAgent(agentId: string): boolean {
   return supersededLocalActorIds.has(agentId)
 }
 
+/**
+ * True when agentId was a prior local amuxd actor identity on THIS client.
+ * Gates stale/rebind UX — must not be true for remote teammates' agents.
+ */
+export function wasEverLocalDaemonIdentity(agentId: string): boolean {
+  const id = agentId.trim()
+  if (!id) return false
+
+  const current = getKnownLocalDaemonActorId()
+  if (current && id === current) return false
+
+  if (isSupersededLocalAgent(id)) return true
+
+  const persisted = readPersistedLocalDaemonActorId()
+  if (persisted && persisted === id && current && current !== id) return true
+
+  return false
+}
+
 /** Latest local daemon actor id observed this app session (HTTP /v1/info). */
 export function getKnownLocalDaemonActorId(): string | null {
   return lastKnownLocalActorId

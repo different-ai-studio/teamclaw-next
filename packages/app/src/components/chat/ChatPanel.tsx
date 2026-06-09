@@ -41,6 +41,7 @@ import { LocalAgentWelcomeEmptyState } from "./LocalAgentWelcomeEmptyState";
 import { SessionEmptyThreadState } from "./SessionEmptyThreadState";
 import { createQuickDaemonSession } from "@/lib/quick-daemon-session";
 import { createQuickEmptySession } from "@/lib/quick-empty-session";
+import { isSoloAgentSession } from "@/lib/session-empty-thread-starters";
 
 import type { Message } from "@/stores/session";
 import { ChatInputArea } from "./ChatInputArea";
@@ -503,8 +504,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   }, [v2Streams, engagedAgents]);
 
   // Existing sessions can be reopened after a reload with no in-memory
-  // engaged agents selected. If there is exactly one agent participant,
-  // route messages to it automatically so sends still trigger a reply.
+  // engaged agents selected. Solo sessions (2 participants: 1 human + 1 agent)
+  // auto-engage the agent pill so sends still trigger a reply.
   // Runs at most once per sessionId per app lifetime so that explicitly
   // removing a mention ("Remove mention" in the agent pill dropdown) isn't
   // immediately undone by this effect re-firing on engagedAgents.length 1→0.
@@ -528,9 +529,8 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       }
       if (cancelled) return;
 
-      const agentActors = actors.filter((row) => isAgentActorType(row.actor_type));
-      if (agentActors.length === 1) {
-        const soleAgent = agentActors[0];
+      if (isSoloAgentSession(actors)) {
+        const soleAgent = actors.find((row) => isAgentActorType(row.actor_type))!;
         useEngagedAgentStore.getState().setAgents(activeSessionId, [{
           id: soleAgent.id,
           displayName: soleAgent.display_name || "AI",
