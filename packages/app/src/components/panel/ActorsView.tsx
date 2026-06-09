@@ -218,14 +218,15 @@ function ActorRowView({ actor, teamId, onViewProfile }: { actor: ActorRow; teamI
   const colors = actorAvatarColor(actor.id)
   const lastActive = actor.last_active_at ? formatRelativeTimeShort(new Date(actor.last_active_at)) : ''
   // Subtitle: an agent shows its Team/Personal visibility; a member shows their
-  // team role. Both fall back to the generic type label while the live fetch is
-  // still in flight (the offline cache doesn't carry role/visibility).
+  // team role. An agent with unknown visibility (offline-cache first paint, which
+  // doesn't carry it) shows nothing — the "Agent" pill next to the name already
+  // says it's an agent, so repeating "Agent" here is redundant.
   const subtitle = isAgent
     ? actor.visibility === 'personal'
       ? t('actors.visibility.personal', 'Personal')
       : actor.visibility === 'team'
         ? t('actors.visibility.team', 'Team')
-        : t('actors.type.agent', 'Agent')
+        : ''
     : actor.team_role
       ? t(`actors.role.${actor.team_role}`, actor.team_role)
       : t('actors.type.member', 'Team')
@@ -263,13 +264,9 @@ function ActorRowView({ actor, teamId, onViewProfile }: { actor: ActorRow; teamI
               )}
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[11.5px] leading-[18px] text-muted-foreground">
-              <span className="truncate">{subtitle}</span>
-              {status && (
-                <>
-                  <span className="text-faint">·</span>
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-faint" aria-label={status} />
-                </>
-              )}
+              {subtitle && <span className="truncate">{subtitle}</span>}
+              {subtitle && status && <span className="text-faint">·</span>}
+              {status && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-faint" aria-label={status} />}
             </div>
           </div>
           {lastActive && <span className="ml-2 shrink-0 font-mono text-[11.5px] text-faint">{lastActive}</span>}
