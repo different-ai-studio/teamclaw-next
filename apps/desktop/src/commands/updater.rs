@@ -15,7 +15,7 @@ use tauri::{AppHandle, Emitter, Runtime};
 
 const DEFAULT_REPO_OWNER: &str = "different-ai-studio";
 const DEFAULT_REPO_NAME: &str = "teamclaw";
-const DEFAULT_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQzODk5QzIxMUI4RkY3OTkKUldTWjk0OGJJWnlKUTlnZVdEaUsyUGJ4WFpaYmlQZW03NGdlNVdyUlRMNGtKVVBKeTk3NEYwZXAK";
+const DEFAULT_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFEMDg3REY5MEI2RDAyMzMKUldRekFtMEwrWDBJSFhTdHYvbStkclEvTEVRNFlpZExxSHNTSTA2V2ZHS0xPUEZ4WnF5d2RxQ0gK";
 const APP_USER_AGENT: &str = concat!("teamclaw-updater/", env!("CARGO_PKG_VERSION"));
 
 fn get_updater_endpoint() -> Option<&'static str> {
