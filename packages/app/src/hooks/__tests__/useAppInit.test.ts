@@ -15,7 +15,6 @@ const {
   mockHydrateFromCache,
   mockLoadPersonal,
   mockLoadTeamForCurrentTeam,
-  mockSetIsNewWorkspace,
 } = vi.hoisted(() => ({
   mockSetWorkspace: vi.fn(),
   mockSetWorkspaceBootstrapped: vi.fn(),
@@ -29,7 +28,6 @@ const {
   mockHydrateFromCache: vi.fn(),
   mockLoadPersonal: vi.fn(),
   mockLoadTeamForCurrentTeam: vi.fn(),
-  mockSetIsNewWorkspace: vi.fn(),
 }))
 
 vi.mock('@/lib/utils', () => ({
@@ -55,7 +53,6 @@ const workspaceState = {
   setWorkspace: mockSetWorkspace,
   setWorkspaceBootstrapped: mockSetWorkspaceBootstrapped,
   setWorkspaceReady: mockSetWorkspaceReady,
-  setIsNewWorkspace: mockSetIsNewWorkspace,
   // useAppInit selects these runtime-readiness actions; the daemon-control
   // migration replaced OpenCode lifecycle selectors with these.
   setOpenCodeBootstrapped: vi.fn(),
@@ -245,7 +242,6 @@ describe('useWorkspaceInit', () => {
     // Workspace selection is explicit — a known team must not silently land the
     // user in ~/.amuxd/teams/<id> without choosing a project directory.
     expect(mockSetWorkspace).not.toHaveBeenCalled()
-    expect(mockSetIsNewWorkspace).not.toHaveBeenCalled()
   })
 
   it('falls back to the picker on first launch in Tauri when no team is known', async () => {

@@ -537,14 +537,6 @@
     "webModeAccessTitle": "访问检查",
     "webModeAccessBody": "继续之前，请确认 Agent 运行时对这个目录有访问权限。",
     "enterPath": "输入工作区路径",
-    "typeDialog": {
-      "title": "你打算怎么使用这个工作区？",
-      "subtitle": "你随时可以在设置中更改",
-      "personal": "个人使用",
-      "personalDesc": "独立工作，无需同步",
-      "team": "团队共享",
-      "teamDesc": "使用团队共享目录，同步共享资源"
-    },
     "prompt": {
       "needShareInitTitle": "需要在团队设置中完成共享目录初始化",
       "needShareInitDesc": "当前工作区还没有 teamclaw-team/，请进入设置 → 团队完成设置。",
