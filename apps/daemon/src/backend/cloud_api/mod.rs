@@ -2094,4 +2094,95 @@ mod tests {
         let cfg = backend.team_share_config("team-1").await.unwrap();
         assert_eq!(cfg.mode, None);
     }
+
+    #[test]
+    fn terminal_refresh_status_only_for_400_and_401() {
+        use reqwest::StatusCode;
+        assert!(is_terminal_refresh_status(StatusCode::UNAUTHORIZED));
+        assert!(is_terminal_refresh_status(StatusCode::BAD_REQUEST));
+        // Transient / server-side failures must not latch the terminal flag.
+        assert!(!is_terminal_refresh_status(StatusCode::INTERNAL_SERVER_ERROR));
+        assert!(!is_terminal_refresh_status(StatusCode::SERVICE_UNAVAILABLE));
+        assert!(!is_terminal_refresh_status(StatusCode::TOO_MANY_REQUESTS));
+        assert!(!is_terminal_refresh_status(StatusCode::FORBIDDEN));
+    }
+
+    #[tokio::test]
+    async fn refresh_rejected_with_401_latches_terminal_auth() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/auth/refresh"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "error": { "code": "missing_auth", "message": "Token refresh failed: refresh_token_not_found" }
+            })))
+            .mount(&server)
+            .await;
+
+        let backend = CloudApiBackend::new(config(&server));
+        // Healthy until the first refusal.
+        assert_eq!(
+            backend.cloud_auth_health(),
+            Some(CloudAuthSnapshot { terminal_failure: false })
+        );
+
+        assert!(backend.access_token().await.is_err());
+        assert_eq!(
+            backend.cloud_auth_health(),
+            Some(CloudAuthSnapshot { terminal_failure: true })
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_5xx_does_not_latch_terminal_auth() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/auth/refresh"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+
+        let backend = CloudApiBackend::new(config(&server));
+        assert!(backend.access_token().await.is_err());
+        // A transient server error must leave the session presumed-recoverable.
+        assert_eq!(
+            backend.cloud_auth_health(),
+            Some(CloudAuthSnapshot { terminal_failure: false })
+        );
+    }
+
+    #[tokio::test]
+    async fn successful_refresh_clears_terminal_latch() {
+        let server = MockServer::start().await;
+        // First refresh is rejected (latches terminal); subsequent ones succeed
+        // (mirrors the desktop re-onboarding the daemon with fresh credentials).
+        Mock::given(method("POST"))
+            .and(path("/v1/auth/refresh"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "error": { "message": "refresh_token_not_found" }
+            })))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/auth/refresh"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(refresh_ok()))
+            .with_priority(2)
+            .mount(&server)
+            .await;
+
+        let backend = CloudApiBackend::new(config(&server));
+        assert!(backend.access_token().await.is_err());
+        assert_eq!(
+            backend.cloud_auth_health(),
+            Some(CloudAuthSnapshot { terminal_failure: true })
+        );
+
+        // Next refresh succeeds and clears the latch.
+        assert_eq!(backend.access_token().await.unwrap(), "access-token");
+        assert_eq!(
+            backend.cloud_auth_health(),
+            Some(CloudAuthSnapshot { terminal_failure: false })
+        );
+    }
 }

@@ -210,7 +210,7 @@ mod tests {
         };
         let meta = metadata("actor-test".into(), "test");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None)
+        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None, None)
             .await
             .unwrap();
         let url = format!("http://{}/v1/healthz", handle.local_addr);
@@ -239,6 +239,7 @@ mod tests {
             None,
             None,
             test_dispatcher(),
+            None,
             None,
         )
         .await
@@ -286,6 +287,7 @@ mod tests {
             None,
             None,
             test_dispatcher(),
+            None,
             None,
         )
         .await
@@ -473,6 +475,7 @@ mod tests {
             None,
             test_dispatcher(),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -539,7 +542,7 @@ mod tests {
         };
         let meta = metadata("actor-x".into(), "test");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None)
+        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None, None)
             .await
             .unwrap();
         let base = format!("http://{}", handle.local_addr);
@@ -610,7 +613,7 @@ mod tests {
         };
         let meta = metadata("actor-abc".into(), "cloud_api");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None)
+        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None, None)
             .await
             .unwrap();
         let url = format!("http://{}/v1/info", handle.local_addr);
@@ -701,6 +704,7 @@ mod tests {
             None,
             None,
             test_dispatcher(),
+            None,
             None,
         )
             .await
