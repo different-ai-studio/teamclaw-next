@@ -24,7 +24,7 @@ pub struct InitOutcome {
 pub async fn run(raw_url: &str, config_path: Option<&Path>) -> Result<InitOutcome> {
     let invite = invite_url::parse(raw_url)?;
 
-    let cloud_url = resolve_cloud_api_url();
+    let cloud_url = resolve_cloud_api_url(invite.cloud_api_url.as_deref());
     let claim = bootstrap_claim_invite(&cloud_url, &invite.token)
         .await
         .map_err(actionable_invite_claim_error)?;
@@ -109,18 +109,41 @@ async fn bootstrap_claim_invite(cloud_url: &str, token: &str) -> Result<ClaimRes
         .with_context(|| "decode claim response")
 }
 
-fn resolve_cloud_api_url() -> String {
-    if let Ok(url) = std::env::var("TEAMCLAW_CLOUD_API_URL") {
-        let trimmed = url.trim();
-        if !trimmed.is_empty() {
-            return trimmed.to_string();
-        }
-    }
+/// Resolve the Cloud API endpoint `amuxd init` POSTs `/v1/invites/claim` to.
+///
+/// Precedence (first non-empty wins):
+///  1. `TEAMCLAW_CLOUD_API_URL` process env — explicit operator/self-test escape
+///     hatch. The production sidecar runs without it, so it never shadows (2).
+///  2. `invite_override` — the `?cloud_api_url=` the inviter (desktop) baked into
+///     the invite, so the daemon follows the app's build/runtime endpoint choice
+///     rather than the hardcoded default below.
+///  3. `apps/daemon/.env` `TEAMCLAW_CLOUD_API_URL` — local dev fallback.
+///  4. `DEFAULT_CLOUD_API_URL` (production `https://cloud.ucar.cc`).
+fn resolve_cloud_api_url(invite_override: Option<&str>) -> String {
+    let env_override = std::env::var("TEAMCLAW_CLOUD_API_URL").ok();
     let dotenv_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(".env");
-    if let Ok(text) = std::fs::read_to_string(&dotenv_path) {
-        if let Some(value) = read_dotenv_value(&text, "TEAMCLAW_CLOUD_API_URL") {
-            if !value.is_empty() {
-                return value;
+    let dotenv_override = std::fs::read_to_string(&dotenv_path)
+        .ok()
+        .and_then(|text| read_dotenv_value(&text, "TEAMCLAW_CLOUD_API_URL"));
+    pick_cloud_api_url(
+        env_override.as_deref(),
+        invite_override,
+        dotenv_override.as_deref(),
+    )
+}
+
+/// Pure precedence resolver (see [`resolve_cloud_api_url`]); split out so the
+/// ordering is unit-testable without touching process env or the filesystem.
+fn pick_cloud_api_url(
+    env_override: Option<&str>,
+    invite_override: Option<&str>,
+    dotenv_override: Option<&str>,
+) -> String {
+    for candidate in [env_override, invite_override, dotenv_override] {
+        if let Some(value) = candidate {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
             }
         }
     }
@@ -242,6 +265,7 @@ mod tests {
             &ParsedInvite {
                 token: "tok".into(),
                 broker_url: Some("mqtts://broker.example.com:8883".into()),
+                cloud_api_url: None,
             },
         );
         assert_eq!(cfg.team_id.as_deref(), Some("team-1"));
@@ -262,6 +286,7 @@ mod tests {
             &ParsedInvite {
                 token: "tok".into(),
                 broker_url: None,
+                cloud_api_url: None,
             },
         );
         assert_eq!(cfg.mqtt.broker_url, "");
@@ -293,6 +318,7 @@ mod tests {
             &ParsedInvite {
                 token: "tok".into(),
                 broker_url: Some("mqtts://broker.example.com:8883".into()),
+                cloud_api_url: None,
             },
         );
         assert_eq!(cfg.actor.id, "actor-2");
@@ -309,6 +335,40 @@ mod tests {
         let s = err.to_string();
         assert!(s.contains("Kind = Agent"));
         assert!(s.contains("member claim requires authentication"));
+    }
+
+    #[test]
+    fn cloud_api_url_precedence_env_over_invite_over_dotenv() {
+        // env wins over everything (operator/self-test escape hatch).
+        assert_eq!(
+            pick_cloud_api_url(
+                Some("https://env.example"),
+                Some("https://invite.example"),
+                Some("https://dotenv.example")
+            ),
+            "https://env.example"
+        );
+        // No env → the invite-carried endpoint wins (the production path).
+        assert_eq!(
+            pick_cloud_api_url(
+                None,
+                Some("https://invite.example"),
+                Some("https://dotenv.example")
+            ),
+            "https://invite.example"
+        );
+        // Empty/whitespace candidates are skipped, not treated as a value.
+        assert_eq!(
+            pick_cloud_api_url(Some("   "), Some("https://invite.example"), None),
+            "https://invite.example"
+        );
+        // Nothing set → the production default.
+        assert_eq!(pick_cloud_api_url(None, None, None), DEFAULT_CLOUD_API_URL);
+        // dotenv is the lowest non-default fallback.
+        assert_eq!(
+            pick_cloud_api_url(None, None, Some("https://dotenv.example")),
+            "https://dotenv.example"
+        );
     }
 
     #[test]
