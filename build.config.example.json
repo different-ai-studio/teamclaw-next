@@ -33,7 +33,7 @@
       "wecom": true,
       "wechat": true
     },
-    "auth": { "google": false, "wechat": false }
+    "auth": { "google": false, "wechat": false, "phone": false }
   },
   "s3": {
     "teamEndpoint": "https://localhost",
