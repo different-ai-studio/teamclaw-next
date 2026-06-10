@@ -5,6 +5,8 @@ const authMock = {
   onAuthStateChange: vi.fn(),
   sendOtp: vi.fn(),
   verifyOtp: vi.fn(),
+  sendPhoneOtp: vi.fn(),
+  verifyPhoneOtp: vi.fn(),
   signOut: vi.fn(),
   signInAnonymously: vi.fn(),
   claimInvite: vi.fn(),
@@ -67,6 +69,7 @@ beforeEach(() => {
     authFlow: "idle",
     errorMessage: null,
     otpEmail: null,
+    otpPhone: null,
   });
 });
 
@@ -155,13 +158,45 @@ describe("auth-store", () => {
     expect(useAuthStore.getState().errorMessage).toMatch(/No pending sign-in/);
   });
 
+  it("sendPhoneOtp stashes phone and returns true on success", async () => {
+    authMock.sendPhoneOtp.mockResolvedValueOnce(undefined);
+    const ok = await useAuthStore.getState().sendPhoneOtp("+8613800138000");
+    expect(ok).toBe(true);
+    expect(authMock.sendPhoneOtp).toHaveBeenCalledWith("+8613800138000");
+    expect(useAuthStore.getState().otpPhone).toBe("+8613800138000");
+    expect(useAuthStore.getState().errorMessage).toBeNull();
+  });
+
+  it("sendPhoneOtp captures error and returns false on failure", async () => {
+    authMock.sendPhoneOtp.mockRejectedValueOnce(new Error("sms rate limit"));
+    const ok = await useAuthStore.getState().sendPhoneOtp("+8613800138000");
+    expect(ok).toBe(false);
+    expect(useAuthStore.getState().errorMessage).toBe("sms rate limit");
+    expect(useAuthStore.getState().otpPhone).toBeNull();
+  });
+
+  it("verifyPhoneOtp sets session on success", async () => {
+    useAuthStore.setState({ otpPhone: "+8613800138000" });
+    authMock.verifyPhoneOtp.mockResolvedValueOnce({ user: { id: "p2" } });
+    await useAuthStore.getState().verifyPhoneOtp("123456");
+    expect(authMock.verifyPhoneOtp).toHaveBeenCalledWith("+8613800138000", "123456");
+    expect(useAuthStore.getState().session?.user.id).toBe("p2");
+    expect(useAuthStore.getState().otpPhone).toBeNull();
+  });
+
+  it("verifyPhoneOtp errors when no pending phone", async () => {
+    await useAuthStore.getState().verifyPhoneOtp("123456");
+    expect(useAuthStore.getState().errorMessage).toMatch(/No pending sign-in/);
+  });
+
   it("signOut clears session and pending otp", async () => {
-    useAuthStore.setState({ session: { user: { id: "u" } }, otpEmail: "a@b.com" });
+    useAuthStore.setState({ session: { user: { id: "u" } }, otpEmail: "a@b.com", otpPhone: "+8613800138000" });
     authMock.signOut.mockResolvedValueOnce(undefined);
     await useAuthStore.getState().signOut();
     expect(authMock.signOut).toHaveBeenCalled();
     expect(useAuthStore.getState().session).toBeNull();
     expect(useAuthStore.getState().otpEmail).toBeNull();
+    expect(useAuthStore.getState().otpPhone).toBeNull();
   });
 
   it("signInAnonymously sets the returned session", async () => {
