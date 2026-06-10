@@ -53,6 +53,13 @@ export function createAuthModule(
       const next = await authClient.verifyOtp(email, code, "email");
       return mapSession(next);
     },
+    async sendPhoneOtp(phone: string): Promise<void> {
+      await authClient.sendPhoneOtp(phone, { shouldCreateUser: true });
+    },
+    async verifyPhoneOtp(phone: string, code: string): Promise<AuthSession | null> {
+      const next = await authClient.verifyPhoneOtp(phone, code);
+      return mapSession(next);
+    },
     async signInAnonymously(): Promise<AuthSession | null> {
       const next = await authClient.signInAnonymously();
       return mapSession(next);

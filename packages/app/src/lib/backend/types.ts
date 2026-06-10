@@ -32,6 +32,10 @@ export interface AuthBackend {
   onAuthStateChange(listener: (session: AuthSession | null) => void): Unsubscribe;
   sendOtp(email: string): Promise<void>;
   verifyOtp(email: string, code: string): Promise<AuthSession | null>;
+  /** Send an SMS OTP to an E.164 phone number (e.g. +8613800138000). */
+  sendPhoneOtp(phone: string): Promise<void>;
+  /** Verify the SMS OTP and establish a session. */
+  verifyPhoneOtp(phone: string, code: string): Promise<AuthSession | null>;
   signInAnonymously(): Promise<AuthSession | null>;
   signInWithOAuth(provider: OAuthProvider): Promise<AuthSession | null>;
   signOut(): Promise<void>;
