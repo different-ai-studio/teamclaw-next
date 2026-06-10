@@ -4,8 +4,8 @@ mod messages;
 
 use super::{
     AgentDefaults, AgentRuntimeRow, AgentRuntimeUpsert, Backend, BackendError, BackendResult,
-    BackendSessionAndParticipants, BootstrapMqttOverride, ClaimResult, ShareModeConfig,
-    StoredMessage, WorkspaceRow, WorkspaceUpsert,
+    BackendSessionAndParticipants, BootstrapMqttOverride, ClaimResult, CloudAuthSnapshot,
+    ShareModeConfig, StoredMessage, WorkspaceRow, WorkspaceUpsert,
 };
 use crate::provider_config::CloudApiConfig;
 use async_trait::async_trait;
@@ -15,8 +15,43 @@ use client::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+/// Shared cloud-auth health flag, cloned across every `CloudApiBackend` clone so
+/// the HTTP layer observes the same state as the refresh path. Set when a token
+/// refresh is rejected with a terminal status (the stored refresh token is dead
+/// and re-onboarding is required); cleared on the next successful refresh.
+#[derive(Debug, Default)]
+struct CloudAuthHealth {
+    terminal_failure: AtomicBool,
+}
+
+impl CloudAuthHealth {
+    fn mark_terminal(&self) {
+        self.terminal_failure.store(true, Ordering::Relaxed);
+    }
+
+    fn clear(&self) {
+        self.terminal_failure.store(false, Ordering::Relaxed);
+    }
+
+    fn snapshot(&self) -> CloudAuthSnapshot {
+        CloudAuthSnapshot {
+            terminal_failure: self.terminal_failure.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// True when a `/v1/auth/refresh` HTTP status means the refresh token itself is
+/// permanently rejected (so re-onboarding is the only recovery), as opposed to a
+/// transient server/network hiccup. GoTrue/FC answer a dead or unknown refresh
+/// token with 400/401 (`refresh_token_not_found`, `invalid_grant`); 5xx and 429
+/// are transient and must NOT latch the terminal flag.
+fn is_terminal_refresh_status(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::BAD_REQUEST
+}
 
 #[derive(Debug, Deserialize)]
 struct BootstrapResponse {
@@ -97,6 +132,9 @@ pub struct CloudApiBackend {
     /// Where to persist a rotated refresh token (`~/.amuxd/backend.toml`).
     /// `None` in tests that don't exercise persistence.
     persist_path: Option<PathBuf>,
+    /// Cloud-auth health, shared across clones. Latched when a refresh is
+    /// rejected with a terminal status; surfaced via `cloud_auth_health()`.
+    auth_health: Arc<CloudAuthHealth>,
 }
 
 impl CloudApiBackend {
@@ -130,6 +168,7 @@ impl CloudApiBackend {
             })),
             refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
             persist_path,
+            auth_health: Arc::new(CloudAuthHealth::default()),
         }
     }
 
@@ -167,7 +206,14 @@ impl CloudApiBackend {
             .map_err(network_error)?;
 
         if !resp.status().is_success() {
+            let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
+            // Latch a terminal-auth flag only when the refresh token itself is
+            // rejected (400/401). The daemon keeps retrying, but the desktop can
+            // now observe the dead session via `/v1/info` and auto re-onboard.
+            if is_terminal_refresh_status(status) {
+                self.auth_health.mark_terminal();
+            }
             return Err(BackendError::Auth(refresh_failure_message(&text)));
         }
 
@@ -194,6 +240,10 @@ impl CloudApiBackend {
         if let Some(new_rt) = rotated {
             self.persist_refresh_token(&new_rt);
         }
+
+        // A successful refresh clears any prior terminal-auth latch (e.g. after
+        // the desktop re-onboards the daemon with fresh credentials).
+        self.auth_health.clear();
 
         Ok(body.access_token)
     }
@@ -368,6 +418,10 @@ impl Backend for CloudApiBackend {
 
     async fn auth_token(&self) -> BackendResult<String> {
         self.access_token().await
+    }
+
+    fn cloud_auth_health(&self) -> Option<CloudAuthSnapshot> {
+        Some(self.auth_health.snapshot())
     }
 
     async fn fetch_bootstrap_mqtt(&self) -> BackendResult<Option<BootstrapMqttOverride>> {

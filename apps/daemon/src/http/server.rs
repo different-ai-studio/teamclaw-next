@@ -14,6 +14,7 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use crate::backend::Backend;
 use crate::config::workspace_control::WorkspaceControlStore;
 use crate::config::{DaemonConfig, HttpConfig};
 
@@ -69,6 +70,7 @@ pub async fn spawn(
     opencode_settings: Option<Arc<crate::opencode_settings::OpenCodeSettingsService>>,
     sync_dispatcher: crate::sync::dispatch::SyncDispatcher,
     register_workspace_tx: Option<crate::http::state::RegisterWorkspaceTx>,
+    backend: Option<Arc<dyn Backend>>,
 ) -> anyhow::Result<HttpHandle> {
     // Resolve token + port files (defaults live in DaemonConfig::config_dir).
     let token_path = http
@@ -116,7 +118,8 @@ pub async fn spawn(
         opencode_settings,
         sync_dispatcher,
         register_workspace_tx,
-    );
+    )
+    .with_backend(backend);
 
     spawn_reapers(state.clone());
     let mut app: Router = routes::build(state);
