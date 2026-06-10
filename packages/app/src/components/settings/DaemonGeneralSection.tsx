@@ -63,6 +63,13 @@ export function DaemonGeneralSection() {
   // is cleared (status 'mismatch'); once re-init starts there's no going back.
   const onboardingStatus = useDaemonOnboardingStore((s) => s.status)
   const onboardingBusy = useDaemonOnboardingStore((s) => s.busy)
+  // Cloud-session auto-heal: when the daemon's refresh token is terminally
+  // rejected it can't advertise its backends — detect it here and re-onboard.
+  const cloudAuthExpired = useDaemonOnboardingStore((s) => s.cloudAuthExpired)
+  const healing = useDaemonOnboardingStore((s) => s.healing)
+  const healError = useDaemonOnboardingStore((s) => s.healError)
+  const checkCloudSession = useDaemonOnboardingStore((s) => s.checkCloudSession)
+  const autoHealCloudSession = useDaemonOnboardingStore((s) => s.autoHealCloudSession)
   const daemonGeneralPrompt = useUIStore((s) => s.daemonGeneralPrompt)
   const clearDaemonGeneralPrompt = useUIStore((s) => s.clearDaemonGeneralPrompt)
 
@@ -114,6 +121,13 @@ export function DaemonGeneralSection() {
   React.useEffect(() => {
     void load()
   }, [load])
+
+  // Opening this section is the moment the misleading "no backends advertised"
+  // copy appears — probe the daemon's cloud session here too so a session that
+  // died after startup is detected (and auto-healed) without an app restart.
+  React.useEffect(() => {
+    void checkCloudSession()
+  }, [checkCloudSession])
 
   const handleSaveProfile = async () => {
     if (!agent || !displayName.trim()) return
@@ -300,6 +314,49 @@ export function DaemonGeneralSection() {
                   {t('settings.daemonGeneral.rebind', '重新绑定到当前团队')}
                 </Button>
               </div>
+            </div>
+          </div>
+        </SettingCard>
+      )}
+
+      {cloudAuthExpired && (
+        <SettingCard className="border-amber-500/30 bg-amber-500/5">
+          <div className="flex items-start gap-3">
+            {healing ? (
+              <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-amber-600 dark:text-amber-400" />
+            ) : (
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+            )}
+            <div className="min-w-0 space-y-1.5">
+              <p className="text-[13px] font-medium text-amber-700 dark:text-amber-400">
+                {t('settings.daemonGeneral.cloudExpiredTitle', '本机 Daemon 云端会话已过期')}
+              </p>
+              <p className="text-[12px] leading-5 text-amber-700/80 dark:text-amber-400/80">
+                {healing
+                  ? t(
+                      'settings.daemonGeneral.cloudExpiredReconnecting',
+                      '正在自动重新连接 Daemon（重新签发凭证并重启）…',
+                    )
+                  : healError
+                    ? healError
+                    : t(
+                        'settings.daemonGeneral.cloudExpiredDesc',
+                        'Daemon 的登录凭证已失效，无法上报后端类型或同步。正在尝试自动重新连接。',
+                      )}
+              </p>
+              {!healing && (
+                <div className="pt-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 border-amber-500/40 bg-transparent text-amber-700 hover:bg-amber-500/10 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200"
+                    onClick={() => void autoHealCloudSession()}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    {t('settings.daemonGeneral.reconnect', '重新连接')}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </SettingCard>

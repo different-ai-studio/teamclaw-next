@@ -15,6 +15,7 @@ pub use teamclaw_gateway::*;
 pub mod qr;
 
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -47,6 +48,10 @@ pub struct ChannelStatus {
     pub last_error: Option<String>,
 }
 
+fn amuxd_unavailable() -> String {
+    "amuxd daemon is not available on Windows".to_string()
+}
+
 pub(crate) fn sock_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
@@ -77,17 +82,22 @@ fn daemon_config_path() -> PathBuf {
 /// daemon is not running so the UI can surface an "amuxd unreachable" state.
 #[tauri::command]
 pub async fn list_channels() -> Result<Vec<ChannelStatus>, String> {
-    let mut s =
-        UnixStream::connect(sock_path()).map_err(|e| format!("amuxd not reachable: {e}"))?;
-    s.write_all(b"channel-status\n")
-        .map_err(|e| format!("write failed: {e}"))?;
-    s.shutdown(std::net::Shutdown::Write)
-        .map_err(|e| format!("shutdown write half failed: {e}"))?;
-    let mut buf = String::new();
-    s.read_to_string(&mut buf)
-        .map_err(|e| format!("read failed: {e}"))?;
-    serde_json::from_str(buf.trim())
-        .map_err(|e| format!("bad response from amuxd: {e} (body={buf:?})"))
+    #[cfg(windows)]
+    return Err(amuxd_unavailable());
+    #[cfg(unix)]
+    {
+        let mut s =
+            UnixStream::connect(sock_path()).map_err(|e| format!("amuxd not reachable: {e}"))?;
+        s.write_all(b"channel-status\n")
+            .map_err(|e| format!("write failed: {e}"))?;
+        s.shutdown(std::net::Shutdown::Write)
+            .map_err(|e| format!("shutdown write half failed: {e}"))?;
+        let mut buf = String::new();
+        s.read_to_string(&mut buf)
+            .map_err(|e| format!("read failed: {e}"))?;
+        serde_json::from_str(buf.trim())
+            .map_err(|e| format!("bad response from amuxd: {e} (body={buf:?})"))
+    }
 }
 
 /// Per-bot WeCom connection status as reported by amuxd over `amuxd.sock`.
@@ -107,17 +117,22 @@ pub struct WeComBotStatus {
 /// JSON-array line, and deserializes it into `Vec<WeComBotStatus>`.
 #[tauri::command]
 pub async fn list_wecom_bots_status() -> Result<Vec<WeComBotStatus>, String> {
-    let mut s =
-        UnixStream::connect(sock_path()).map_err(|e| format!("amuxd not reachable: {e}"))?;
-    s.write_all(b"wecom-bots-status\n")
-        .map_err(|e| format!("write failed: {e}"))?;
-    s.shutdown(std::net::Shutdown::Write)
-        .map_err(|e| format!("shutdown write half failed: {e}"))?;
-    let mut buf = String::new();
-    s.read_to_string(&mut buf)
-        .map_err(|e| format!("read failed: {e}"))?;
-    serde_json::from_str(buf.trim())
-        .map_err(|e| format!("bad response from amuxd: {e} (body={buf:?})"))
+    #[cfg(windows)]
+    return Err(amuxd_unavailable());
+    #[cfg(unix)]
+    {
+        let mut s =
+            UnixStream::connect(sock_path()).map_err(|e| format!("amuxd not reachable: {e}"))?;
+        s.write_all(b"wecom-bots-status\n")
+            .map_err(|e| format!("write failed: {e}"))?;
+        s.shutdown(std::net::Shutdown::Write)
+            .map_err(|e| format!("shutdown write half failed: {e}"))?;
+        let mut buf = String::new();
+        s.read_to_string(&mut buf)
+            .map_err(|e| format!("read failed: {e}"))?;
+        serde_json::from_str(buf.trim())
+            .map_err(|e| format!("bad response from amuxd: {e} (body={buf:?})"))
+    }
 }
 
 /// Load a persisted channel config from daemon.toml. This is local-only data:
@@ -159,26 +174,36 @@ pub fn load_channel_config(platform: String) -> Result<Option<serde_json::Value>
 /// auto-reloads the channel manager so the change takes effect immediately.
 #[tauri::command]
 pub async fn save_channel_config(platform: String, config_json: String) -> Result<(), String> {
-    let mut s =
-        UnixStream::connect(sock_path()).map_err(|e| format!("amuxd not reachable: {e}"))?;
-    // Single-line JSON keeps the framing simple — the daemon reads exactly
-    // three newline-terminated tokens off the sock.
-    let single_line = config_json.replace('\n', " ");
-    let payload = format!("channel-save\n{platform}\n{single_line}\n");
-    s.write_all(payload.as_bytes())
-        .map_err(|e| format!("write failed: {e}"))?;
-    Ok(())
+    #[cfg(windows)]
+    return Err(amuxd_unavailable());
+    #[cfg(unix)]
+    {
+        let mut s =
+            UnixStream::connect(sock_path()).map_err(|e| format!("amuxd not reachable: {e}"))?;
+        // Single-line JSON keeps the framing simple — the daemon reads exactly
+        // three newline-terminated tokens off the sock.
+        let single_line = config_json.replace('\n', " ");
+        let payload = format!("channel-save\n{platform}\n{single_line}\n");
+        s.write_all(payload.as_bytes())
+            .map_err(|e| format!("write failed: {e}"))?;
+        Ok(())
+    }
 }
 
 /// Tell amuxd to re-read `daemon.toml` and restart all channels. Cheap;
 /// useful when the daemon-managed config file was edited out-of-band.
 #[tauri::command]
 pub async fn reload_channels() -> Result<(), String> {
-    let mut s =
-        UnixStream::connect(sock_path()).map_err(|e| format!("amuxd not reachable: {e}"))?;
-    s.write_all(b"channel-reload\n")
-        .map_err(|e| format!("write failed: {e}"))?;
-    Ok(())
+    #[cfg(windows)]
+    return Err(amuxd_unavailable());
+    #[cfg(unix)]
+    {
+        let mut s =
+            UnixStream::connect(sock_path()).map_err(|e| format!("amuxd not reachable: {e}"))?;
+        s.write_all(b"channel-reload\n")
+            .map_err(|e| format!("write failed: {e}"))?;
+        Ok(())
+    }
 }
 
 /// Persist a per-session model preference for gateway-backed chats.

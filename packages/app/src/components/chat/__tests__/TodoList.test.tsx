@@ -57,6 +57,23 @@ describe("TodoList", () => {
     expect(screen.getByTestId("todo-list-inline-queue-body").className).toContain("[scrollbar-width:thin]");
   });
 
+  it("renders inline priority labels from todo.priority", () => {
+    render(
+      <TodoList
+        variant="inline"
+        todos={[
+          { id: "1", content: "High task", status: "pending", priority: "high" } as never,
+          { id: "2", content: "Med task", status: "pending", priority: "medium" } as never,
+          { id: "3", content: "Low task", status: "pending", priority: "low" } as never,
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("high")).toBeTruthy();
+    expect(screen.getByText("med")).toBeTruthy();
+    expect(screen.getByText("low")).toBeTruthy();
+  });
+
   it("hides todo content when the inline todo section is collapsed", () => {
     render(
       <TodoList

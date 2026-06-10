@@ -88,6 +88,20 @@ pub struct AgentDefaults {
     pub default_workspace_id: Option<String>,
 }
 
+/// Health of the cloud-auth session, surfaced over the local HTTP `/v1/info`
+/// endpoint so the desktop can detect a terminally-expired daemon session and
+/// auto re-onboard it.
+///
+/// `terminal_failure == true` means a token refresh was rejected by the auth
+/// backend (HTTP 400/401 from `/v1/auth/refresh` — e.g. `refresh_token_not_found`
+/// / `invalid_grant`): the stored refresh token will never work again and the
+/// daemon needs fresh credentials. Transient failures (network errors, 5xx,
+/// rate limits) do NOT set this flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CloudAuthSnapshot {
+    pub terminal_failure: bool,
+}
+
 #[async_trait]
 pub trait Backend: Send + Sync {
     // ── Identity ──────────────────────────────────────────────────────────
@@ -112,6 +126,15 @@ pub trait Backend: Send + Sync {
 
     /// Drop any cached access token so the next [`auth_token`] call refreshes.
     fn invalidate_cached_credential(&self) {}
+
+    /// Snapshot of the cloud-auth session health. `Some` for HTTP-backed cloud
+    /// backends; `None` for backends with no remote auth surface (mock). Read by
+    /// the local HTTP `/v1/info` handler so the desktop can detect a terminally
+    /// expired session and trigger auto re-onboarding. Diagnostic only — callers
+    /// must not gate request behavior on it.
+    fn cloud_auth_health(&self) -> Option<CloudAuthSnapshot> {
+        None
+    }
 
     /// Fetch runtime MQTT broker overrides from the cloud backend. Default
     /// implementation is a no-op for backends that have no remote config

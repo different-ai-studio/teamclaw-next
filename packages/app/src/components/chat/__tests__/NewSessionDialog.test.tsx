@@ -124,6 +124,7 @@ vi.mock('@/lib/session-live-subscriptions', () => ({
 
 vi.mock('@/lib/utils', () => ({
   cn: (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' '),
+  isTauri: () => false,
 }))
 
 import { NewSessionDialog } from '../NewSessionDialog'
@@ -132,7 +133,12 @@ describe('NewSessionDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.createSessionWithFirstMessage.mockResolvedValue({ sessionId: 'sess-1' })
-    mocks.listActorDirectory.mockResolvedValue([])
+    // Candidates now flow through the shared actor-directory store, which reads
+    // the network directory (listActorDirectory) — not the libsql cache — in the
+    // jsdom test env (isTauri() === false).
+    mocks.listActorDirectory.mockResolvedValue([
+      { id: 'agent-1', actor_type: 'agent', display_name: 'MCA2' },
+    ])
   })
 
   it('allows creating a daemon-agent session before the daemon has advertised models', async () => {

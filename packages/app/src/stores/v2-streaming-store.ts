@@ -945,7 +945,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     set({
       byKey: {
         ...get().byKey,
-        [key]: { ...existing, pendingPermission: null, lastUpdate: Date.now() },
+        [key]: { ...existing, pendingPermission: null },
       },
     });
   },

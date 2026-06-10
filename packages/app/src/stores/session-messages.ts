@@ -59,6 +59,9 @@ async function resolveMentionActorIdsForSession(
 
   const agents = participants.filter((row) => isAgentActorType(row.actor_type));
 
+  // Sole-agent send fallback — see ChatPanel.resolveMentionActorIdsForSession.
+  // Multi-person sessions still route to the sole agent here; only open-time
+  // pill auto-engage is restricted to solo pairs (isSoloAgentSession).
   return agents.length === 1
     ? [agents[0].id]
     : [];

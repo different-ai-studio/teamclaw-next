@@ -148,72 +148,64 @@ export function ComposerStack({
   const showTopChrome = showAgentSection || showPlan;
   const planRoundsTop = showPlan && !showAgentSection;
 
+  const approvalExpandClasses = cn(
+    "grid transition-[grid-template-rows] duration-[400ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+    hasApproval ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+  );
+
+  const approvalPanelMotionClasses = cn(
+    "box-border w-full origin-bottom transition-[transform,opacity] duration-[380ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+    hasApproval
+      ? "translate-y-0 opacity-100 delay-75"
+      : "translate-y-3 opacity-0 motion-safe:delay-0",
+  );
+
   return (
     <div data-testid="composer-stack" className={composerStackShellClass}>
       {showTopChrome ? (
         <div className="box-border w-full overflow-hidden rounded-t-[14px]">
           {showAgentSection ? (
             <div data-testid="streaming-agents-dock" className="box-border w-full">
-              <div data-testid="streaming-agent-shell" className="box-border w-full overflow-hidden">
-                {hasApproval ? (
+              <div
+                data-testid="streaming-agent-shell"
+                className={cn(
+                  "box-border w-full overflow-hidden",
+                  hasApproval && "rounded-t-[14px]",
+                  hasApproval && composerGlassFillClass,
+                )}
+              >
+                <div
+                  data-testid="composer-approval-chrome"
+                  className={cn(hasApproval && "rounded-t-[14px]")}
+                >
                   <div
-                    data-testid="composer-approval-chrome"
-                    className={cn(
-                      "box-border w-full overflow-hidden rounded-t-[14px]",
-                      composerGlassFillClass,
-                    )}
+                    className={approvalExpandClasses}
+                    data-testid="pending-permission-expand"
+                    data-open={hasApproval ? "true" : "false"}
                   >
-                    <div
-                      className="grid grid-rows-[1fr] transition-[grid-template-rows] duration-[400ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-                      data-testid="pending-permission-expand"
-                      data-open="true"
-                    >
-                      <div className="min-h-0 overflow-hidden">
-                        {currentEntry ? (
-                          <PermissionApprovalPanel
-                            entry={currentEntry}
-                            queueIndex={0}
-                            queueTotal={queuedCount}
-                            onReplyStart={onReplyStart}
-                            onReplyRollback={onReplyRollback}
-                            appearance="glass"
-                            className={cn(
-                              "box-border w-full px-3.5 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-300",
-                              composerStackRowDividerClass,
-                            )}
-                          />
-                        ) : null}
-                      </div>
+                    <div className="min-h-0 overflow-hidden">
+                      {currentEntry ? (
+                        <PermissionApprovalPanel
+                          entry={currentEntry}
+                          queueIndex={0}
+                          queueTotal={queuedCount}
+                          onReplyStart={onReplyStart}
+                          onReplyRollback={onReplyRollback}
+                          appearance="glass"
+                          className={cn(
+                            approvalPanelMotionClasses,
+                            composerStackRowDividerClass,
+                          )}
+                        />
+                      ) : null}
                     </div>
-
-                    {showApprovalOnly ? null : (
-                      agents.map((agent) => {
-                        const isAnchor = anchorActorId === agent.actorId && currentEntry !== null;
-                        return (
-                          <ComposerAgentStrip
-                            key={agent.actorId}
-                            actorId={agent.actorId}
-                            displayNameHint={agent.displayName}
-                            waitingForApproval={isAnchor}
-                            showInterrupt={Boolean(onInterrupt) && !isAnchor}
-                            onInterrupt={onInterrupt ?? (() => {})}
-                            embeddedInGlass
-                          />
-                        );
-                      })
-                    )}
                   </div>
-                ) : (
-                  <>
-                    <div
-                      className="grid grid-rows-[0fr] transition-[grid-template-rows] duration-[400ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-                      data-testid="pending-permission-expand"
-                      data-open="false"
-                    >
-                      <div className="min-h-0 overflow-hidden" />
-                    </div>
-                    {agents.map((agent, index) => {
-                      const isAnchor = anchorActorId === agent.actorId && currentEntry !== null;
+                </div>
+
+                {!showApprovalOnly
+                  ? agents.map((agent, index) => {
+                      const isAnchor =
+                        anchorActorId === agent.actorId && currentEntry !== null;
                       return (
                         <ComposerAgentStrip
                           key={agent.actorId}
@@ -222,12 +214,12 @@ export function ComposerStack({
                           waitingForApproval={isAnchor}
                           showInterrupt={Boolean(onInterrupt) && !isAnchor}
                           onInterrupt={onInterrupt ?? (() => {})}
-                          roundsTop={index === 0}
+                          roundsTop={!hasApproval && index === 0}
+                          embeddedInGlass={hasApproval}
                         />
                       );
-                    })}
-                  </>
-                )}
+                    })
+                  : null}
               </div>
             </div>
           ) : null}

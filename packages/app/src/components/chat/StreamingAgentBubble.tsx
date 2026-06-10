@@ -1,9 +1,11 @@
+import * as React from "react";
 import { AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
-  streamEntryHasVisibleContent,
-  type AgentStreamEntry,
-} from "@/stores/v2-streaming-store";
+  streamTranscriptHasText,
+  streamTranscriptRevision,
+} from "@/lib/live-agent-stream";
+import type { AgentStreamEntry } from "@/stores/v2-streaming-store";
 import { Message, MessageContent, MessageResponse } from "@/packages/ai/message";
 import { useStreamAwaitingNextEvent } from "@/hooks/useStreamAwaitingNextEvent";
 import { useStreamRevealText } from "@/hooks/useStreamRevealText";
@@ -148,12 +150,35 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
     }
   }
 
-  const awaitingNextEvent = useStreamAwaitingNextEvent(entry.active, entry.lastUpdate);
-  const hasVisibleContent = streamEntryHasVisibleContent(entry);
-  const showPlanningInitial =
-    entry.active && !hasError && !hasVisibleContent && awaitingNextEvent;
+  const transcriptRevision = streamTranscriptRevision(entry);
+  const awaitingNextEvent = useStreamAwaitingNextEvent(
+    entry.active,
+    transcriptRevision,
+  );
+
+  const hasTranscriptText = streamTranscriptHasText(entry);
+
+  const [pauseDotsLatched, setPauseDotsLatched] = React.useState(false);
+  React.useEffect(() => {
+    setPauseDotsLatched(false);
+  }, [transcriptRevision]);
+  React.useEffect(() => {
+    if (!entry.active) {
+      setPauseDotsLatched(false);
+      return;
+    }
+    if (awaitingNextEvent && hasTranscriptText) {
+      setPauseDotsLatched(true);
+    }
+  }, [entry.active, awaitingNextEvent, hasTranscriptText]);
+
+  // Align with agent bar on statusChange ACTIVE — show immediately, no idle debounce.
+  const showPlanningInitial = entry.active && !hasError && !hasTranscriptText;
   const showPlanningAfterPause =
-    entry.active && !hasError && hasVisibleContent && awaitingNextEvent;
+    entry.active &&
+    !hasError &&
+    hasTranscriptText &&
+    (awaitingNextEvent || pauseDotsLatched);
 
   if (
     !showPlanningInitial &&
@@ -178,7 +203,14 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
       <ActorLabel senderActorId={entry.actorId} isUser={false} />
       <Message from="assistant">
         <div className="min-w-0 flex-1">
-          {showPlanningInitial && <AgentStreamLoadingDots />}
+          {showPlanningInitial ? (
+            <div
+              className="flex h-[22px] items-center"
+              data-testid="v2-streaming-planning-slot"
+            >
+              <AgentStreamLoadingDots />
+            </div>
+          ) : null}
 
           {hasThinking && (
             <ThinkingBlock
@@ -224,11 +256,14 @@ export function StreamingAgentBubble({ entry }: { entry: AgentStreamEntry }) {
             <StreamRevealedResponse text={entry.outputText} reveal={entry.active} />
           )}
 
-          {showPlanningAfterPause && (
-            <div className="mt-1.5">
-              <AgentStreamLoadingDots />
+          {entry.active && hasTranscriptText ? (
+            <div
+              className="mt-1.5 flex h-[22px] items-center"
+              data-testid="v2-streaming-planning-pause-slot"
+            >
+              {showPlanningAfterPause ? <AgentStreamLoadingDots /> : null}
             </div>
-          )}
+          ) : null}
 
           {hasError && (
             <ErrorCard message={entry.errorMessage!} details={entry.errorDetails ?? ""} />

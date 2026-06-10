@@ -41,12 +41,14 @@ import { LocalAgentWelcomeEmptyState } from "./LocalAgentWelcomeEmptyState";
 import { SessionEmptyThreadState } from "./SessionEmptyThreadState";
 import { createQuickDaemonSession } from "@/lib/quick-daemon-session";
 import { createQuickEmptySession } from "@/lib/quick-empty-session";
+import { isSoloAgentSession } from "@/lib/session-empty-thread-starters";
 
 import type { Message } from "@/stores/session";
 import { ChatInputArea } from "./ChatInputArea";
 import { SessionNoticeList } from "./SessionNoticeList";
 import { useEngagedAgentRuntimeMap } from "@/hooks/use-engaged-agent-runtime-map";
 import { useEngagedAgentUiStates } from "@/hooks/use-engaged-agent-ui-states";
+import { useEnsureEngagedRuntimesOnSessionFocus } from "@/hooks/use-ensure-engaged-runtimes-on-session-focus";
 import { getCurrentDaemonAgent } from "@/lib/daemon-agent-admin";
 import { buildPostSendSessionNotice } from "@/lib/session-agent-notice-text";
 import { useSessionNoticeStore } from "@/stores/session-notice-store";
@@ -154,6 +156,9 @@ async function resolveMentionActorIdsForSession(
 
   const agents = participants.filter((row) => isAgentActorType(row.actor_type));
 
+  // Sole-agent send fallback: any session with exactly one agent participant
+  // routes to that agent when the user sends without @. This is independent
+  // of isSoloAgentSession, which only gates open-time pill auto-engage.
   return agents.length === 1
     ? [agents[0].id]
     : [];
@@ -218,17 +223,17 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // above the prompt input (v1 style) rather than inline in the message
   // bubble. Render only the most-recently-updated stream's plan to avoid
   // stacking plans from multiple engaged agents — typical sessions have
-  // one planner at a time. Mapped to the Todo shape the TodoList consumes;
-  // status/content carry over, priority is dropped (Todo has no slot).
-  const planTodos = React.useMemo(() => {
+  // one planner at a time. Mapped to the Todo shape the TodoList consumes.
+  const planTodos = React.useMemo((): Todo[] => {
     const mapPlan = (
       entries: StreamingPlanEntry[],
       actorId: string,
-    ): Array<{ id: string; status: string; content: string }> =>
+    ): Todo[] =>
       entries.map((e, i) => ({
         id: `plan:${actorId}:${i}`,
         status: e.status,
         content: e.content,
+        priority: e.priority,
       }));
 
     const latestWithPlan = [...v2Streams]
@@ -502,8 +507,11 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   }, [v2Streams, engagedAgents]);
 
   // Existing sessions can be reopened after a reload with no in-memory
-  // engaged agents selected. If there is exactly one agent participant,
-  // route messages to it automatically so sends still trigger a reply.
+  // engaged agents selected. Solo sessions (2 participants: 1 human + 1 agent)
+  // auto-engage the agent pill so sends still trigger a reply.
+  // Note: send-time mention fallback (resolveMentionActorIdsForSession) still
+  // auto-mentions the sole session agent in multi-person sessions — only this
+  // open-time pill auto-engage is restricted to solo pairs.
   // Runs at most once per sessionId per app lifetime so that explicitly
   // removing a mention ("Remove mention" in the agent pill dropdown) isn't
   // immediately undone by this effect re-firing on engagedAgents.length 1→0.
@@ -527,13 +535,26 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       }
       if (cancelled) return;
 
-      const agentActors = actors.filter((row) => isAgentActorType(row.actor_type));
-      if (agentActors.length === 1) {
-        const soleAgent = agentActors[0];
+      if (isSoloAgentSession(actors)) {
+        const soleAgent = actors.find((row) => isAgentActorType(row.actor_type))!;
         useEngagedAgentStore.getState().setAgents(activeSessionId, [{
           id: soleAgent.id,
           displayName: soleAgent.display_name || "AI",
         }]);
+        const teamId =
+          useSessionListStore.getState().rows.find((r) => r.id === activeSessionId)?.team_id ??
+          useCurrentTeamStore.getState().team?.id ??
+          null;
+        if (teamId) {
+          void import("@/lib/teamclaw/ensure-agent-runtime").then(({ ensureAgentRuntimesForSession }) => {
+            void ensureAgentRuntimesForSession({
+              sessionId: activeSessionId,
+              teamId,
+              agentActorIds: [soleAgent.id],
+              reason: "session_auto_engage",
+            });
+          });
+        }
       }
     })();
 
@@ -549,6 +570,11 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   const currentTeamId = useCurrentTeamStore(s => s.team?.id ?? null);
   const fallbackTeamId = useSessionListStore(s => s.rows[0]?.team_id ?? null);
   const sheetTeamId = sessionRow?.team_id ?? fallbackTeamId ?? currentTeamId;
+  useEnsureEngagedRuntimesOnSessionFocus({
+    sessionId: activeSessionId,
+    teamId: sheetTeamId,
+    engagedUiEntries,
+  });
   const [localDaemonAgent, setLocalDaemonAgent] = React.useState<AttachedAgent | null>(null);
   const [localDaemonAgentLoading, setLocalDaemonAgentLoading] = React.useState(false);
   const [welcomeSessionStarting, setWelcomeSessionStarting] = React.useState(false);
@@ -972,6 +998,10 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // ── Input height change → forward to MessageList ───────────────────────
   const handleInputHeightChange = React.useCallback((height: number) => {
     messageListRef.current?.handleInputHeightChange(height);
+  }, []);
+
+  const handleComposerFocus = React.useCallback(() => {
+    messageListRef.current?.pauseAutoFollowIfReading();
   }, []);
 
   // ── File handling ─────────────────────────────────────────────────────
@@ -2169,6 +2199,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
             messageQueue={messageQueue}
             onRemoveFromQueue={removeFromQueue}
             onHeightChange={handleInputHeightChange}
+            onComposerFocus={handleComposerFocus}
             bottomOffsetPx={terminalBottomOffset}
             stackTodos={hasComposerPlanData ? (combinedTodos as Todo[]) : []}
             stackQueue={hasComposerPlanData ? messageQueue : []}

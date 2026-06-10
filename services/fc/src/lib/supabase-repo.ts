@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createClient as defaultCreateClient } from "@supabase/supabase-js";
 import WebSocket from "ws";
 import { ApiError } from "./http-utils.js";
+import { normalizeAgentTypes } from "./agent-types.js";
 
 // FC runtime is Node 20 which lacks native WebSocket. supabase-js v2.45+ tries
 // to construct a RealtimeClient at createClient() time and throws without a
@@ -952,6 +953,8 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async ensureAgentTypes({ supportedTypes, defaultAgentType }) {
+      // Keep the default a member of the supported set (see normalizeAgentTypes).
+      const norm = normalizeAgentTypes(supportedTypes, defaultAgentType);
       const { data: actorRow, error: actorErr } = await supabase
         .from("actors")
         .select("id")
@@ -965,8 +968,8 @@ export function createSupabaseBusinessRepository(options) {
       const { error } = await supabase
         .from("agents")
         .update({
-          agent_types: supportedTypes,
-          default_agent_type: defaultAgentType,
+          agent_types: norm.supportedTypes,
+          default_agent_type: norm.defaultAgentType,
         })
         .eq("id", actorRow.id);
       if (error) throw error;

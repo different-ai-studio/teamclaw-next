@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use tokio::sync::{mpsc, oneshot};
 
+use crate::backend::Backend;
 use crate::config::workspace_control::WorkspaceControlStore;
 use crate::config::HttpConfig;
 
@@ -77,6 +78,10 @@ pub struct HttpState {
     /// the HTTP server runs without a daemon actor behind it (focused tests) —
     /// the route then returns 503.
     pub register_workspace_tx: Option<RegisterWorkspaceTx>,
+    /// The cloud backend this daemon authenticates against, used by `/v1/info`
+    /// to surface cloud-auth health (`cloud_auth_health()`). `None` in focused
+    /// HTTP tests and for backends with no remote auth surface.
+    pub backend: Option<Arc<dyn Backend>>,
 }
 
 impl HttpState {
@@ -111,6 +116,14 @@ impl HttpState {
             opencode_settings,
             sync_dispatcher,
             register_workspace_tx,
+            backend: None,
         }
+    }
+
+    /// Attach the cloud backend so `/v1/info` can report cloud-auth health.
+    /// Chained after `new()` to keep the (already wide) constructor stable.
+    pub fn with_backend(mut self, backend: Option<Arc<dyn Backend>>) -> Self {
+        self.backend = backend;
+        self
     }
 }

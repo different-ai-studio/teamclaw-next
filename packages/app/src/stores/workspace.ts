@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { UNSUPPORTED_BINARY_EXTENSIONS } from "@/components/viewers/UnsupportedFileViewer";
 import { isTauri } from '@/lib/utils'
 import { ensureGitignoreEntries } from '@/lib/gitignore-manager'
-import { appShortName, TEAMCLAW_DIR, TEAM_REPO_DIR } from '@/lib/build-config'
+import { appShortName, TEAM_REPO_DIR } from '@/lib/build-config'
 import { useTeamModeStore } from './team-mode'
 
 // Start watching a directory for file changes
@@ -129,10 +129,6 @@ interface WorkspaceState {
   setClipboard: (paths: string[], mode: 'copy' | 'cut') => void;
   clearClipboard: () => void;
   pasteFiles: (targetDir: string) => Promise<boolean>;
-
-  // New workspace detection
-  isNewWorkspace: boolean;
-  setIsNewWorkspace: (value: boolean) => void;
 
   // Actions
   setWorkspace: (path: string) => Promise<void>;
@@ -262,8 +258,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   undoStack: [],
   clipboardPaths: [],
   clipboardMode: null,
-  isNewWorkspace: false,
-  setIsNewWorkspace: (value: boolean) => set({ isNewWorkspace: value }),
 
   setClipboard: (paths, mode) => set({ clipboardPaths: paths, clipboardMode: mode }),
   clearClipboard: () => set({ clipboardPaths: [], clipboardMode: null }),
@@ -321,21 +315,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       await stopWatching(currentPath);
     }
 
-    // Pre-cache Tauri fs modules so the .teamclaw check after set() runs
-    // without extra async import delay
-    let cachedJoin: typeof import("@tauri-apps/api/path")["join"] | null = null;
-    let cachedExists: typeof import("@tauri-apps/plugin-fs")["exists"] | null = null;
-    if (isTauri()) {
-      try {
-        const [pathMod, fsMod] = await Promise.all([
-          import("@tauri-apps/api/path"),
-          import("@tauri-apps/plugin-fs"),
-        ]);
-        cachedJoin = pathMod.join;
-        cachedExists = fsMod.exists;
-      } catch { /* ignore */ }
-    }
-
     set({
       isLoadingWorkspace: true,
       openCodeBootstrapped: false,
@@ -372,18 +351,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           await m.invoke('set_config_locale', { locale: i18n.language }).catch(() => {});
         })
         .catch(() => {});
-    }
-
-    // Check if this is a new workspace (no .teamclaw directory yet)
-    // Runs right after set() using pre-cached imports to minimize delay
-    if (cachedJoin && cachedExists) {
-      try {
-        const teamclawDir = await cachedJoin(expandedPath, TEAMCLAW_DIR);
-        const dirExists = await cachedExists(teamclawDir);
-        if (!dirExists) {
-          set({ isNewWorkspace: true });
-        }
-      } catch { /* ignore */ }
     }
 
     // Reset UI to home state: close settings, switch to task/chat mode, clear tabs

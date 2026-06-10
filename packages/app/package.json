@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.12.0",
-    "@codemirror/autocomplete": "^6.20.2",
+    "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.10.2",
     "@codemirror/lang-css": "^6.3.1",
     "@codemirror/lang-html": "^6.4.11",
@@ -83,7 +83,7 @@
     "radix-ui": "^1.4.3",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-i18next": "^16.5.4",
+    "react-i18next": "^17.0.8",
     "react-markdown": "^10.1.0",
     "react-pdf": "^10.3.0",
     "remark-gfm": "^4.0.0",

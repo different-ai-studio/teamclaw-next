@@ -4,8 +4,8 @@ mod messages;
 
 use super::{
     AgentDefaults, AgentRuntimeRow, AgentRuntimeUpsert, Backend, BackendError, BackendResult,
-    BackendSessionAndParticipants, BootstrapMqttOverride, ClaimResult, ShareModeConfig,
-    StoredMessage, WorkspaceRow, WorkspaceUpsert,
+    BackendSessionAndParticipants, BootstrapMqttOverride, ClaimResult, CloudAuthSnapshot,
+    ShareModeConfig, StoredMessage, WorkspaceRow, WorkspaceUpsert,
 };
 use crate::provider_config::CloudApiConfig;
 use async_trait::async_trait;
@@ -15,8 +15,43 @@ use client::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+/// Shared cloud-auth health flag, cloned across every `CloudApiBackend` clone so
+/// the HTTP layer observes the same state as the refresh path. Set when a token
+/// refresh is rejected with a terminal status (the stored refresh token is dead
+/// and re-onboarding is required); cleared on the next successful refresh.
+#[derive(Debug, Default)]
+struct CloudAuthHealth {
+    terminal_failure: AtomicBool,
+}
+
+impl CloudAuthHealth {
+    fn mark_terminal(&self) {
+        self.terminal_failure.store(true, Ordering::Relaxed);
+    }
+
+    fn clear(&self) {
+        self.terminal_failure.store(false, Ordering::Relaxed);
+    }
+
+    fn snapshot(&self) -> CloudAuthSnapshot {
+        CloudAuthSnapshot {
+            terminal_failure: self.terminal_failure.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// True when a `/v1/auth/refresh` HTTP status means the refresh token itself is
+/// permanently rejected (so re-onboarding is the only recovery), as opposed to a
+/// transient server/network hiccup. GoTrue/FC answer a dead or unknown refresh
+/// token with 400/401 (`refresh_token_not_found`, `invalid_grant`); 5xx and 429
+/// are transient and must NOT latch the terminal flag.
+fn is_terminal_refresh_status(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::BAD_REQUEST
+}
 
 #[derive(Debug, Deserialize)]
 struct BootstrapResponse {
@@ -97,6 +132,9 @@ pub struct CloudApiBackend {
     /// Where to persist a rotated refresh token (`~/.amuxd/backend.toml`).
     /// `None` in tests that don't exercise persistence.
     persist_path: Option<PathBuf>,
+    /// Cloud-auth health, shared across clones. Latched when a refresh is
+    /// rejected with a terminal status; surfaced via `cloud_auth_health()`.
+    auth_health: Arc<CloudAuthHealth>,
 }
 
 impl CloudApiBackend {
@@ -130,6 +168,7 @@ impl CloudApiBackend {
             })),
             refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
             persist_path,
+            auth_health: Arc::new(CloudAuthHealth::default()),
         }
     }
 
@@ -167,7 +206,14 @@ impl CloudApiBackend {
             .map_err(network_error)?;
 
         if !resp.status().is_success() {
+            let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
+            // Latch a terminal-auth flag only when the refresh token itself is
+            // rejected (400/401). The daemon keeps retrying, but the desktop can
+            // now observe the dead session via `/v1/info` and auto re-onboard.
+            if is_terminal_refresh_status(status) {
+                self.auth_health.mark_terminal();
+            }
             return Err(BackendError::Auth(refresh_failure_message(&text)));
         }
 
@@ -194,6 +240,10 @@ impl CloudApiBackend {
         if let Some(new_rt) = rotated {
             self.persist_refresh_token(&new_rt);
         }
+
+        // A successful refresh clears any prior terminal-auth latch (e.g. after
+        // the desktop re-onboards the daemon with fresh credentials).
+        self.auth_health.clear();
 
         Ok(body.access_token)
     }
@@ -368,6 +418,10 @@ impl Backend for CloudApiBackend {
 
     async fn auth_token(&self) -> BackendResult<String> {
         self.access_token().await
+    }
+
+    fn cloud_auth_health(&self) -> Option<CloudAuthSnapshot> {
+        Some(self.auth_health.snapshot())
     }
 
     async fn fetch_bootstrap_mqtt(&self) -> BackendResult<Option<BootstrapMqttOverride>> {
@@ -2039,5 +2093,96 @@ mod tests {
         let backend = CloudApiBackend::new(config(&server));
         let cfg = backend.team_share_config("team-1").await.unwrap();
         assert_eq!(cfg.mode, None);
+    }
+
+    #[test]
+    fn terminal_refresh_status_only_for_400_and_401() {
+        use reqwest::StatusCode;
+        assert!(is_terminal_refresh_status(StatusCode::UNAUTHORIZED));
+        assert!(is_terminal_refresh_status(StatusCode::BAD_REQUEST));
+        // Transient / server-side failures must not latch the terminal flag.
+        assert!(!is_terminal_refresh_status(StatusCode::INTERNAL_SERVER_ERROR));
+        assert!(!is_terminal_refresh_status(StatusCode::SERVICE_UNAVAILABLE));
+        assert!(!is_terminal_refresh_status(StatusCode::TOO_MANY_REQUESTS));
+        assert!(!is_terminal_refresh_status(StatusCode::FORBIDDEN));
+    }
+
+    #[tokio::test]
+    async fn refresh_rejected_with_401_latches_terminal_auth() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/auth/refresh"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "error": { "code": "missing_auth", "message": "Token refresh failed: refresh_token_not_found" }
+            })))
+            .mount(&server)
+            .await;
+
+        let backend = CloudApiBackend::new(config(&server));
+        // Healthy until the first refusal.
+        assert_eq!(
+            backend.cloud_auth_health(),
+            Some(CloudAuthSnapshot { terminal_failure: false })
+        );
+
+        assert!(backend.access_token().await.is_err());
+        assert_eq!(
+            backend.cloud_auth_health(),
+            Some(CloudAuthSnapshot { terminal_failure: true })
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_5xx_does_not_latch_terminal_auth() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/auth/refresh"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+
+        let backend = CloudApiBackend::new(config(&server));
+        assert!(backend.access_token().await.is_err());
+        // A transient server error must leave the session presumed-recoverable.
+        assert_eq!(
+            backend.cloud_auth_health(),
+            Some(CloudAuthSnapshot { terminal_failure: false })
+        );
+    }
+
+    #[tokio::test]
+    async fn successful_refresh_clears_terminal_latch() {
+        let server = MockServer::start().await;
+        // First refresh is rejected (latches terminal); subsequent ones succeed
+        // (mirrors the desktop re-onboarding the daemon with fresh credentials).
+        Mock::given(method("POST"))
+            .and(path("/v1/auth/refresh"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "error": { "message": "refresh_token_not_found" }
+            })))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/auth/refresh"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(refresh_ok()))
+            .with_priority(2)
+            .mount(&server)
+            .await;
+
+        let backend = CloudApiBackend::new(config(&server));
+        assert!(backend.access_token().await.is_err());
+        assert_eq!(
+            backend.cloud_auth_health(),
+            Some(CloudAuthSnapshot { terminal_failure: true })
+        );
+
+        // Next refresh succeeds and clears the latch.
+        assert_eq!(backend.access_token().await.unwrap(), "access-token");
+        assert_eq!(
+            backend.cloud_auth_health(),
+            Some(CloudAuthSnapshot { terminal_failure: false })
+        );
     }
 }

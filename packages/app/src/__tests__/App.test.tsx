@@ -1,10 +1,6 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 
-const uiVariantState = vi.hoisted(() => ({
-  workspace: false,
-}))
-
 const uiStoreState = vi.hoisted(() => ({
   currentView: 'chat',
   closeSettings: vi.fn(),
@@ -34,8 +30,6 @@ const workspaceStoreState = vi.hoisted(() => ({
   isLoadingFile: false,
   clearSelection: vi.fn(),
   selectFile: vi.fn(),
-  isNewWorkspace: false,
-  setIsNewWorkspace: vi.fn(),
 }))
 
 const sidebarState = vi.hoisted(() => ({
@@ -53,6 +47,13 @@ const tabsStoreState = vi.hoisted(() => ({
   activeTab: null as null | { id: string; type: string; target: string },
   tabs: [] as Array<{ id: string; type: string; target: string }>,
   activeTabId: null as string | null,
+}))
+const currentTeamStoreState = vi.hoisted(() => ({
+  team: null as null | { id: string },
+  currentMember: null as null | { id: string },
+  teamUserId: null as string | null,
+  load: () => Promise.resolve(),
+  reloadAndSwitchTo: () => Promise.resolve(),
 }))
 
 // Polyfill browser APIs missing in jsdom
@@ -124,13 +125,14 @@ vi.mock('@/components/app-sidebar', () => ({
   SidebarCollapseToggle: () => null,
   SidebarSecondarySessionActions: () => null,
 }))
+vi.mock('@/components/sidebar/SidebarSecondColumn', () => ({
+  SidebarSecondColumn: () => <div data-testid="sidebar-second-column" />,
+}))
 vi.mock('@/components/settings/section-registry', () => ({
   SettingsSectionBody: () => <div data-testid="settings-section-body" />,
 }))
-vi.mock('@/lib/ui-variant', () => ({
-  isWorkspaceUIVariant: () => uiVariantState.workspace,
-}))
 vi.mock('@/components/chat/ChatPanel', () => ({ ChatPanel: () => <div data-testid="chat-panel">chat</div> }))
+vi.mock('@/components/chat/NewSessionDialog', () => ({ NewSessionDialog: () => null }))
 vi.mock('@/components/voice/VoiceInputFloatingButton', () => ({ VoiceInputFloatingButton: () => null }))
 vi.mock('@/components/ErrorBoundary', () => ({ ErrorBoundary: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
 vi.mock('@/components/updater/UpdateDialog', () => ({ UpdateDialogContainer: () => null }))
@@ -166,6 +168,18 @@ vi.mock('@/stores/workspace', () => ({
   useWorkspaceStore: vi.fn((sel: (s: any) => any) => {
     return sel(workspaceStoreState)
   }),
+}))
+// Mock the current-team store so App's mount-time load() doesn't fire the real
+// Tauri-invoke path (unavailable in jsdom) and leak unhandled rejections.
+vi.mock('@/stores/current-team', () => ({
+  useCurrentTeamStore: Object.assign(
+    vi.fn((sel: (s: any) => any) => sel(currentTeamStoreState)),
+    { getState: () => currentTeamStoreState, setState: vi.fn(), subscribe: () => () => {} },
+  ),
+  setLocalCacheTeamGate: () => Promise.resolve(),
+  readCachedCurrentTeam: () => null,
+  writeCachedCurrentTeam: () => {},
+  initialCurrentTeamState: () => ({ team: null, currentMember: null, teamUserId: null }),
 }))
 vi.mock('@/stores/tabs', () => ({
   useTabsStore: Object.assign(
@@ -225,7 +239,6 @@ import App from '../App'
 
 describe('App', () => {
   beforeEach(() => {
-    uiVariantState.workspace = false
     uiStoreState.currentView = 'chat'
     uiStoreState.layoutMode = 'task'
     uiStoreState.mainContentLayout = 'stacked'
@@ -233,7 +246,6 @@ describe('App', () => {
     workspaceStoreState.workspacePath = null
     workspaceStoreState.isPanelOpen = false
     workspaceStoreState.activeTab = 'shortcuts'
-    workspaceStoreState.isNewWorkspace = false
     teamModeState.devUnlocked = false
     teamModeState.teamModeType = null
     tabsStoreState.activeTab = null

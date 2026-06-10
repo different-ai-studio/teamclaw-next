@@ -8,7 +8,6 @@ import {
 import { resolveRuntimeStateEntryForAgent } from '@/lib/runtime-state-resolve'
 import {
   SESSION_AGENT_CONNECTING_TIMEOUT_MS,
-  isDriftedLocalGhostBinding,
   resolveSessionAgentUiState,
   type SessionAgentUiState,
 } from '@/lib/session-agent-ui-state'
@@ -17,6 +16,7 @@ import {
   isSupersededLocalAgent,
   noteLocalDaemonActorId,
 } from '@/lib/local-daemon-identity'
+import { resolveEngagedAgentStaleBinding } from '@/lib/session-agent-stale-binding'
 import { useActorPresenceStore } from '@/stores/actor-presence-store'
 import { useRuntimeStateStore, type RuntimeStateEntry } from '@/stores/runtime-state-store'
 import { getLocalDaemonActorId } from '@/lib/daemon-agent-admin'
@@ -34,14 +34,13 @@ function resolveStaleBinding(
   byRuntimeId: Record<string, RuntimeStateEntry>,
   presenceByActor: Record<string, { online: boolean } | undefined>,
 ): boolean {
-  if (isSupersededLocalAgent(agent.id)) return true
   const localId = getKnownLocalDaemonActorId()
   const dbRuntimeId = agentToRuntimeId.get(agent.id)
   const agentEntry = resolveRuntimeStateEntryForAgent(agent.id, byRuntimeId, dbRuntimeId)
   const localEntry = localId
     ? resolveRuntimeStateEntryForAgent(localId, byRuntimeId)
     : undefined
-  return isDriftedLocalGhostBinding({
+  return resolveEngagedAgentStaleBinding({
     agentId: agent.id,
     localDaemonActorId: localId,
     presenceOnline: presenceByActor[agent.id]?.online,

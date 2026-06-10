@@ -20,6 +20,7 @@ import {
   checkAgentPermission as authzCheckAgentPermission,
 } from "./authz.js";
 import { ApiError } from "../http-utils.js";
+import { normalizeAgentTypes } from "../agent-types.js";
 
 const iso = (d: Date | string | null | undefined): string | null =>
   d ? new Date(d).toISOString() : null;
@@ -330,8 +331,14 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
       if (!ctx.callerActorId) {
         throw new ApiError(403, "forbidden", "ensureAgentTypes: no agent actor visible to caller");
       }
+      // Keep the default a member of the supported set (see normalizeAgentTypes).
+      const norm = normalizeAgentTypes(supportedTypes, defaultAgentType);
       await (db.update(agents) as any)
-        .set({ agentTypes: supportedTypes, defaultAgentType, updatedAt: new Date() })
+        .set({
+          agentTypes: norm.supportedTypes,
+          defaultAgentType: norm.defaultAgentType,
+          updatedAt: new Date(),
+        })
         .where(eq(agents.id, ctx.callerActorId));
     },
 

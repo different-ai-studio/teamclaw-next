@@ -4,7 +4,12 @@ import { isTauri } from '@/lib/utils'
 import { getBackend } from '@/lib/backend'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { useMemberPreferencesStore } from '@/stores/member-preferences-store'
-import { probeDaemonHttp, invalidateDaemonConnection } from '@/lib/daemon-local-client'
+import {
+  probeDaemonHttp,
+  invalidateDaemonConnection,
+  fetchDaemonCloudAuthStatus,
+} from '@/lib/daemon-local-client'
+import { getLocalDaemonActorId } from '@/lib/daemon-agent-admin'
 import { markStartup } from '@/lib/startup-perf'
 
 /**
@@ -51,11 +56,24 @@ type DaemonOnboardingState = {
   busy: boolean
   error: string | null
   ownedAgents: OwnedAgent[]
+  /** The local daemon's cloud session was terminally rejected (refresh token
+   * dead). Drives the "reconnecting" banner; the daemon can't advertise its
+   * backends or sync until re-onboarded. */
+  cloudAuthExpired: boolean
+  /** An auto re-onboard is in flight (mint re-invite → amuxd init → restart). */
+  healing: boolean
+  /** Last auto-heal failure (e.g. caller doesn't own the agent). Non-null
+   * suppresses further automatic attempts; the banner offers a manual retry. */
+  healError: string | null
   refresh: () => Promise<void>
   loadOwnedAgents: () => Promise<void>
   createNewAgent: (name: string, visibility: Visibility) => Promise<void>
   bindExistingAgent: (agentId: string, displayName: string) => Promise<void>
   forceReset: () => Promise<void>
+  /** Poll the daemon's cloud-auth health; auto-heal once when terminally expired. */
+  checkCloudSession: () => Promise<void>
+  /** Re-onboard the local daemon in place (same actor) to restore credentials. */
+  autoHealCloudSession: () => Promise<void>
 }
 
 async function daemonTeamId(): Promise<string | null> {
@@ -133,6 +151,9 @@ export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get)
   busy: false,
   error: null,
   ownedAgents: [],
+  cloudAuthExpired: false,
+  healing: false,
+  healError: null,
 
   refresh: async () => {
     if (!isTauri()) {
@@ -158,10 +179,15 @@ export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get)
       // Daemon and actor share a team — ensure the default team workspace is
       // registered locally + in the cloud (idempotent, best-effort).
       void ensureDefaultWorkspaceRegistered(currentTeamId)
+      // The daemon process is up, but its *cloud* session may be dead (refresh
+      // token rejected) — detect and auto re-onboard so it can advertise its
+      // backends + sync again. Best-effort; never blocks `ready`.
+      void get().checkCloudSession()
       return
     }
     set({ status: 'starting', loaded: true, error: null })
-    const ok = await ensureHealthy()
+    let ok = await ensureHealthy()
+    if (!ok) ok = await ensureHealthy()
     set({
       status: ok ? 'ready' : 'error',
       loaded: true,
@@ -236,6 +262,58 @@ export const useDaemonOnboardingStore = create<DaemonOnboardingState>((set, get)
       set({ error: String(e) })
     } finally {
       set({ busy: false })
+    }
+  },
+
+  checkCloudSession: async () => {
+    if (!isTauri()) return
+    const status = await fetchDaemonCloudAuthStatus()
+    if (status !== 'expired') {
+      // Healthy / unknown (older daemon or transient) — clear any stale banner.
+      if (get().cloudAuthExpired) set({ cloudAuthExpired: false })
+      return
+    }
+    set({ cloudAuthExpired: true })
+    // Auto-heal exactly once. A prior failure (`healError`) or an in-flight heal
+    // suppresses further automatic attempts so a non-owner daemon never spins;
+    // the banner's retry button drives subsequent attempts explicitly.
+    if (!get().healing && !get().healError) {
+      await get().autoHealCloudSession()
+    }
+  },
+
+  autoHealCloudSession: async () => {
+    if (!isTauri() || get().healing) return
+    const teamId = useCurrentTeamStore.getState().team?.id
+    if (!teamId) return
+    set({ healing: true, healError: null })
+    try {
+      const actorId = await getLocalDaemonActorId()
+      if (!actorId) throw new Error('daemon actor id unavailable')
+      // Re-inviting an existing actor requires ownership (FC enforces it). If
+      // this user doesn't own the daemon, surface manual guidance instead.
+      await get().loadOwnedAgents()
+      const owned = get().ownedAgents.find((a) => a.agentId === actorId)
+      if (!owned) {
+        set({
+          healError: i18n.t(
+            'settings.daemonOnboarding.cloudExpiredNotOwner',
+            'This daemon’s cloud session expired and only its owner can reconnect it. Re-onboard it from the owning account.',
+          ),
+        })
+        return
+      }
+      // Mint a re-invite for the SAME actor (rebind, no orphan), run `amuxd
+      // init` to write fresh credentials, then install-service kickstarts the
+      // running daemon (`launchctl kickstart -k`) so it reloads backend.toml.
+      await onboard(teamId, owned.displayName, actorId)
+      invalidateDaemonConnection()
+      set({ cloudAuthExpired: false })
+      await get().refresh()
+    } catch (e) {
+      set({ healError: String(e) })
+    } finally {
+      set({ healing: false })
     }
   },
 }))
