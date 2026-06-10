@@ -14,6 +14,7 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use crate::backend::Backend;
 use crate::config::workspace_control::WorkspaceControlStore;
 use crate::config::{DaemonConfig, HttpConfig};
 
@@ -60,6 +61,9 @@ impl Drop for HttpHandle {
 /// Pass `Some(store)` to enable the `/v1/workspaces/*` control-plane APIs.
 /// Pass `None` to disable them (workspace routes return 404). The latter is
 /// the default for tests that only exercise session/runtime behaviour.
+// Wide by design: this is the single HTTP bring-up seam; a builder would add
+// indirection without removing any of the genuinely-distinct dependencies.
+#[allow(clippy::too_many_arguments)]
 pub async fn spawn(
     http: HttpConfig,
     meta: DaemonMetadata,
@@ -69,6 +73,7 @@ pub async fn spawn(
     opencode_settings: Option<Arc<crate::opencode_settings::OpenCodeSettingsService>>,
     sync_dispatcher: crate::sync::dispatch::SyncDispatcher,
     register_workspace_tx: Option<crate::http::state::RegisterWorkspaceTx>,
+    backend: Option<Arc<dyn Backend>>,
 ) -> anyhow::Result<HttpHandle> {
     // Resolve token + port files (defaults live in DaemonConfig::config_dir).
     let token_path = http
@@ -116,7 +121,8 @@ pub async fn spawn(
         opencode_settings,
         sync_dispatcher,
         register_workspace_tx,
-    );
+    )
+    .with_backend(backend);
 
     spawn_reapers(state.clone());
     let mut app: Router = routes::build(state);
@@ -207,7 +213,7 @@ mod tests {
         };
         let meta = metadata("actor-test".into(), "test");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None)
+        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None, None)
             .await
             .unwrap();
         let url = format!("http://{}/v1/healthz", handle.local_addr);
@@ -236,6 +242,7 @@ mod tests {
             None,
             None,
             test_dispatcher(),
+            None,
             None,
         )
         .await
@@ -283,6 +290,7 @@ mod tests {
             None,
             None,
             test_dispatcher(),
+            None,
             None,
         )
         .await
@@ -470,6 +478,7 @@ mod tests {
             None,
             test_dispatcher(),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -536,7 +545,7 @@ mod tests {
         };
         let meta = metadata("actor-x".into(), "test");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None)
+        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None, None)
             .await
             .unwrap();
         let base = format!("http://{}", handle.local_addr);
@@ -607,7 +616,7 @@ mod tests {
         };
         let meta = metadata("actor-abc".into(), "cloud_api");
         let runtime = crate::http::runtime_adapter::StubRuntimeAdapter::new(256);
-        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None)
+        let handle = spawn(cfg, meta, runtime, None, None, None, test_dispatcher(), None, None)
             .await
             .unwrap();
         let url = format!("http://{}/v1/info", handle.local_addr);
@@ -698,6 +707,7 @@ mod tests {
             None,
             None,
             test_dispatcher(),
+            None,
             None,
         )
             .await

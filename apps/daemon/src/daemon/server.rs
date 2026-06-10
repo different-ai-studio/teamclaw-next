@@ -1168,6 +1168,7 @@ impl DaemonServer {
                 opencode_settings,
                 self.sync_dispatcher.clone(),
                 Some(register_workspace_tx),
+                Some(self.backend.clone()),
             )
             .await
             {

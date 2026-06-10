@@ -34,6 +34,12 @@ vi.mock('@/lib/daemon-local-client', () => ({
       ? h.probeQueue.shift()!
       : (h.probeQueue[0] ?? { ok: false, reason: 'not_running' }),
   ),
+  // Default to 'unknown' so the ready path's cloud-session probe is a no-op in
+  // these orchestration tests (auto-heal is covered separately).
+  fetchDaemonCloudAuthStatus: vi.fn(async () => 'unknown'),
+}))
+vi.mock('@/lib/daemon-agent-admin', () => ({
+  getLocalDaemonActorId: vi.fn(async () => null),
 }))
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string, args?: unknown) => {
@@ -60,6 +66,9 @@ const reset = () =>
     busy: false,
     error: null,
     ownedAgents: [],
+    cloudAuthExpired: false,
+    healing: false,
+    healError: null,
   })
 
 beforeEach(() => {

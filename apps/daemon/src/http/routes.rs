@@ -153,17 +153,38 @@ struct InfoBody {
     uptime_seconds: i64,
     actor_id: String,
     backend_kind: String,
+    /// Cloud-auth session health. Omitted when the backend exposes no auth
+    /// surface (e.g. focused tests). `status: "expired"` means the refresh
+    /// token was terminally rejected and the daemon needs re-onboarding — the
+    /// desktop polls this to trigger auto re-onboard.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cloud_auth: Option<CloudAuthInfo>,
+}
+
+#[derive(serde::Serialize)]
+struct CloudAuthInfo {
+    /// `"ok"` | `"expired"`. Coarse status only — the raw auth-backend error is
+    /// kept out of this unauthenticated endpoint.
+    status: &'static str,
 }
 
 async fn info_handler(State(state): State<HttpState>) -> Json<InfoBody> {
     let uptime = chrono::Utc::now()
         .signed_duration_since(state.meta.started_at)
         .num_seconds();
+    let cloud_auth = state
+        .backend
+        .as_ref()
+        .and_then(|b| b.cloud_auth_health())
+        .map(|h| CloudAuthInfo {
+            status: if h.terminal_failure { "expired" } else { "ok" },
+        });
     Json(InfoBody {
         version: state.meta.version,
         started_at: state.meta.started_at,
         uptime_seconds: uptime,
         actor_id: state.meta.actor_id.clone(),
         backend_kind: state.meta.backend_kind.clone(),
+        cloud_auth,
     })
 }
