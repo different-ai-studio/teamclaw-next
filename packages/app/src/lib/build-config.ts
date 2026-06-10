@@ -48,6 +48,7 @@ export interface BuildConfig {
     auth?: {
       google?: boolean
       wechat?: boolean
+      phone?: boolean
     }
   }
   s3?: {
@@ -93,7 +94,7 @@ const fallback: BuildConfig = {
     lockLlmConfig: false,
   },
   app: { name: 'TeamClaw', shortName: 'teamclaw' },
-  features: { teamMode: true, updater: true, channels: { ...allChannelsEnabled }, auth: { google: false, wechat: false } },
+  features: { teamMode: true, updater: true, channels: { ...allChannelsEnabled }, auth: { google: false, wechat: false, phone: false } },
   defaults: { locale: 'zh-CN', theme: 'system' },
 }
 

@@ -30,10 +30,13 @@ interface AuthState {
   authFlow: AuthFlow;
   errorMessage: string | null;
   otpEmail: string | null;
+  otpPhone: string | null;
   upgradeEmail: string | null;
   hydrate: () => Promise<void>;
   sendOtp: (email: string) => Promise<boolean>;
   verifyOtp: (code: string) => Promise<void>;
+  sendPhoneOtp: (phone: string) => Promise<boolean>;
+  verifyPhoneOtp: (code: string) => Promise<void>;
   resetOtp: () => void;
   signInAnonymously: () => Promise<boolean>;
   signInWithOAuth: (provider: OAuthProvider) => Promise<boolean>;
@@ -74,6 +77,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   authFlow: "idle",
   errorMessage: null,
   otpEmail: null,
+  otpPhone: null,
   upgradeEmail: null,
   hydrate: async () => {
     set({ loading: true, authFlow: "idle", errorMessage: null });
@@ -125,7 +129,41 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
   },
-  resetOtp: () => set({ otpEmail: null, errorMessage: null }),
+  sendPhoneOtp: async (phone) => {
+    if (!hasBackendConfig()) {
+      set({ loading: false, errorMessage: BACKEND_CONFIG_MISSING_MESSAGE });
+      return false;
+    }
+    set({ loading: true, authFlow: "idle", errorMessage: null });
+    try {
+      await getBackend().auth.sendPhoneOtp(phone);
+    } catch (error) {
+      set({ loading: false, errorMessage: errorMessageFor(error) });
+      return false;
+    }
+    set({ loading: false, otpPhone: phone });
+    return true;
+  },
+  verifyPhoneOtp: async (code) => {
+    if (!hasBackendConfig()) {
+      set({ loading: false, errorMessage: BACKEND_CONFIG_MISSING_MESSAGE });
+      return;
+    }
+    const phone = get().otpPhone;
+    if (!phone) {
+      set({ errorMessage: "No pending sign-in. Re-enter your phone number." });
+      return;
+    }
+    set({ loading: true, authFlow: "idle", errorMessage: null });
+    try {
+      const session = await getBackend().auth.verifyPhoneOtp(phone, code);
+      set({ session: storeSession(session), loading: false, otpPhone: null });
+    } catch (error) {
+      set({ loading: false, errorMessage: errorMessageFor(error) });
+      return;
+    }
+  },
+  resetOtp: () => set({ otpEmail: null, otpPhone: null, errorMessage: null }),
   signInAnonymously: async () => {
     if (!hasBackendConfig()) {
       set({ loading: false, errorMessage: BACKEND_CONFIG_MISSING_MESSAGE });
@@ -236,7 +274,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   resetUpgradeOtp: () => set({ upgradeEmail: null, upgradeLoading: false, errorMessage: null }),
   signOut: async () => {
     await getBackend().auth.signOut();
-    set({ session: null, authFlow: "idle", otpEmail: null, upgradeEmail: null });
+    set({ session: null, authFlow: "idle", otpEmail: null, otpPhone: null, upgradeEmail: null });
     // Reset the current team so the NEXT (e.g. anonymous) login doesn't inherit
     // the previous user's team. Without this the current-team store kept the old
     // team (its RLS-lag guard preserves it while the new user's team list is
