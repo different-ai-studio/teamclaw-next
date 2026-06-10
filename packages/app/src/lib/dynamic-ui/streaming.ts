@@ -1,4 +1,12 @@
-import type { UITree, UIElement } from "@json-render/core"
+import type { UIElement } from "@json-render/core"
+
+/**
+ * 流式解析得到的扁平 UI 树（`{ root, elements }`，即 0.19 的合法 `Spec` 形状）。
+ */
+export type UITree = {
+  root: string
+  elements: Record<string, UIElement>
+}
 
 /**
  * 流式 UI 解析状态

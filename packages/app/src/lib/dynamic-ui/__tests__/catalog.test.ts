@@ -5,6 +5,6 @@ describe("dynamic UI catalog", () => {
     const { catalogPrompt, uiCatalog } = await import("../catalog")
 
     expect(catalogPrompt).toContain("Card")
-    expect(uiCatalog.components.Card.description).toBe("卡片容器，用于分组相关内容")
+    expect(uiCatalog.data.components.Card.description).toBe("卡片容器，用于分组相关内容")
   })
 })

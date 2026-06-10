@@ -68,7 +68,6 @@ import { SetupGuide } from "@/components/SetupGuide";
 import { WelcomeScreen } from "@/components/auth/WelcomeScreen";
 import { hasSeenWelcome, markWelcomeSeen } from "@/stores/deps";
 import { TelemetryConsentDialog } from "@/components/telemetry/TelemetryConsentDialog";
-import { WorkspaceTypeDialog } from "@/components/workspace/WorkspaceTypeDialog";
 import { RuntimeRefreshWorkspaceBanner } from "@/components/workspace/RuntimeRefreshBanner";
 import { useSessionStore } from "@/stores/session";
 import { useSessionListStore } from "@/stores/session-list-store";
