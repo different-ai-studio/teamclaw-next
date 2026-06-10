@@ -95,7 +95,15 @@ async function onboard(teamId: string, displayName: string, targetActorId: strin
     ttlSeconds: 600,
     targetActorId,
   })
-  const inviteUrl = `teamclaw://invite?token=${encodeURIComponent(invite.token)}`
+  // Carry this app's effective Cloud API endpoint into the invite so the daemon
+  // talks to the same backend the desktop build/runtime resolved — otherwise it
+  // falls back to its own hardcoded default and diverges in non-prod builds.
+  const { getEffectiveServerConfig } = await import('@/lib/server-config')
+  const cloudApiUrl = (await getEffectiveServerConfig()).cloudApiUrl
+  let inviteUrl = `teamclaw://invite?token=${encodeURIComponent(invite.token)}`
+  if (cloudApiUrl) {
+    inviteUrl += `&cloud_api_url=${encodeURIComponent(cloudApiUrl)}`
+  }
   const result = await invoke<{ actorId: string; teamId: string }>('daemon_init', { inviteUrl })
   await invoke('daemon_install_service')
   return result.actorId

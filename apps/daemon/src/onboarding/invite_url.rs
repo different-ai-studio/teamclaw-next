@@ -7,6 +7,10 @@ const INVITE_URL_SCHEMES: &[&str] = &["teamclaw", "amux"];
 pub struct ParsedInvite {
     pub token: String,
     pub broker_url: Option<String>,
+    /// Optional `?cloud_api_url=` override. The inviter (desktop) bakes its own
+    /// effective Cloud API endpoint into the invite so the daemon follows the
+    /// app's build/runtime choice instead of a hardcoded default.
+    pub cloud_api_url: Option<String>,
 }
 
 pub fn parse(raw: &str) -> Result<ParsedInvite> {
@@ -40,7 +44,17 @@ pub fn parse(raw: &str) -> Result<ParsedInvite> {
         .map(|(_, v)| v.into_owned())
         .filter(|v| !v.is_empty());
 
-    Ok(ParsedInvite { token, broker_url })
+    let cloud_api_url = url
+        .query_pairs()
+        .find(|(k, _)| k == "cloud_api_url")
+        .map(|(_, v)| v.into_owned())
+        .filter(|v| !v.is_empty());
+
+    Ok(ParsedInvite {
+        token,
+        broker_url,
+        cloud_api_url,
+    })
 }
 
 #[cfg(test)]
@@ -66,6 +80,27 @@ mod tests {
         let p = parse("teamclaw://invite?token=tok-123&broker=mqtts://ai.ucar.cc:8883").unwrap();
         assert_eq!(p.token, "tok-123");
         assert_eq!(p.broker_url.as_deref(), Some("mqtts://ai.ucar.cc:8883"));
+        assert_eq!(p.cloud_api_url, None);
+    }
+
+    #[test]
+    fn parses_invite_with_cloud_api_url() {
+        // The desktop URL-encodes its effective endpoint into `?cloud_api_url=`.
+        let p = parse(
+            "teamclaw://invite?token=tok-123&cloud_api_url=https%3A%2F%2Fbelayo-test-api.ucar.cc",
+        )
+        .unwrap();
+        assert_eq!(p.token, "tok-123");
+        assert_eq!(
+            p.cloud_api_url.as_deref(),
+            Some("https://belayo-test-api.ucar.cc")
+        );
+    }
+
+    #[test]
+    fn empty_cloud_api_url_is_none() {
+        let p = parse("teamclaw://invite?token=tok-123&cloud_api_url=").unwrap();
+        assert_eq!(p.cloud_api_url, None);
     }
 
     #[test]
