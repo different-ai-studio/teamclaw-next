@@ -178,6 +178,35 @@ export async function isDaemonHttpAvailable(): Promise<boolean> {
   return probe.ok
 }
 
+// 'ok'      — daemon's cloud session refreshes normally.
+// 'expired' — refresh token terminally rejected (re-onboarding required).
+// 'unknown' — daemon unreachable, or an older daemon that doesn't report it.
+export type DaemonCloudAuthStatus = 'ok' | 'expired' | 'unknown'
+
+/**
+ * Read the local daemon's cloud-auth session health from `/v1/info` (an
+ * unauthenticated endpoint). `'expired'` means the stored refresh token was
+ * terminally rejected by the auth backend — the daemon keeps retrying a dead
+ * token and the desktop should re-onboard it. Best-effort: any reachability or
+ * shape problem degrades to `'unknown'` (never throws).
+ */
+export async function fetchDaemonCloudAuthStatus(): Promise<DaemonCloudAuthStatus> {
+  if (!isTauri()) return 'unknown'
+  const info = await readDaemonHttpInfo()
+  if (!info) return 'unknown'
+  try {
+    const resp = await fetch(`${info.base_url}/v1/info`)
+    if (!resp.ok) return 'unknown'
+    const data: { cloud_auth?: { status?: string } } = await resp.json()
+    const status = data.cloud_auth?.status
+    if (status === 'expired') return 'expired'
+    if (status === 'ok') return 'ok'
+    return 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
 // ─── Authenticated fetch ──────────────────────────────────────────────────────
 
 async function daemonFetch<T>(
