@@ -61,6 +61,9 @@ impl Drop for HttpHandle {
 /// Pass `Some(store)` to enable the `/v1/workspaces/*` control-plane APIs.
 /// Pass `None` to disable them (workspace routes return 404). The latter is
 /// the default for tests that only exercise session/runtime behaviour.
+// Wide by design: this is the single HTTP bring-up seam; a builder would add
+// indirection without removing any of the genuinely-distinct dependencies.
+#[allow(clippy::too_many_arguments)]
 pub async fn spawn(
     http: HttpConfig,
     meta: DaemonMetadata,
