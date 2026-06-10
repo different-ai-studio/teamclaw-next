@@ -138,3 +138,6 @@ build.config.json
 
 .opencode/
 opencode.json
+
+# Local-only manual belayo deploy workflow (not committed; deploy via deploy-local.sh)
+.github/workflows/belayo-deploy.yml

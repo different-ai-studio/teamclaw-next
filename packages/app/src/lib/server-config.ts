@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauri } from "@/lib/utils";
 import type { BackendKind } from "@/lib/backend/types";
+import { buildConfig } from "@/lib/build-config";
 
 export interface ServerConfig {
   backendKind?: BackendKind;
@@ -42,7 +43,8 @@ function envConfig(): ServerConfig {
         : undefined;
   return {
     backendKind: "cloud_api",
-    cloudApiUrl: import.meta.env.VITE_CLOUD_API_URL,
+    // Env var wins; otherwise fall back to the value baked into build.config.*.
+    cloudApiUrl: import.meta.env.VITE_CLOUD_API_URL || buildConfig.cloudApiUrl,
     mqttHost: import.meta.env.VITE_MQTT_HOST,
     mqttPort: Number.isFinite(mqttPort) ? mqttPort : undefined,
     mqttUseTls,

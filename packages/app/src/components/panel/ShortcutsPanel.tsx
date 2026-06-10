@@ -26,7 +26,6 @@ import { useUIStore } from "@/stores/ui"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useCurrentTeamStore } from "@/stores/current-team"
 import { useSidebar } from "@/components/ui/sidebar"
-import { isWorkspaceUIVariant } from "@/lib/ui-variant"
 
 // ── Icon resolver ────────────────────────────────────────────────────
 // Uses PascalCase Lucide icon names (e.g. "ShoppingCart", "Users", "BarChart3").
@@ -183,7 +182,6 @@ export function ShortcutsPanel() {
   /** Close workspace Shortcuts dock, expand main sidebar, then open settings (avoids header / traffic-light overlap). */
   const openPersonalShortcutsSettings = useCallback(() => {
     const inShortcutsLeftDock =
-      isWorkspaceUIVariant() &&
       isPanelOpen &&
       workspaceActiveTab === "shortcuts"
     if (inShortcutsLeftDock) {

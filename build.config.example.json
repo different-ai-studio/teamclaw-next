@@ -1,4 +1,5 @@
 {
+  "cloudApiUrl": "https://cloud.ucar.cc",
   "team": {
     "llm": {
       "baseUrl": "",
@@ -12,7 +13,6 @@
   "app": {
     "name": "TeamClaw",
     "shortName": "teamclaw",
-    "uiVariant": "default",
     "palette": "default",
     "updater": {
       "endpoints": [

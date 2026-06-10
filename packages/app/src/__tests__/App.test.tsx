@@ -1,10 +1,6 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 
-const uiVariantState = vi.hoisted(() => ({
-  workspace: false,
-}))
-
 const uiStoreState = vi.hoisted(() => ({
   currentView: 'chat',
   closeSettings: vi.fn(),
@@ -122,11 +118,11 @@ vi.mock('@/components/app-sidebar', () => ({
   SidebarCollapseToggle: () => null,
   SidebarSecondarySessionActions: () => null,
 }))
+vi.mock('@/components/sidebar/SidebarSecondColumn', () => ({
+  SidebarSecondColumn: () => <div data-testid="sidebar-second-column" />,
+}))
 vi.mock('@/components/settings/section-registry', () => ({
   SettingsSectionBody: () => <div data-testid="settings-section-body" />,
-}))
-vi.mock('@/lib/ui-variant', () => ({
-  isWorkspaceUIVariant: () => uiVariantState.workspace,
 }))
 vi.mock('@/components/chat/ChatPanel', () => ({ ChatPanel: () => <div data-testid="chat-panel">chat</div> }))
 vi.mock('@/components/chat/NewSessionDialog', () => ({ NewSessionDialog: () => null }))
@@ -223,7 +219,6 @@ import App from '../App'
 
 describe('App', () => {
   beforeEach(() => {
-    uiVariantState.workspace = false
     uiStoreState.currentView = 'chat'
     uiStoreState.layoutMode = 'task'
     uiStoreState.mainContentLayout = 'stacked'

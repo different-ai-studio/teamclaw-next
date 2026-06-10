@@ -69,12 +69,9 @@ export default defineConfig({
     {
       name: 'inject-app-short-name',
       transformIndexHtml(html) {
-        const uiVariant =
-          (buildConfig as any).app?.uiVariant === 'workspace' ? 'workspace' : 'default'
         const palette = ((buildConfig as any).app?.palette as string) || 'default'
         return html
           .replace(/__APP_SHORT_NAME__/g, sn as string)
-          .replace(/__UI_VARIANT__/g, uiVariant)
           .replace(/__PALETTE__/g, palette)
       },
     },
@@ -107,7 +104,6 @@ export default defineConfig({
   define: {
     __BUILD_CONFIG__: JSON.stringify(buildConfig),
     // Inject build config defaults into import.meta.env so they work without .env files
-    'import.meta.env.VITE_UI_VARIANT': JSON.stringify((buildConfig as any).app?.uiVariant ?? ''),
     'import.meta.env.VITE_LOCALE': JSON.stringify((buildConfig as any).defaults?.locale ?? ''),
     'import.meta.env.PACKAGE_VERSION': JSON.stringify(
       JSON.parse(readFileSync(path.join(rootDir, 'apps/desktop/tauri.conf.json'), 'utf-8')).version ?? '0.0.0'

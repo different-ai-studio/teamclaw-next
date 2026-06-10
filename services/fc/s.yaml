@@ -7,7 +7,10 @@ resources:
     component: fc3
     props:
       region: cn-shenzhen
-      functionName: teamclaw-sync
+      # Defaults to teamclaw-sync (the auto-deployed function). The manual
+      # belayo-deploy.yml workflow sets FC_FUNCTION_NAME=belayo-api to target
+      # the production function from this same s.yaml + services/fc code.
+      functionName: ${env('FC_FUNCTION_NAME', 'teamclaw-sync')}
       runtime: nodejs20
       handler: dist/index.handler
       timeout: 30
@@ -63,7 +66,10 @@ resources:
         GOOGLE_CLIENT_ID: ${env('GOOGLE_CLIENT_ID', '')}
         GOOGLE_CLIENT_SECRET: ${env('GOOGLE_CLIENT_SECRET', '')}
       triggers:
-        - triggerName: http-trigger
+        # Trigger name is parameterized so we can adopt a pre-existing function's
+        # http trigger (FC console default is `defaultTrigger`). Defaults to
+        # http-trigger so teamclaw-sync / the GHA deploy are unaffected.
+        - triggerName: ${env('FC_HTTP_TRIGGER_NAME', 'http-trigger')}
           triggerType: http
           triggerConfig:
             authType: anonymous

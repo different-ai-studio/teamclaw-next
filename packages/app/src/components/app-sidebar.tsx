@@ -1,9 +1,8 @@
 import * as React from "react"
 import { useTranslation } from "react-i18next"
-import { Search, SquarePen, MessageSquare, Loader2, Archive, PanelLeftIcon, Pencil, Ellipsis, Settings, Pin, SquarePlus, UserPlus, Lightbulb, ChevronUp, Mail, CalendarDays, LogOut, Users, Trophy, Sparkles, Info } from "lucide-react"
+import { Search, SquarePen, PanelLeftIcon, Settings, ChevronUp, Mail, CalendarDays, LogOut, Users, Trophy, Sparkles } from "lucide-react"
 import { useTeamModeStore } from "@/stores/team-mode"
 import { UpgradeAccountDialog } from "@/components/auth/UpgradeAccountDialog"
-import { isWorkspaceUIVariant } from "@/lib/ui-variant"
 
 import { useSessionStore } from "@/stores/session"
 import { useStreamingStore } from "@/stores/streaming"
@@ -16,19 +15,12 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
   SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
-import { formatRelativeTime } from "@/lib/date-format"
 import { Button } from "@/components/ui/button"
 import { AnimatedClock } from "@/components/ui/animated-clock"
-import { DefaultBottomNav } from "@/components/navigation/DefaultBottomNav"
-import { ShortcutsPanel, ActorsView, IdeasView } from "@/components/panel"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,33 +30,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { TrafficLights } from "@/components/ui/traffic-lights"
-import { buildSessionListActivityMap, type SessionListActivity } from "@/lib/session-list-activity"
+import { buildSessionListActivityMap } from "@/lib/session-list-activity"
 import { SessionSearchDialog } from "@/components/sidebar/session-search-dialog"
 import { SessionDetailDialog, type SessionDetailListHints } from "@/components/sidebar/SessionDetailDialog"
 import { NavRail } from "@/components/sidebar/NavRail"
 import { MqttDisconnectedNotice } from "@/components/sidebar/MqttDisconnectedNotice"
-import { useSessionWorkspaceLabels } from "@/hooks/use-session-workspace-labels"
-
-function SessionActivityBadge({ activity }: { activity?: SessionListActivity }) {
-  const { t } = useTranslation()
-  if (!activity) return null
-  if (activity.state === "running") {
-    return (
-      <Loader2
-        className="h-3.5 w-3.5 shrink-0 animate-spin text-primary"
-        aria-label={t("sidebar.sessionRunning", "Running")}
-      />
-    )
-  }
-
-  return (
-    <span className="min-w-0 shrink rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold leading-4 text-emerald-600">
-      <span className="block truncate">
-        {t("sidebar.awaitingConfirmation", "Awaiting confirmation")}
-      </span>
-    </span>
-  )
-}
 
 /** Sidebar collapse control only (workspace variant sidebar header). */
 export function SidebarCollapseToggle({ className }: { className?: string }) {
@@ -247,95 +217,6 @@ export function SidebarIconGroup({ className }: { className?: string }) {
   )
 }
 
-function DefaultShortcutsHeaderControls() {
-  const { t } = useTranslation()
-  const openSettings = useUIStore(s => s.openSettings)
-  const newShortcutLabel = t('shortcuts.newShortcut', 'New Shortcut')
-
-  return (
-    <div className="flex items-center gap-0.5">
-      <SidebarCollapseToggle />
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-        onClick={() => openSettings('shortcuts')}
-        title={newShortcutLabel}
-        aria-label={newShortcutLabel}
-      >
-        <SquarePlus className="h-4 w-4" />
-      </Button>
-    </div>
-  )
-}
-
-async function notImplementedToast(message: string) {
-  const { toast } = await import('sonner')
-  toast(message)
-}
-
-function DefaultActorsHeaderControls() {
-  const { t } = useTranslation()
-  const searchLabel = t('common.search', 'Search')
-  const inviteLabel = t('sidebar.invite', 'Invite member')
-  return (
-    <div className="flex items-center gap-0.5">
-      <SidebarCollapseToggle />
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-        onClick={() => void notImplementedToast(t('common.comingSoon', 'Coming soon'))}
-        title={searchLabel}
-        aria-label={searchLabel}
-      >
-        <Search className="h-4 w-4" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-        onClick={() => void notImplementedToast(t('common.comingSoon', 'Coming soon'))}
-        title={inviteLabel}
-        aria-label={inviteLabel}
-      >
-        <UserPlus className="h-4 w-4" />
-      </Button>
-    </div>
-  )
-}
-
-function DefaultIdeasHeaderControls() {
-  const { t } = useTranslation()
-  const searchLabel = t('common.search', 'Search')
-  const newIdeaLabel = t('sidebar.newIdea', 'New idea')
-  return (
-    <div className="flex items-center gap-0.5">
-      <SidebarCollapseToggle />
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-        onClick={() => void notImplementedToast(t('common.comingSoon', 'Coming soon'))}
-        title={searchLabel}
-        aria-label={searchLabel}
-      >
-        <Search className="h-4 w-4" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-        onClick={() => void notImplementedToast(t('common.comingSoon', 'Coming soon'))}
-        title={newIdeaLabel}
-        aria-label={newIdeaLabel}
-      >
-        <Lightbulb className="h-4 w-4" />
-      </Button>
-    </div>
-  )
-}
-
 function SidebarUserAccountMenu() {
   const { t, i18n } = useTranslation()
   const authSession = useAuthStore((s) => s.session)
@@ -467,107 +348,21 @@ function SidebarUserAccountMenu() {
   )
 }
 
-// Inline editing input component for session rename
-function SessionRenameInput({
-  defaultValue,
-  onConfirm,
-  onCancel,
-}: {
-  defaultValue: string;
-  onConfirm: (value: string) => void;
-  onCancel: () => void;
-}) {
-  const inputRef = React.useRef<HTMLInputElement>(null);
-
-  React.useEffect(() => {
-    const input = inputRef.current;
-    if (input) {
-      input.focus();
-      input.select();
-    }
-  }, [defaultValue]);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      const value = inputRef.current?.value.trim();
-      if (value) onConfirm(value);
-      else onCancel();
-    } else if (e.key === "Escape") {
-      onCancel();
-    }
-  };
-
-  return (
-    <input
-      ref={inputRef}
-      defaultValue={defaultValue}
-      onKeyDown={handleKeyDown}
-      onBlur={() => {
-        const value = inputRef.current?.value.trim();
-        if (value) onConfirm(value);
-        else onCancel();
-      }}
-      onClick={(e) => e.stopPropagation()}
-      className="flex-1 bg-transparent border border-primary/50 rounded px-1.5 py-0.5 text-sm outline-none focus:border-primary min-w-0"
-    />
-  );
-}
-
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { t } = useTranslation()
   const allSessions = useSessionStore(s => s.sessions)
-  const pinnedSessionIds = useSessionStore(s => s.pinnedSessionIds)
   const activeSessionId = useSessionStore(s => s.activeSessionId)
-  const isLoading = useSessionStore(s => s.isLoading)
-  const isLoadingMore = useSessionStore(s => s.isLoadingMore)
-  const hasMoreSessions = useSessionStore(s => s.hasMoreSessions)
-  const visibleSessionCount = useSessionStore(s => s.visibleSessionCount)
-  const highlightedSessionIds = useSessionStore(s => s.highlightedSessionIds)
   const sessionStatuses = useSessionStore(s => s.sessionStatuses) || {}
   const pendingQuestionIdsBySession = useSessionStore(s => s.pendingQuestionIdsBySession) || {}
   const pendingQuestions = useSessionStore(s => s.pendingQuestions) || []
   const pendingPermissions = useSessionStore(s => s.pendingPermissions) || []
   const streamingMessageId = useStreamingStore(s => s.streamingMessageId)
   const childSessionStreaming = useStreamingStore(s => s.childSessionStreaming)
-  const archiveSession = useSessionStore(s => s.archiveSession)
-  const updateSessionTitle = useSessionStore(s => s.updateSessionTitle)
-  const toggleSessionPinned = useSessionStore(s => s.toggleSessionPinned)
-  const loadMoreSessions = useSessionStore(s => s.loadMoreSessions)
-  const cronSessionIds = useCronStore(s => s.cronSessionIds)
-  const showCronSessions = useCronStore(s => s.showCronSessions)
   const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
-  const sessionWorkspaceLabels = useSessionWorkspaceLabels(teamId)
 
-  // Rename state
-  const [renamingSessionId, setRenamingSessionId] = React.useState<string | null>(null)
   const [detailSessionId, setDetailSessionId] = React.useState<string | null>(null)
   const [detailHints, setDetailHints] = React.useState<SessionDetailListHints | null>(null)
 
-  // UI-level pagination: filter by cron toggle, then slice to visible count
-  const sessions = React.useMemo(
-    () => allSessions
-      .filter(s => !s.parentID)
-      .filter(s => showCronSessions
-        ? cronSessionIds.has(s.id)
-        : !cronSessionIds.has(s.id)
-      )
-      .sort((a, b) => {
-        const aPinned = pinnedSessionIds.includes(a.id)
-        const bPinned = pinnedSessionIds.includes(b.id)
-        if (aPinned !== bPinned) return aPinned ? -1 : 1
-        return b.updatedAt.getTime() - a.updatedAt.getTime()
-      })
-      .slice(0, visibleSessionCount),
-    [allSessions, cronSessionIds, pinnedSessionIds, showCronSessions, visibleSessionCount],
-  )
-  const pinnedSessions = React.useMemo(
-    () => sessions.filter((session) => pinnedSessionIds.includes(session.id)),
-    [sessions, pinnedSessionIds],
-  )
-  const unpinnedSessions = React.useMemo(
-    () => sessions.filter((session) => !pinnedSessionIds.includes(session.id)),
-    [sessions, pinnedSessionIds],
-  )
   const sessionActivityMap = React.useMemo(
     () =>
       buildSessionListActivityMap({
@@ -595,177 +390,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   )
   
   const openSettings = useUIStore(s => s.openSettings)
-  const defaultNavTab = useUIStore(s => s.defaultNavTab)
-
-  const defaultSidebarContent = isWorkspaceUIVariant() ? 'session' : defaultNavTab
 
   const handleSelectSession = (id: string) => {
     useUIStore.getState().switchToSession(id)
-  }
-
-  const handleArchiveSession = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation()
-    await archiveSession(id)
-  }
-
-  const handleStartRename = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation()
-    setRenamingSessionId(id)
-  }
-
-  const handleViewDetail = (e: React.MouseEvent, session: { id: string; title: string; ideaId?: string | null; updatedAt: Date }) => {
-    e.stopPropagation()
-    setDetailHints({
-      title: session.title,
-      ideaId: session.ideaId ?? null,
-      isPinned: pinnedSessionIds.includes(session.id),
-      lastMessageAt: session.updatedAt.toISOString(),
-    })
-    setDetailSessionId(session.id)
-  }
-
-  const handleRenameConfirm = async (id: string, newTitle: string) => {
-    if (newTitle.trim() && newTitle !== allSessions.find(s => s.id === id)?.title) {
-      try {
-        await updateSessionTitle(id, newTitle.trim())
-      } catch (error) {
-        console.error("[AppSidebar] Failed to rename session:", error)
-        // Error is already handled in the store
-      }
-    }
-    setRenamingSessionId(null)
-  }
-
-  const handleRenameCancel = () => {
-    setRenamingSessionId(null)
-  }
-
-  const handleTogglePinned = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation()
-    toggleSessionPinned(id)
-  }
-
-  // Format date for display with relative time
-  const formatDate = (date: Date) => formatRelativeTime(date)
-
-  const renderSessionItem = (session: typeof sessions[number]) => {
-    const isHighlighted = highlightedSessionIds.includes(session.id)
-    const isRenaming = renamingSessionId === session.id
-    const isPinned = pinnedSessionIds.includes(session.id)
-    const activity = sessionActivityMap.get(session.id)
-    const workspaceLabel = sessionWorkspaceLabels.get(session.id)
-
-    return (
-      <SidebarMenuItem key={session.id}>
-        <SidebarMenuButton
-          isActive={session.id === activeSessionId}
-          className={cn(
-            "h-auto py-2 pr-8 transition-all duration-300",
-            isWorkspaceUIVariant() &&
-              session.id === activeSessionId &&
-              "relative z-0 data-[active=true]:!bg-muted/40 data-[active=true]:font-medium before:pointer-events-none before:absolute before:left-0 before:top-1/2 before:z-10 before:h-[72%] before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-primary before:content-['']",
-            isHighlighted &&
-              session.id !== activeSessionId &&
-              "bg-emerald-500/15 ring-1 ring-emerald-500/30"
-          )}
-          onClick={() => {
-            if (!isRenaming) {
-              handleSelectSession(session.id)
-            }
-          }}
-          onDoubleClick={(e) => {
-            e.stopPropagation()
-            handleStartRename(e, session.id)
-          }}
-        >
-          <div className="flex flex-col items-start gap-1 flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 w-full">
-              {isRenaming ? (
-                <SessionRenameInput
-                  defaultValue={session.title}
-                  onConfirm={(newTitle) => handleRenameConfirm(session.id, newTitle)}
-                  onCancel={handleRenameCancel}
-                />
-              ) : (
-                <>
-                  <span className="truncate text-left text-l">
-                    {session.title}
-                  </span>
-                  {isPinned && (
-                    <Pin className="h-3 w-3 shrink-0 text-amber-500 fill-amber-500/20" />
-                  )}
-                  {session.id !== activeSessionId && isHighlighted && (
-                    <span className="shrink-0 text-[10px] font-medium text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
-                      {t('chat.newSessionBadge', 'NEW')}
-                    </span>
-                  )}
-                </>
-              )}
-            </div>
-            {!isRenaming && workspaceLabel && (
-              <span className="w-full truncate font-mono text-[11px] text-faint">
-                {workspaceLabel}
-              </span>
-            )}
-            {!isRenaming && (
-              <div className="flex min-w-0 items-center gap-2 w-full">
-                <span className="shrink-0 text-[10px] text-muted-foreground">
-                  {formatDate(session.updatedAt)}
-                  {session.messageCount !== undefined && (
-                    <> · {t('chat.messageCountShort', { count: session.messageCount })}</>
-                  )}
-                </span>
-                <SessionActivityBadge activity={activity} />
-              </div>
-            )}
-          </div>
-        </SidebarMenuButton>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2 opacity-0 group-hover/menu-item:opacity-100 data-[state=open]:opacity-100 transition-opacity hover:bg-black/10 dark:hover:bg-white/10 rounded-md"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Ellipsis className="h-3 w-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              className="text-[13px]"
-              onClick={(e) => handleTogglePinned(e as unknown as React.MouseEvent, session.id)}
-            >
-              <Pin className="h-3.5 w-3.5 mr-2" />
-              {isPinned
-                ? t('sidebar.unpin', 'Unpin')
-                : t('sidebar.pinToTop', 'Pin to top')}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-[13px]"
-              onClick={(e) => handleStartRename(e, session.id)}
-            >
-              <Pencil className="h-3.5 w-3.5 mr-2" />
-              {t('sidebar.rename', 'Rename')}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-[13px]"
-              onClick={(e) => handleViewDetail(e, session)}
-            >
-              <Info className="h-3.5 w-3.5 mr-2" />
-              {t('sidebar.viewDetail', 'View detail')}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-[13px]"
-              onClick={(e) => handleArchiveSession(e as unknown as React.MouseEvent, session.id)}
-            >
-              <Archive className="h-3.5 w-3.5 mr-2" />
-              {t('sidebar.archive', 'Archive')}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </SidebarMenuItem>
-    )
   }
 
   return (
@@ -793,119 +420,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <TrafficLights />
           {/* Flexible drag region */}
           <div className="flex-1" data-tauri-drag-region />
-          {isWorkspaceUIVariant() ? (
-            <SidebarCollapseToggle />
-          ) : defaultSidebarContent === 'shortcuts' ? (
-            <DefaultShortcutsHeaderControls />
-          ) : defaultSidebarContent === 'actors' ? (
-            <DefaultActorsHeaderControls />
-          ) : defaultSidebarContent === 'ideas' ? (
-            <DefaultIdeasHeaderControls />
-          ) : (
-            <SidebarIconGroup />
-          )}
+          <SidebarCollapseToggle />
         </SidebarHeader>
 
         <SidebarContent className="overflow-hidden">
-          {isWorkspaceUIVariant() ? (
-            <NavRail />
-          ) : (
-            <SidebarGroup className="!px-0 !pb-0 !pt-0 min-h-0 flex-1 overflow-hidden">
-              {defaultSidebarContent === 'session' && (
-                <div
-                  data-testid="sidebar-session-scroll"
-                  className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
-                >
-                  <SidebarMenu>
-                    {isLoading && sessions.length === 0 ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : sessions.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-8 text-center">
-                        <MessageSquare className="h-8 w-8 text-muted-foreground mb-2" />
-                        <p className="text-sm text-muted-foreground">
-                          {t('sidebar.noConversations', 'No conversations')}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {t('sidebar.clickToStartChat', 'Click the edit icon to start a new chat')}
-                        </p>
-                      </div>
-                    ) : (
-                      <>
-                        {pinnedSessions.length > 0 && (
-                          <>
-                            <div className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
-                              {t('sidebar.pinnedSessions', 'Pinned')}
-                            </div>
-                            {pinnedSessions.map(renderSessionItem)}
-                          </>
-                        )}
-                        {unpinnedSessions.length > 0 && (
-                          <>
-                            {pinnedSessions.length > 0 && (
-                              <div className="px-2 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
-                                {t('sidebar.allSessions', 'All sessions')}
-                              </div>
-                            )}
-                            {unpinnedSessions.map(renderSessionItem)}
-                          </>
-                        )}
-                      </>
-                    )}
-                  </SidebarMenu>
-
-                  {hasMoreSessions && sessions.length > 0 && (
-                    <div className="px-2 py-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="w-full"
-                        onClick={() => loadMoreSessions()}
-                        disabled={isLoadingMore}
-                      >
-                        {isLoadingMore ? (
-                          <>
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            {t('sidebar.loadingMore', 'Loading...')}
-                          </>
-                        ) : (
-                          t('sidebar.loadMore', 'Load More')
-                        )}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {defaultSidebarContent === 'shortcuts' && (
-                <div className="min-h-0 flex-1 overflow-hidden">
-                  <ShortcutsPanel />
-                </div>
-              )}
-
-              {defaultSidebarContent === 'actors' && (
-                <div className="min-h-0 flex-1 overflow-hidden">
-                  <ActorsView />
-                </div>
-              )}
-
-              {defaultSidebarContent === 'ideas' && (
-                <div className="min-h-0 flex-1 overflow-hidden">
-                  <IdeasView />
-                </div>
-              )}
-            </SidebarGroup>
-          )}
-
+          <NavRail />
         </SidebarContent>
 
         <SidebarFooter className="gap-1 px-2 pb-1 pt-1">
           <MqttDisconnectedNotice />
 
-          {!isWorkspaceUIVariant() && <DefaultBottomNav />}
-
-          {isWorkspaceUIVariant() && (
             <div className="flex min-w-0 items-center justify-between gap-1 overflow-hidden">
               <Button
                 variant="ghost"
@@ -920,7 +444,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <SidebarUserAccountMenu />
               </div>
             </div>
-          )}
 
         </SidebarFooter>
       </div>

@@ -11,8 +11,7 @@
   },
   "app": {
     "name": "TeamClaw",
-    "shortName": "teamclaw",
-    "uiVariant": "default"
+    "shortName": "teamclaw"
   },
   "features": {
     "teamMode": true,

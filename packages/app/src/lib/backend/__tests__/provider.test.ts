@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+// Neutralize any baked cloudApiUrl from a local build.config.local.json so the
+// committed-state resolution logic is tested deterministically (the production
+// default lives in a tracked build config, not the gitignored local file).
+vi.mock("@/lib/build-config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/build-config")>();
+  return { ...actual, buildConfig: { ...actual.buildConfig, cloudApiUrl: undefined } };
+});
+
 vi.mock("../cloud-api", () => ({
   hasCloudApiBackendConfig: (config: { cloudApiUrl?: string }) =>
     Boolean(config.cloudApiUrl),
@@ -49,10 +57,12 @@ describe("backend provider facade", () => {
     expect(getBackendKind()).toBe("cloud_api");
   });
 
-  it("hasBackendConfig is true only when cloudApiUrl is set", async () => {
+  it("hasBackendConfig reflects whether a cloudApiUrl resolves", async () => {
+    // No saved config + no baked default (build config mocked) -> not configured.
     const { hasBackendConfig } = await import("../provider");
     expect(hasBackendConfig()).toBe(false);
 
+    // A saved cloudApiUrl makes it configured.
     localStorage.setItem(
       "teamclaw.serverConfig",
       JSON.stringify({ cloudApiUrl: "https://fc.example.com" }),
