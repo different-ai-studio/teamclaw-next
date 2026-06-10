@@ -21,7 +21,7 @@ export interface Session {
   [key: string]: unknown;
 }
 
-export type OtpType = "email" | "email_change";
+export type OtpType = "email" | "email_change" | "sms" | "phone_change";
 
 export class AuthError extends Error {
   status: number;

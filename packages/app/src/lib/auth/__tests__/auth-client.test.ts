@@ -66,6 +66,33 @@ describe("auth-client", () => {
     expect(getSession()?.access_token).toBe("verified");
   });
 
+  it("sendPhoneOtp POSTs phone + options without storing a session", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {}));
+    const client = createAuthClient({ baseUrl: BASE, fetchImpl: fetchImpl as unknown as typeof fetch });
+    await client.sendPhoneOtp("+8613800138000", { shouldCreateUser: true });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${BASE}/v1/auth/signin-otp`);
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      phone: "+8613800138000",
+      options: { shouldCreateUser: true },
+    });
+    expect(getSession()).toBeNull();
+  });
+
+  it("verifyPhoneOtp POSTs type sms and stores the returned session", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, makeSession({ access_token: "phone-verified" })));
+    const client = createAuthClient({ baseUrl: BASE, fetchImpl: fetchImpl as unknown as typeof fetch });
+    await client.verifyPhoneOtp("+8613800138000", "123456");
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${BASE}/v1/auth/verify-otp`);
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      phone: "+8613800138000",
+      token: "123456",
+      type: "sms",
+    });
+    expect(getSession()?.access_token).toBe("phone-verified");
+  });
+
   it("timer refresh accepts normalized Cloud API session fields and preserves the user", async () => {
     const expiresAt = Math.floor(Date.now() / 1000) + 3600;
     const fetchImpl = vi.fn(async () =>
