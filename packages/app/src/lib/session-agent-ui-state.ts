@@ -8,9 +8,11 @@ export type MentionDeliverySnapshot = 'ready' | 'offline' | 'stale'
 export const SESSION_AGENT_CONNECTING_TIMEOUT_MS = 10_000
 
 /**
- * Session @-mentions an old local actor id while this machine's daemon already
- * publishes a live runtime under a new id — MQTT may still retain online:true
- * for the dead identity, which otherwise leaves the pill in connecting forever.
+ * Detects MQTT ghost retain for a **prior local** amuxd identity while this
+ * machine's daemon already publishes a live runtime under a new id.
+ *
+ * Callers must gate with `wasEverLocalDaemonIdentity(agentId)` first — this is
+ * not a remote-agent reachability signal.
  */
 export function isDriftedLocalGhostBinding(input: {
   agentId: string

@@ -1,3 +1,5 @@
+import { isAgentActorType } from '@/lib/actor-type'
+
 export type EmptyThreadParticipant = {
   actorId: string
   displayName: string
@@ -6,6 +8,22 @@ export type EmptyThreadParticipant = {
 }
 
 export type EmptyThreadRoutingKind = 'soloAgent' | 'singleAgent' | 'multiAgent'
+
+export type SoloSessionParticipant =
+  | { actor_type?: string | null }
+  | Pick<EmptyThreadParticipant, 'isAgent'>
+
+function isAgentParticipant(p: SoloSessionParticipant): boolean {
+  if ('isAgent' in p && typeof p.isAgent === 'boolean') return p.isAgent
+  if ('actor_type' in p) return isAgentActorType(p.actor_type)
+  return false
+}
+
+/** Exactly one agent and one other participant (solo human + agent pair). */
+export function isSoloAgentSession(participants: SoloSessionParticipant[]): boolean {
+  const agents = participants.filter(isAgentParticipant)
+  return agents.length === 1 && participants.length === 2
+}
 
 export type EmptyThreadStarter = {
   id: string
@@ -20,10 +38,10 @@ export type EmptyThreadStarter = {
 export function resolveEmptyThreadRoutingKind(
   participants: EmptyThreadParticipant[],
 ): EmptyThreadRoutingKind {
-  const agents = participants.filter((p) => p.isAgent)
-  if (agents.length === 1 && participants.length === 2) {
+  if (isSoloAgentSession(participants)) {
     return 'soloAgent'
   }
+  const agents = participants.filter((p) => p.isAgent)
   if (agents.length === 1) {
     return 'singleAgent'
   }
