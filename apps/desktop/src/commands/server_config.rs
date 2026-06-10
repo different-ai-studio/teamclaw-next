@@ -67,15 +67,15 @@ fn legacy_teamclaw_json_path() -> PathBuf {
     )
 }
 
-const DEFAULT_CLOUD_API_URL: &str = "https://cloud.ucar.cc";
-
 fn default_server_config() -> ServerConfig {
-    // MQTT is delivered by the Cloud API (`/v1/config/bootstrap`, applied after
-    // sign-in), never hardcoded. Only the fields needed to *reach* the Cloud API
-    // have defaults here. `cloud_api_url` is the bootstrap of the bootstrap.
+    // The cloud API URL is supplied by the frontend build config
+    // (`build.config*.json` → `buildConfig.cloudApiUrl`), not hardcoded here. The
+    // desktop persists only explicit runtime overrides; when none is set we leave
+    // `cloud_api_url` empty so the build-config value takes over. MQTT is
+    // delivered by the Cloud API bootstrap after sign-in, never hardcoded.
     ServerConfig {
         backend_kind: Some("cloud_api".to_string()),
-        cloud_api_url: Some(DEFAULT_CLOUD_API_URL.to_string()),
+        cloud_api_url: None,
         mqtt_host: None,
         mqtt_port: None,
         mqtt_use_tls: None,
@@ -96,6 +96,9 @@ fn merge_with_defaults(mut config: ServerConfig) -> ServerConfig {
     {
         config.backend_kind = defaults.backend_kind;
     }
+    // The cloud API URL is no longer defaulted here — it flows from the frontend
+    // build config when no explicit override is persisted. Normalize a blank
+    // value to None so it falls through to the build-config default cleanly.
     if config
         .cloud_api_url
         .as_deref()
@@ -103,8 +106,7 @@ fn merge_with_defaults(mut config: ServerConfig) -> ServerConfig {
         .trim()
         .is_empty()
     {
-        // Fill the canonical production URL when no override is set.
-        config.cloud_api_url = defaults.cloud_api_url;
+        config.cloud_api_url = None;
     }
     // MQTT host/port/tls are intentionally NOT defaulted here: they are
     // delivered by the Cloud API bootstrap after sign-in. A blank value stays
@@ -278,10 +280,11 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        // Only Cloud-API-reachability fields are defaulted. MQTT is delivered by
-        // the Cloud API bootstrap after sign-in, never hardcoded here.
+        // No URL is hardcoded: the cloud API URL comes from the frontend build
+        // config, so a fresh config leaves it empty. MQTT is delivered by the
+        // Cloud API bootstrap after sign-in, never hardcoded here.
         assert_eq!(loaded.backend_kind.as_deref(), Some("cloud_api"));
-        assert_eq!(loaded.cloud_api_url.as_deref(), Some(DEFAULT_CLOUD_API_URL));
+        assert_eq!(loaded.cloud_api_url, None);
         assert_eq!(loaded.mqtt_host, None);
         assert_eq!(loaded.mqtt_port, None);
         assert_eq!(loaded.mqtt_use_tls, None);
