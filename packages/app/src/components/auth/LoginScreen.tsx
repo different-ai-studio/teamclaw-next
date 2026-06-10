@@ -71,7 +71,6 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
   const [phone, setPhone] = useState("+86");
   const [method, setMethod] = useState<"email" | "phone">("email");
   const phoneEnabled = isTauri() && Boolean(buildConfig.features?.auth?.phone);
-  const pendingPhone = otpPhone;
   const appVersion = useAppVersion();
   const onSendEmail = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,9 +141,9 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
         </button>
       )}
 
-      {(otpEmail || pendingPhone) ? (
+      {(otpEmail || otpPhone) ? (
         <form
-          onSubmit={pendingPhone ? onVerifyPhone : onVerify}
+          onSubmit={otpPhone ? onVerifyPhone : onVerify}
           className={cardClassName}
         >
           <div className="space-y-1.5">
@@ -152,8 +151,8 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
               {t("auth.enterCode", "Enter the code")}
             </h2>
             <p className="text-[13px] text-muted-foreground">
-              {pendingPhone
-                ? t("auth.codeSentPhone", "We sent a 6-digit code to {{phone}}.", { phone: pendingPhone })
+              {otpPhone
+                ? t("auth.codeSentPhone", "We sent a 6-digit code to {{phone}}.", { phone: otpPhone })
                 : t("auth.codeSent", "We sent a 6-digit code to {{email}}.", { email: otpEmail })}
             </p>
           </div>
@@ -190,7 +189,7 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
             onClick={onUseDifferentContact}
             className="block w-full text-center text-[12px] text-muted-foreground hover:text-foreground transition-colors"
           >
-            {pendingPhone
+            {otpPhone
               ? t("auth.useDifferentPhone", "Use a different number")
               : t("auth.useDifferentEmail", "Use a different email")}
           </button>
@@ -261,6 +260,7 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
               {serverConfigRequired ? serverConfigMessage : errorMessage}
             </p>
           )}
+          {/* phone guard: block the bare "+86" prefix; FC/GoTrue validates the full E.164 number (mirrors iOS) */}
           <Button
             type="submit"
             disabled={serverConfigRequired || loading || (method === "phone" ? phone.length <= 4 : !email)}
