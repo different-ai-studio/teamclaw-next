@@ -144,7 +144,8 @@ vi.mock('@/components/settings', () => ({ Settings: () => <div>settings</div> })
 vi.mock('@/components/settings/FeedbackDialog', () => ({ FeedbackDialog: () => null }))
 vi.mock('@/components/SetupGuide', () => ({ SetupGuide: () => null }))
 vi.mock('@/components/telemetry/TelemetryConsentDialog', () => ({ TelemetryConsentDialog: () => null }))
-vi.mock('@/components/workspace', () => ({ WorkspacePrompt: () => <div>workspace-prompt</div> }))
+vi.mock('@/components/workspace', () => ({}))
+vi.mock('@/components/workspace/WorkspaceTypeDialog', () => ({ WorkspaceTypeDialog: () => null }))
 vi.mock('@/stores/session', () => ({
   useSessionStore: vi.fn((sel: (s: any) => any) => {
     const state = {
@@ -258,12 +259,6 @@ describe('App', () => {
   it('renders without crashing', () => {
     const { container } = render(<App />)
     expect(container).toBeTruthy()
-  })
-
-  it('shows workspace prompt when no workspace is selected', () => {
-    render(<App />)
-    // The WorkspacePrompt mock renders 'workspace-prompt'
-    expect(document.body.textContent).toContain('workspace-prompt')
   })
 
   it('opens settings as a modal panel over the current workspace', () => {
