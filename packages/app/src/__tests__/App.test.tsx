@@ -48,6 +48,13 @@ const tabsStoreState = vi.hoisted(() => ({
   tabs: [] as Array<{ id: string; type: string; target: string }>,
   activeTabId: null as string | null,
 }))
+const currentTeamStoreState = vi.hoisted(() => ({
+  team: null as null | { id: string },
+  currentMember: null as null | { id: string },
+  teamUserId: null as string | null,
+  load: () => Promise.resolve(),
+  reloadAndSwitchTo: () => Promise.resolve(),
+}))
 
 // Polyfill browser APIs missing in jsdom
 globalThis.ResizeObserver = vi.fn().mockImplementation(() => ({
@@ -160,6 +167,18 @@ vi.mock('@/stores/workspace', () => ({
   useWorkspaceStore: vi.fn((sel: (s: any) => any) => {
     return sel(workspaceStoreState)
   }),
+}))
+// Mock the current-team store so App's mount-time load() doesn't fire the real
+// Tauri-invoke path (unavailable in jsdom) and leak unhandled rejections.
+vi.mock('@/stores/current-team', () => ({
+  useCurrentTeamStore: Object.assign(
+    vi.fn((sel: (s: any) => any) => sel(currentTeamStoreState)),
+    { getState: () => currentTeamStoreState, setState: vi.fn(), subscribe: () => () => {} },
+  ),
+  setLocalCacheTeamGate: () => Promise.resolve(),
+  readCachedCurrentTeam: () => null,
+  writeCachedCurrentTeam: () => {},
+  initialCurrentTeamState: () => ({ team: null, currentMember: null, teamUserId: null }),
 }))
 vi.mock('@/stores/tabs', () => ({
   useTabsStore: Object.assign(
