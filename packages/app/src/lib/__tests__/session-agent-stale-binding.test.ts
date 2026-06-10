@@ -38,6 +38,22 @@ describe('resolveEngagedAgentStaleBinding', () => {
     expect(resolveEngagedAgentStaleBinding(ghostBindingInput('old-macpro'))).toBe(true)
   })
 
+  it('marks superseded local agent as stale without ghost MQTT conditions', () => {
+    noteLocalDaemonActorId('old-macpro')
+    noteLocalDaemonActorId('new-local')
+    expect(
+      resolveEngagedAgentStaleBinding({
+        agentId: 'old-macpro',
+        localDaemonActorId: 'new-local',
+        presenceOnline: false,
+        agentRuntimeInfo: undefined,
+        agentAvailableModelCount: 0,
+        localRuntimeInfo: undefined,
+        localAvailableModelCount: 0,
+      }),
+    ).toBe(true)
+  })
+
   it('marks transition-window local id as stale when ghost MQTT retains', () => {
     localStorage.setItem(STORAGE_KEY, 'old-macpro')
     noteLocalDaemonActorId('new-local')

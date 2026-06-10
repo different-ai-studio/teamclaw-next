@@ -156,6 +156,9 @@ async function resolveMentionActorIdsForSession(
 
   const agents = participants.filter((row) => isAgentActorType(row.actor_type));
 
+  // Sole-agent send fallback: any session with exactly one agent participant
+  // routes to that agent when the user sends without @. This is independent
+  // of isSoloAgentSession, which only gates open-time pill auto-engage.
   return agents.length === 1
     ? [agents[0].id]
     : [];
@@ -506,6 +509,9 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // Existing sessions can be reopened after a reload with no in-memory
   // engaged agents selected. Solo sessions (2 participants: 1 human + 1 agent)
   // auto-engage the agent pill so sends still trigger a reply.
+  // Note: send-time mention fallback (resolveMentionActorIdsForSession) still
+  // auto-mentions the sole session agent in multi-person sessions — only this
+  // open-time pill auto-engage is restricted to solo pairs.
   // Runs at most once per sessionId per app lifetime so that explicitly
   // removing a mention ("Remove mention" in the agent pill dropdown) isn't
   // immediately undone by this effect re-firing on engagedAgents.length 1→0.
