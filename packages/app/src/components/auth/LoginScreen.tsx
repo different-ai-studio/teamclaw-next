@@ -56,8 +56,22 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
   const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const { sendOtp, verifyOtp, resetOtp, signInAnonymously, otpEmail, loading, errorMessage } =
-    useAuthStore();
+  const {
+    sendOtp,
+    verifyOtp,
+    resetOtp,
+    signInAnonymously,
+    sendPhoneOtp,
+    verifyPhoneOtp,
+    otpEmail,
+    otpPhone,
+    loading,
+    errorMessage,
+  } = useAuthStore();
+  const [phone, setPhone] = useState("+86");
+  const [method, setMethod] = useState<"email" | "phone">("email");
+  const phoneEnabled = isTauri() && Boolean(buildConfig.features?.auth?.phone);
+  const pendingPhone = otpPhone;
   const appVersion = useAppVersion();
   const onSendEmail = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,7 +83,17 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
     await verifyOtp(code);
   };
 
-  const onUseDifferentEmail = () => {
+  const onSendPhone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await sendPhoneOtp(phone);
+  };
+
+  const onVerifyPhone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await verifyPhoneOtp(code);
+  };
+
+  const onUseDifferentContact = () => {
     setCode("");
     resetOtp();
   };
@@ -118,9 +142,9 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
         </button>
       )}
 
-      {otpEmail ? (
+      {(otpEmail || pendingPhone) ? (
         <form
-          onSubmit={onVerify}
+          onSubmit={pendingPhone ? onVerifyPhone : onVerify}
           className={cardClassName}
         >
           <div className="space-y-1.5">
@@ -128,7 +152,9 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
               {t("auth.enterCode", "Enter the code")}
             </h2>
             <p className="text-[13px] text-muted-foreground">
-              {t("auth.codeSent", "We sent a 6-digit code to {{email}}.", { email: otpEmail })}
+              {pendingPhone
+                ? t("auth.codeSentPhone", "We sent a 6-digit code to {{phone}}.", { phone: pendingPhone })
+                : t("auth.codeSent", "We sent a 6-digit code to {{email}}.", { email: otpEmail })}
             </p>
           </div>
           <label className="block space-y-2">
@@ -161,39 +187,75 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
           </Button>
           <button
             type="button"
-            onClick={onUseDifferentEmail}
+            onClick={onUseDifferentContact}
             className="block w-full text-center text-[12px] text-muted-foreground hover:text-foreground transition-colors"
           >
-            {t("auth.useDifferentEmail", "Use a different email")}
+            {pendingPhone
+              ? t("auth.useDifferentPhone", "Use a different number")
+              : t("auth.useDifferentEmail", "Use a different email")}
           </button>
         </form>
       ) : (
-        <form
-          onSubmit={onSendEmail}
-          className={cardClassName}
-        >
+        <form onSubmit={method === "phone" ? onSendPhone : onSendEmail} className={cardClassName}>
+          {phoneEnabled && (
+            <div className="flex rounded-[8px] border border-border p-0.5 text-[12px] font-medium">
+              <button
+                type="button"
+                onClick={() => setMethod("email")}
+                className={`flex-1 rounded-[6px] py-1.5 transition-colors ${method === "email" ? "bg-selected/60 text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                {t("auth.methodEmail", "Email")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setMethod("phone")}
+                className={`flex-1 rounded-[6px] py-1.5 transition-colors ${method === "phone" ? "bg-selected/60 text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                {t("auth.methodPhone", "Phone")}
+              </button>
+            </div>
+          )}
           <div className="space-y-1.5">
             <h2 className="text-[17px] font-semibold text-foreground">
               {t("auth.signIn", "Sign in")}
             </h2>
             <p className="text-[13px] text-muted-foreground">
-              {t("auth.willEmailCode", "We'll email you a 6-digit code.")}
+              {method === "phone"
+                ? t("auth.willSmsCode", "We'll text you a 6-digit code.")
+                : t("auth.willEmailCode", "We'll email you a 6-digit code.")}
             </p>
           </div>
-          <label className="block space-y-2">
-            <span className="block text-[12px] font-medium text-ink-2">
-              {t("auth.email", "Email")}
-            </span>
-            <Input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoFocus
-              placeholder={t("auth.emailPlaceholder", "you@example.com")}
-              className="h-10"
-            />
-          </label>
+          {method === "phone" ? (
+            <label className="block space-y-2">
+              <span className="block text-[12px] font-medium text-ink-2">
+                {t("auth.phone", "Phone number")}
+              </span>
+              <Input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                required
+                autoFocus
+                placeholder={t("auth.phonePlaceholder", "+8613800138000")}
+                className="h-10"
+              />
+            </label>
+          ) : (
+            <label className="block space-y-2">
+              <span className="block text-[12px] font-medium text-ink-2">
+                {t("auth.email", "Email")}
+              </span>
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoFocus
+                placeholder={t("auth.emailPlaceholder", "you@example.com")}
+                className="h-10"
+              />
+            </label>
+          )}
           {(serverConfigRequired || errorMessage) && (
             <p className="text-[12px] text-destructive">
               {serverConfigRequired ? serverConfigMessage : errorMessage}
@@ -201,7 +263,7 @@ export function LoginScreen({ embedded = false, onBack }: LoginScreenProps) {
           )}
           <Button
             type="submit"
-            disabled={serverConfigRequired || loading || !email}
+            disabled={serverConfigRequired || loading || (method === "phone" ? phone.length <= 4 : !email)}
             className="h-10 w-full bg-coral text-paper hover:bg-coral/90 disabled:bg-coral/40 disabled:text-paper"
           >
             {loading ? t("auth.sending", "Sending…") : t("auth.sendCode", "Send code")}
