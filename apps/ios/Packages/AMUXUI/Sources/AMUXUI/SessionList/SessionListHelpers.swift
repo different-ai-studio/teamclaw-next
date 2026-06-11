@@ -34,13 +34,20 @@ struct SessionListContent: View {
     /// display name, and agent-vs-human shaping for the participant cluster.
     @Query private var allActors: [CachedActor]
 
-    /// Most-recent cached messages across all sessions. Cap at a reasonable
-    /// number — we only need to discover distinct senders per session, not
-    /// replay the thread.
-    @Query(
-        sort: \SessionMessage.createdAt,
-        order: .reverse
-    ) private var recentMessages: [SessionMessage]
+    /// Most-recent cached messages across all sessions. Capped — we only
+    /// need to discover distinct senders per session for the participant
+    /// cluster, not replay threads, and the messages table grows without
+    /// bound as history accumulates.
+    @Query(SessionListContent.recentMessagesDescriptor)
+    private var recentMessages: [SessionMessage]
+
+    private static var recentMessagesDescriptor: FetchDescriptor<SessionMessage> {
+        var descriptor = FetchDescriptor<SessionMessage>(
+            sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 500
+        return descriptor
+    }
 
     private var flatSessions: [Session] {
         viewModel.groupedSessions.flatMap(\.items)
