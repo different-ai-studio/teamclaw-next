@@ -123,7 +123,7 @@ describe('RightPanel interactions', () => {
     });
 
     it('passes knowledge browser props through to KnowledgeBrowser', async () => {
-      mockStoreState.activeTab = 'knowledge';
+      mockStoreState.activeTab = 'files';
       const { RightPanel } = await import('@/components/panel/RightPanel');
       render(React.createElement(RightPanel, {
         knowledgeBrowserProps: {

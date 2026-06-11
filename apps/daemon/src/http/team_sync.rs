@@ -53,7 +53,7 @@ pub async fn sync_now(
         .filter(|m| !m.trim().is_empty())
         .is_none()
     {
-        return Err(HttpError::validation(format!(
+        return Err(HttpError::team_share_not_enabled_for_daemon(format!(
             "team share is not enabled for daemon team {team_id} (share_mode is unset). \
              If you switched teams in the app, re-bind the local daemon (amuxd init) to the current team, then enable Git share again."
         )));

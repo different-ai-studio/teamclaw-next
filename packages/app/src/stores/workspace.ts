@@ -70,7 +70,7 @@ export interface FileNode {
 }
 
 // Right panel tab type
-export type RightPanelTab = "diff" | "shortcuts" | "knowledge" | "actors";
+export type RightPanelTab = "diff" | "shortcuts" | "files" | "teamShared" | "actors";
 
 // Undo operation types for file operations
 interface UndoOperation {

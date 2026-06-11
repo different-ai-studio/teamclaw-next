@@ -17,8 +17,13 @@ const shareStoreMocks = vi.hoisted(() => ({
     linkStatus: 'symlink' as 'symlink' | 'real_dir' | 'missing' | undefined,
     globalPath: '/home/me/.amuxd/teams/team-1/teamclaw-team' as string | null,
   },
-  refresh: vi.fn(async () => {}),
+  refresh: vi.fn(async () => ({ ...shareStoreMocks.status })),
   disconnect: disconnectShare,
+  loading: false,
+}))
+
+vi.mock('../TeamShareSection', () => ({
+  TeamShareSection: () => <div data-testid="team-share-section">Enable team share</div>,
 }))
 
 vi.mock('react-i18next', () => ({
@@ -72,10 +77,14 @@ vi.mock('@/lib/team-permissions', () => ({
   useTeamPermissions: () => ({ isOwner: true }),
 }))
 
-vi.mock('@/stores/team-share', () => ({
-  useTeamShareStore: (sel: (s: typeof shareStoreMocks) => unknown) =>
-    sel(shareStoreMocks),
-}))
+vi.mock('@/stores/team-share', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/stores/team-share')>()
+  return {
+    ...actual,
+    useTeamShareStore: (sel: (s: typeof shareStoreMocks) => unknown) =>
+      sel(shareStoreMocks),
+  }
+})
 
 vi.mock('./TeamSyncPaths', () => ({
   TeamSyncPaths: () => <div>Team Sync Paths</div>,
@@ -85,9 +94,12 @@ vi.mock('@/components/auth/DaemonOnboardingWizard', () => ({
   DaemonOnboardingWizard: () => <div data-testid="daemon-onboarding-wizard">wizard</div>,
 }))
 
+const forceResetDaemon = vi.hoisted(() => vi.fn(async () => {}))
+
 vi.mock('@/stores/daemon-onboarding', () => ({
-  useDaemonOnboardingStore: (sel: (s: { status: string; busy: boolean }) => unknown) =>
-    sel({ status: 'idle', busy: false }),
+  useDaemonOnboardingStore: (
+    sel: (s: { status: string; busy: boolean; forceReset: () => Promise<void> }) => unknown,
+  ) => sel({ status: 'idle', busy: false, forceReset: forceResetDaemon }),
 }))
 
 vi.mock('@/components/ui/button', () => ({
@@ -154,6 +166,7 @@ describe('TeamGitConfig status panel', () => {
     // Repo URL + managed-git mode label come from the FC share-mode status.
     expect(await screen.findByText('Managed Git')).toBeTruthy()
     expect(screen.getByText('https://example.com/repo.git')).toBeTruthy()
+    expect(screen.getByText('Connected')).toBeTruthy()
     expect(screen.getByText(/Last synced/i)).toBeTruthy()
     expect(screen.getByText('Sync Now')).toBeTruthy()
     expect(screen.getByText('Disconnect')).toBeTruthy()
@@ -217,6 +230,92 @@ describe('TeamGitConfig status panel', () => {
       expect(screen.getByRole('button', { name: '重新绑定到当前团队' })).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Sync Now' })).toBeDisabled()
     })
+  })
+
+  it('shows the rebind action (not the raw 422) when the daemon cannot read this team’s share-mode', async () => {
+    // team_id matches (no mismatch), cloud share is locked but the workspace is
+    // not linked yet, and the daemon's sync reports the dedicated
+    // team_share_not_enabled_for_daemon 422. The rebind card must win and the
+    // (contradictory) "pending local link → Sync Now" card must be suppressed.
+    shareStoreMocks.status = {
+      mode: 'custom_git',
+      gitRemoteUrl: 'https://git.example.com/team/repo.git',
+      gitAuthKind: 'https_token',
+      enabledAt: null,
+      linkStatus: 'missing',
+      globalPath: null,
+    }
+    const rawDaemonError =
+      'daemon /v1/team/sync 422 Unprocessable Entity: ' +
+      '{"type":"https://teamclaw/errors/team_share_not_enabled_for_daemon",' +
+      '"title":"Team share not enabled for daemon","status":422,' +
+      '"detail":"team share is not enabled for daemon team team-1 (share_mode is unset).",' +
+      '"code":"team_share_not_enabled_for_daemon"}'
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_daemon_team_id') return 'team-1'
+      if (cmd === 'oss_sync_status') {
+        return {
+          mode: 'git',
+          lastSyncAt: null,
+          syncing: false,
+          lastError: rawDaemonError,
+        }
+      }
+      return null
+    })
+
+    render(<TeamGitConfig />)
+
+    await waitFor(() => {
+      // Friendly card + rebind action instead of the raw daemon error.
+      expect(screen.getByText('本机 Daemon 无法读取团队共享配置')).toBeTruthy()
+      expect(screen.getByRole('button', { name: '重新绑定到当前团队' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Sync Now' })).toBeDisabled()
+    })
+    // The raw 422 string is hidden from the user.
+    expect(screen.queryByText(/team_share_not_enabled_for_daemon/)).toBeNull()
+    // This is NOT the team-mismatch path, so no team-id comparison is shown.
+    expect(screen.queryByText('Daemon 团队')).toBeNull()
+    // The contradictory "pending local link → click Sync Now" card is suppressed
+    // while a rebind is required (otherwise it tells the user to click a disabled
+    // button).
+    expect(
+      screen.queryByText(/Cloud share is enabled; local directory not linked yet/i),
+    ).toBeNull()
+  })
+
+  it('shows enable flow when cloud share_mode is unset (legacy git UI trap)', async () => {
+    shareStoreMocks.status = {
+      mode: null,
+      gitRemoteUrl: 'https://git.example.com/team/repo.git',
+      gitAuthKind: 'https_token',
+      enabledAt: null,
+      linkStatus: 'symlink',
+      globalPath: null,
+    }
+    render(<TeamGitConfig />)
+
+    expect(await screen.findByText(/Team share is not enabled on the cloud yet/i)).toBeTruthy()
+    expect(screen.getByTestId('team-share-section')).toBeTruthy()
+    expect(screen.queryByText('Sync Now')).toBeNull()
+    expect(screen.queryByText('Connected')).toBeNull()
+  })
+
+  it('shows pending-local-link state when cloud git is enabled but workspace is unlinked', async () => {
+    shareStoreMocks.status = {
+      mode: 'custom_git',
+      gitRemoteUrl: 'https://git.example.com/team/repo.git',
+      gitAuthKind: 'https_token',
+      enabledAt: '2026-06-11T06:00:00.000Z',
+      linkStatus: 'missing',
+      globalPath: '/home/me/.amuxd/teams/team-1/teamclaw-team',
+    }
+    render(<TeamGitConfig />)
+
+    expect(await screen.findByText('Self-hosted Git')).toBeTruthy()
+    expect(screen.getByText('Pending local link')).toBeTruthy()
+    expect(screen.queryByText('Connected')).toBeNull()
+    expect(screen.getByText(/Cloud share is enabled; local directory not linked yet/i)).toBeTruthy()
   })
 
   it('disconnects local team materialization with teamId via inline confirm', async () => {
