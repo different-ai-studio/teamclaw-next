@@ -615,7 +615,7 @@ function AppContent() {
   const authSession = useAuthStore((s) => s.session);
   const loadCurrentTeam = useCurrentTeamStore((s) => s.load);
   const mainContentLayout = useUIStore((s) => s.mainContentLayout);
-  const { state, open: sidebarOpen, setOpen: setSidebarOpen } = useSidebar();
+  const { open: sidebarOpen, setOpen: setSidebarOpen } = useSidebar();
   const hasActiveFileTab = !!useTabsStore(selectActiveTab);
   const hasHiddenTabs = useTabsStore(selectHasHiddenTabs);
   /** Shortcuts open in the left dock for both shells.
