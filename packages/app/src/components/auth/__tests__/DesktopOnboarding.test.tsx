@@ -58,7 +58,6 @@ beforeEach(() => {
   authState.resetOtp.mockReset();
   hasConfig.value = true;
   saveServerConfig.mockReset();
-  window.__TEAMCLAW_SERVER_CONFIG__ = undefined;
   Object.defineProperty(window, "location", {
     value: { reload },
     writable: true,
@@ -68,14 +67,16 @@ beforeEach(() => {
 });
 
 describe("DesktopOnboarding", () => {
-  it("shows the four setup choices", () => {
+  it("shows the setup choices", () => {
     const { container } = render(<DesktopOnboarding />);
 
     expect(container.querySelector("[data-tauri-drag-region]")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /quick trial/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign in or register/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /join the team/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /self-hosted server/i })).toBeInTheDocument();
+    // The self-hosted server step was removed: the Cloud API URL is owned by the
+    // build config, with no runtime override.
+    expect(screen.queryByRole("button", { name: /self-hosted server/i })).not.toBeInTheDocument();
   });
 
   it("quick trial signs in anonymously", async () => {
@@ -126,24 +127,5 @@ describe("DesktopOnboarding", () => {
 
     expect(screen.getByText(/supabase is not configured/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /send code/i })).toBeDisabled();
-  });
-
-  it("self-hosted server saves the cloud api address and reloads", async () => {
-    saveServerConfig.mockResolvedValueOnce({
-      cloudApiUrl: "https://self.example.com",
-    });
-    render(<DesktopOnboarding />);
-
-    fireEvent.click(screen.getByRole("button", { name: /self-hosted server/i }));
-    fireEvent.change(screen.getByLabelText(/server address/i), {
-      target: { value: "https://self.example.com" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /save and restart/i }));
-
-    await waitFor(() => expect(saveServerConfig).toHaveBeenCalledWith({
-      cloudApiUrl: "https://self.example.com",
-    }));
-    expect(window.__TEAMCLAW_SERVER_CONFIG__?.cloudApiUrl).toBe("https://self.example.com");
-    expect(reload).toHaveBeenCalled();
   });
 });

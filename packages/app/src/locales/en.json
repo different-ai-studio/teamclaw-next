@@ -96,18 +96,12 @@
       "signInOrRegisterDesc": "Continue with an email code, matching the iOS flow.",
       "joinTeam": "Join the team",
       "joinTeamDesc": "Paste an invite link or token to join an existing team.",
-      "selfHosted": "Use self-hosted server",
       "inviteParseError": "Enter a valid invite token or invite link.",
       "inviteTitle": "Join the team",
       "inviteDesc": "Paste an invite link or token. We create an anonymous session first, then claim the invite.",
       "inviteLabel": "Invite link or token",
       "joining": "Joining…",
-      "continue": "Continue",
-      "serverTitle": "Self-hosted server",
-      "serverDesc": "Saving writes the local TeamClaw config and restarts the frontend so Supabase initializes again.",
-      "serverAddress": "Server address",
-      "savingServer": "Saving…",
-      "saveServer": "Save and restart"
+      "continue": "Continue"
     }
   },
   "navigation": {
@@ -930,11 +924,8 @@
       "mqttReconnect": "Reconnect",
       "mqttReconnecting": "Reconnecting…",
       "save": "Save",
-      "saving": "Saving…",
       "server": "Server",
       "serverAddress": "Server address",
-      "serverAddressHint": "Example: http://localhost:8787",
-      "serverSaved": "Server saved",
       "serverSynced": "Server synced",
       "serverSyncedEmpty": "Not synced yet",
       "serverSyncedHint": "Loaded from daemon when available.",

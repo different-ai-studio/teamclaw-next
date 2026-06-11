@@ -34,12 +34,7 @@ import { useAcpDebugStore } from '@/stores/acp-debug-store'
 import { getPermissionPolicy, setPermissionPolicy, type PermissionPolicy } from '@/lib/permission-policy'
 import { appShortName, buildConfig } from '@/lib/build-config'
 import { LANGUAGE_OPTIONS, getPreferredLanguage, normalizeSupportedLanguage, persistLanguage } from '@/lib/locale'
-import {
-  getEffectiveServerConfig,
-  getSavedServerConfig,
-  saveServerConfig,
-  type ServerConfig,
-} from '@/lib/server-config'
+import { getEffectiveServerConfig, type ServerConfig } from '@/lib/server-config'
 
 // Theme helpers
 const THEME_STORAGE_KEY = `${buildConfig.app.shortName ?? 'teamclaw'}-theme`
@@ -350,42 +345,15 @@ export const GeneralSection = React.memo(function GeneralSection() {
 
 function ServerAddressCard() {
   const { t } = useTranslation()
-  const [savedUrl, setSavedUrl] = React.useState('')
   const [effective, setEffective] = React.useState<ServerConfig>({})
-  const [draft, setDraft] = React.useState('')
-  const [saving, setSaving] = React.useState(false)
 
   const reload = React.useCallback(async () => {
-    const [saved, effectiveConfig] = await Promise.all([
-      getSavedServerConfig(),
-      getEffectiveServerConfig(),
-    ])
-    const savedValue = saved.cloudApiUrl?.trim() ?? ''
-    setSavedUrl(savedValue)
-    setEffective(effectiveConfig)
-    setDraft(savedValue)
+    setEffective(await getEffectiveServerConfig())
   }, [])
 
   React.useEffect(() => {
     void reload()
   }, [reload])
-
-  const dirty = draft.trim() !== savedUrl.trim()
-
-  const handleSave = React.useCallback(async () => {
-    setSaving(true)
-    try {
-      const next = await saveServerConfig({ cloudApiUrl: draft.trim() || undefined })
-      const nextValue = next.cloudApiUrl?.trim() ?? ''
-      setSavedUrl(nextValue)
-      setEffective((current) => ({ ...current, cloudApiUrl: nextValue || current.cloudApiUrl }))
-      toast.success(t('settings.general.serverSaved', 'Server address saved. Restart the app to apply.'))
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
-    } finally {
-      setSaving(false)
-    }
-  }, [draft, t])
 
   const mqttConnected = useMqttConnected()
   const bumpMqttReconnect = useMqttReconnectStore((s) => s.bump)
@@ -403,27 +371,13 @@ function ServerAddressCard() {
         <Server className="h-4 w-4 text-muted-foreground" />
         {t('settings.general.server', 'Server')}
       </h4>
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <label className="text-[12px] font-medium text-muted-foreground">
           {t('settings.general.serverAddress', 'Server address')}
         </label>
-        <Input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={effective.cloudApiUrl || 'https://cloud.ucar.cc'}
-          className="font-mono text-[12.5px]"
-        />
-        <p className="text-xs text-muted-foreground">
-          {t(
-            'settings.general.serverAddressHint',
-            'Gateway for all business data. Restart the app to apply changes.',
-          )}
+        <p className="font-mono text-[12.5px] text-foreground break-all">
+          {effective.cloudApiUrl || '—'}
         </p>
-        <div className="flex justify-end pt-2">
-          <Button size="sm" disabled={!dirty || saving} onClick={handleSave}>
-            {saving ? t('settings.general.saving', 'Saving…') : t('settings.general.save', 'Save')}
-          </Button>
-        </div>
       </div>
 
       <div className="mt-5 space-y-2 border-t border-border-soft pt-4">

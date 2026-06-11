@@ -96,18 +96,12 @@
       "signInOrRegisterDesc": "使用邮箱验证码继续，和 iOS 流程保持一致。",
       "joinTeam": "加入团队",
       "joinTeamDesc": "粘贴邀请链接或邀请码，加入已有团队。",
-      "selfHosted": "使用自建 server",
       "inviteParseError": "请输入有效的邀请码或邀请链接。",
       "inviteTitle": "加入团队",
       "inviteDesc": "粘贴邀请链接或邀请码。我们会先创建匿名会话，再领取团队邀请。",
       "inviteLabel": "邀请链接或邀请码",
       "joining": "加入中…",
-      "continue": "继续",
-      "serverTitle": "自建 server",
-      "serverDesc": "保存后会写入本机 TeamClaw 配置，并重启前端以重新初始化 Supabase。",
-      "serverAddress": "服务器地址",
-      "savingServer": "保存中…",
-      "saveServer": "保存并重启"
+      "continue": "继续"
     }
   },
   "navigation": {
@@ -930,11 +924,8 @@
       "mqttReconnect": "重连",
       "mqttReconnecting": "正在重连…",
       "save": "保存",
-      "saving": "保存中…",
       "server": "服务器",
       "serverAddress": "服务器地址",
-      "serverAddressHint": "例如: http://localhost:8787",
-      "serverSaved": "Server 已保存",
       "serverSynced": "Server 已同步",
       "serverSyncedEmpty": "尚未同步",
       "serverSyncedHint": "如可用，将从 daemon 读取。",

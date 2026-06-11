@@ -1,5 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
-import { isTauri } from "@/lib/utils";
 import type { BackendKind } from "@/lib/backend/types";
 import { buildConfig } from "@/lib/build-config";
 
@@ -13,11 +11,21 @@ export interface ServerConfig {
   mqttPassword?: string;
 }
 
+// The Cloud API URL is owned entirely by the frontend build config
+// (`build.config*.json` → `buildConfig.cloudApiUrl`), overridable only at
+// build/dev time via the `VITE_CLOUD_API_URL` env var. There is no runtime
+// override and no on-disk persistence: the legacy `~/.teamclaw/config.json`
+// override (and the `window.__TEAMCLAW_SERVER_CONFIG__` injection that carried
+// it) have been removed, because a stale persisted value could silently shadow
+// the baked build config.
+//
+// This localStorage entry is a session cache for the MQTT broker config that the
+// Cloud API delivers via `/v1/config/bootstrap` after sign-in — nothing else. It
+// lets the MQTT client read a broker synchronously before bootstrap re-runs.
 const STORAGE_KEY = "teamclaw.serverConfig";
 
 function readLocalConfig(): ServerConfig {
   if (typeof window === "undefined") return {};
-  if (window.__TEAMCLAW_SERVER_CONFIG__) return window.__TEAMCLAW_SERVER_CONFIG__;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return {};
@@ -53,10 +61,10 @@ function envConfig(): ServerConfig {
   };
 }
 
-function normalizeServerConfig(config: ServerConfig): ServerConfig {
+// Only the bootstrap-delivered MQTT broker config is persisted. cloudApiUrl and
+// backendKind are intentionally dropped — they are never a runtime override.
+function normalizeMqttConfig(config: ServerConfig): ServerConfig {
   return {
-    backendKind: "cloud_api",
-    cloudApiUrl: config.cloudApiUrl?.trim() || undefined,
     mqttHost: config.mqttHost?.trim() || undefined,
     mqttPort: config.mqttPort,
     mqttUseTls: config.mqttUseTls,
@@ -69,53 +77,36 @@ function hasOwn(config: ServerConfig, key: keyof ServerConfig): boolean {
   return Object.prototype.hasOwnProperty.call(config, key);
 }
 
-export function getEffectiveServerConfigSync(): ServerConfig {
-  const rawSaved = readLocalConfig();
-  const saved = normalizeServerConfig(rawSaved);
+function resolve(rawSaved: ServerConfig): ServerConfig {
+  const saved = normalizeMqttConfig(rawSaved);
   const env = envConfig();
   return {
     backendKind: "cloud_api",
-    cloudApiUrl: saved.cloudApiUrl ?? env.cloudApiUrl,
+    // Single source of truth: build config (env var override only). The saved
+    // localStorage cache never contributes a cloudApiUrl.
+    cloudApiUrl: env.cloudApiUrl,
     mqttHost: saved.mqttHost ?? env.mqttHost,
     mqttPort: saved.mqttPort ?? env.mqttPort,
     mqttUseTls: saved.mqttUseTls ?? env.mqttUseTls,
     mqttUsername: hasOwn(rawSaved, "mqttUsername") ? saved.mqttUsername : env.mqttUsername,
     mqttPassword: hasOwn(rawSaved, "mqttPassword") ? saved.mqttPassword : env.mqttPassword,
   };
+}
+
+export function getEffectiveServerConfigSync(): ServerConfig {
+  return resolve(readLocalConfig());
 }
 
 export async function getSavedServerConfig(): Promise<ServerConfig> {
-  if (!isTauri()) return readLocalConfig();
-  try {
-    const config = await invoke<ServerConfig>("get_server_config");
-    writeLocalConfig(config);
-    return config;
-  } catch {
-    return readLocalConfig();
-  }
+  return readLocalConfig();
 }
 
 export async function saveServerConfig(config: ServerConfig): Promise<ServerConfig> {
-  const normalized = normalizeServerConfig(config);
-
+  const normalized = normalizeMqttConfig(config);
   writeLocalConfig(normalized);
-  if (!isTauri()) return normalized;
-  const saved = await invoke<ServerConfig>("save_server_config", { config: normalized });
-  writeLocalConfig(saved);
-  return saved;
+  return { backendKind: "cloud_api", ...normalized };
 }
 
 export async function getEffectiveServerConfig(): Promise<ServerConfig> {
-  const rawSaved = await getSavedServerConfig();
-  const saved = normalizeServerConfig(rawSaved);
-  const env = envConfig();
-  return {
-    backendKind: "cloud_api",
-    cloudApiUrl: saved.cloudApiUrl ?? env.cloudApiUrl,
-    mqttHost: saved.mqttHost ?? env.mqttHost,
-    mqttPort: saved.mqttPort ?? env.mqttPort,
-    mqttUseTls: saved.mqttUseTls ?? env.mqttUseTls,
-    mqttUsername: hasOwn(rawSaved, "mqttUsername") ? saved.mqttUsername : env.mqttUsername,
-    mqttPassword: hasOwn(rawSaved, "mqttPassword") ? saved.mqttPassword : env.mqttPassword,
-  };
+  return resolve(readLocalConfig());
 }
