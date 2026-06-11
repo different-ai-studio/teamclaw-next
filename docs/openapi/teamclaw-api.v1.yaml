@@ -67,6 +67,16 @@ paths:
       operationId: listTeams
       summary: List teams
       tags: [Teams]
+      parameters:
+        - in: query
+          name: scope
+          required: false
+          schema:
+            type: string
+            enum: [all]
+          description: >
+            scope=all returns the caller's teams across ALL orgs they belong to
+            (MembershipTeam items). Omitted returns teams in the active org only.
       responses:
         "200":
           description: Current user's teams.
@@ -82,7 +92,9 @@ paths:
                   items:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Team"
+                      oneOf:
+                        - $ref: "#/components/schemas/Team"
+                        - $ref: "#/components/schemas/MembershipTeam"
                   nextCursor:
                     type:
                       - string
@@ -192,6 +204,34 @@ paths:
         "400":
           $ref: "#/components/responses/Error"
         "401":
+          $ref: "#/components/responses/Error"
+  /v1/teams/{id}/activate:
+    post:
+      operationId: activateTeam
+      summary: Switch the caller's active team (and org), minting a fresh session.
+      tags: [Teams]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: New session for the activated team.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [teamId, refreshToken]
+                properties:
+                  actorId:
+                    type: [string, "null"]
+                  teamId:
+                    type: string
+                  refreshToken:
+                    type: string
+        "403":
           $ref: "#/components/responses/Error"
   /v1/teams/{teamId}/invites:
     post:
@@ -3507,6 +3547,20 @@ components:
           type:
             - string
             - "null"
+    MembershipTeam:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: [string, "null"]
+        orgId:
+          type: [string, "null"]
+        orgName:
+          type: [string, "null"]
     Session:
       type: object
       required: [id, teamId, title, mode, hasUnread]
