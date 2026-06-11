@@ -413,6 +413,17 @@ export interface IdeasBackend {
   }): Promise<void>;
 }
 
+// Latest reported version of each client (device) backing an actor. Only carried
+// on the single-actor detail fetch (GET /v1/actors/:id), never on the directory
+// list — used by the actor profile dialog for ops/support debugging.
+export interface ClientVersionEntry {
+  clientType: string;
+  version: string;
+  deviceId: string;
+  build: string | null;
+  lastReportedAt: string;
+}
+
 export interface ActorDirectoryEntry {
   id: string;
   team_id: string;
@@ -433,6 +444,8 @@ export interface ActorDirectoryEntry {
   // Member contact — null for agents/external and anonymous members.
   email?: string | null;
   phone?: string | null;
+  // Per-device client versions — only populated by the single-actor detail fetch.
+  client_versions?: ClientVersionEntry[] | null;
 }
 
 export interface ConnectedAgentRow extends ActorDirectoryEntry {

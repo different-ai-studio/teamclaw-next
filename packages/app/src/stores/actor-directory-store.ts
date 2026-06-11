@@ -37,6 +37,9 @@ export type ActorRow = {
   id: string
   actor_type: 'member' | 'agent'
   display_name: string
+  // Real avatar image URL; the detail dialog falls back to display-name initials
+  // when absent. Carried on the network directory row (not the libsql cache).
+  avatar_url?: string | null
   member_status: string | null
   agent_status: string | null
   last_active_at: string | null
@@ -177,6 +180,7 @@ export const useActorDirectoryStore = create<DirectoryState>((set, get) => {
         id: row.id,
         actor_type: row.actor_type === 'agent' ? 'agent' : 'member',
         display_name: row.display_name || row.id,
+        avatar_url: row.avatar_url ?? null,
         member_status: row.member_status ?? null,
         agent_status: row.agent_status ?? null,
         last_active_at: row.last_active_at ?? null,

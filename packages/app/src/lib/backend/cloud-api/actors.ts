@@ -2,6 +2,7 @@ import type {
   ActorDirectoryEntry,
   ActorsBackend,
   AgentAccessBackendRow,
+  ClientVersionEntry,
   ConnectedAgentRow,
   TeamMemberOptionBackendRow,
 } from "../types";
@@ -26,6 +27,8 @@ type CloudActor = {
   lastActiveAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  // Only present on the single-actor detail response (GET /v1/actors/:id).
+  clientVersions?: ClientVersionEntry[] | null;
 };
 
 type CloudConnectedAgent = CloudActor & {
@@ -67,6 +70,7 @@ function mapActor(row: CloudActor): ActorDirectoryEntry {
     last_active_at: row.lastActiveAt ?? null,
     created_at: row.createdAt ?? null,
     updated_at: row.updatedAt ?? null,
+    client_versions: row.clientVersions ?? null,
   };
 }
 

@@ -1,14 +1,38 @@
-import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { ActorDetailDialog } from '../ActorDetailDialog'
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_k: string, fallback?: string) => fallback ?? _k }),
+  useTranslation: () => ({
+    t: (_k: string, fallback?: string | Record<string, unknown>, opts?: Record<string, unknown>) => {
+      // Mirror i18next: when called as t(key, { when: '...' }) the 2nd arg is
+      // options (no string fallback), so fall back to the key itself.
+      const fb = typeof fallback === 'string' ? fallback : _k
+      const vars = (typeof fallback === 'object' ? fallback : opts) as Record<string, unknown> | undefined
+      if (vars) {
+        return fb.replace(/\{\{(\w+)\}\}/g, (_m, name) => String(vars[name] ?? ''))
+      }
+      return fb
+    },
+  }),
 }))
 
 vi.mock('@/lib/date-format', () => ({
   formatRelativeTime: () => 'just now',
+  formatDate: () => 'Jan 1, 2026',
 }))
+
+const mockGetActorDirectoryEntry = vi.fn()
+
+vi.mock('@/lib/backend', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/backend')>()
+  return {
+    ...actual,
+    getBackend: () => ({
+      actors: { getActorDirectoryEntry: mockGetActorDirectoryEntry },
+    }),
+  }
+})
 
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ open, children }: { open: boolean; children: React.ReactNode }) => open ? <div>{children}</div> : null,
@@ -26,6 +50,11 @@ vi.mock('@/components/ui/dialog', () => ({
     <h2 className={className}>{children}</h2>
   ),
 }))
+
+beforeEach(() => {
+  mockGetActorDirectoryEntry.mockReset()
+  mockGetActorDirectoryEntry.mockResolvedValue(null)
+})
 
 describe('ActorDetailDialog', () => {
   it('uses the member detail pane surface', () => {
@@ -69,5 +98,143 @@ describe('ActorDetailDialog', () => {
 
     expect(screen.getByText('Team ID')).toBeInTheDocument()
     expect(screen.getByText('team-abc')).toBeInTheDocument()
+  })
+
+  it('renders the real avatar image when avatar_url is present', () => {
+    render(
+      <ActorDetailDialog
+        actor={{
+          id: 'actor-1',
+          actor_type: 'member',
+          display_name: 'Matt-iOS',
+          member_status: 'iOS',
+          agent_status: null,
+          last_active_at: new Date().toISOString(),
+          avatar_url: 'https://example.com/avatar.png',
+        }}
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    const img = screen.getByRole('img', { name: 'Matt-iOS' }) as HTMLImageElement
+    expect(img).toBeInTheDocument()
+    expect(img.src).toBe('https://example.com/avatar.png')
+  })
+
+  it('falls back to initials when the avatar image fails to load', () => {
+    render(
+      <ActorDetailDialog
+        actor={{
+          id: 'actor-1',
+          actor_type: 'member',
+          display_name: 'Matt-iOS',
+          member_status: 'iOS',
+          agent_status: null,
+          last_active_at: new Date().toISOString(),
+          avatar_url: 'https://example.com/broken.png',
+        }}
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    const img = screen.getByRole('img', { name: 'Matt-iOS' })
+    fireEvent.error(img)
+    expect(screen.queryByRole('img', { name: 'Matt-iOS' })).not.toBeInTheDocument()
+    // The hero initial ("M") is shown instead.
+    expect(screen.getByText('M')).toBeInTheDocument()
+  })
+
+  it('shows no avatar image when avatar_url is absent', () => {
+    render(
+      <ActorDetailDialog
+        actor={{
+          id: 'actor-1',
+          actor_type: 'member',
+          display_name: 'Matt-iOS',
+          member_status: 'iOS',
+          agent_status: null,
+          last_active_at: new Date().toISOString(),
+        }}
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+  })
+
+  it('renders the client versions section from the fetched actor detail', async () => {
+    mockGetActorDirectoryEntry.mockResolvedValue({
+      id: 'actor-1',
+      team_id: 'team-abc',
+      actor_type: 'member',
+      display_name: 'Matt-iOS',
+      client_versions: [
+        {
+          clientType: 'tauri',
+          version: '1.2.3',
+          deviceId: 'device-abcdef123456',
+          build: '456',
+          lastReportedAt: new Date().toISOString(),
+        },
+        {
+          clientType: 'ios',
+          version: '1.1.5',
+          deviceId: 'device-zzz',
+          build: null,
+          lastReportedAt: new Date().toISOString(),
+        },
+      ],
+    })
+
+    render(
+      <ActorDetailDialog
+        actor={{
+          id: 'actor-1',
+          actor_type: 'member',
+          display_name: 'Matt-iOS',
+          member_status: 'iOS',
+          agent_status: null,
+          last_active_at: new Date().toISOString(),
+        }}
+        teamId="team-abc"
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByText('Client versions')).toBeInTheDocument()
+    expect(screen.getByText('tauri')).toBeInTheDocument()
+    expect(screen.getByText(/1\.2\.3/)).toBeInTheDocument()
+    expect(screen.getByText('ios')).toBeInTheDocument()
+    expect(screen.getByText(/1\.1\.5/)).toBeInTheDocument()
+    expect(mockGetActorDirectoryEntry).toHaveBeenCalledWith('actor-1')
+  })
+
+  it('omits the client versions section when none are reported', async () => {
+    mockGetActorDirectoryEntry.mockResolvedValue({
+      id: 'actor-1',
+      team_id: 'team-abc',
+      actor_type: 'member',
+      display_name: 'Matt-iOS',
+      client_versions: [],
+    })
+
+    render(
+      <ActorDetailDialog
+        actor={{
+          id: 'actor-1',
+          actor_type: 'member',
+          display_name: 'Matt-iOS',
+          member_status: 'iOS',
+          agent_status: null,
+          last_active_at: new Date().toISOString(),
+        }}
+        teamId="team-abc"
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    // Let the fetch resolve.
+    await screen.findByText('Details')
+    expect(screen.queryByText('Client versions')).not.toBeInTheDocument()
   })
 })

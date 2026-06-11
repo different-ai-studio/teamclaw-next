@@ -2650,6 +2650,7 @@
       "never": "从未",
       "actorId": "Actor ID",
       "teamId": "团队 ID",
+      "clientVersions": "客户端版本",
       "startSession": "开始会话",
       "copyId": "复制 ID"
     },

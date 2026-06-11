@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { getBackend } from '@/lib/backend'
+import type { ClientVersionEntry } from '@/lib/backend/types'
 import { actorAvatarColor } from '@/lib/actor-color'
 import { formatDate, formatRelativeTime } from '@/lib/date-format'
 import { useActorPresenceStore } from '@/stores/actor-presence-store'
@@ -40,12 +41,42 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
 
   const [reinviting, setReinviting] = React.useState(false)
   const [reinvite, setReinvite] = React.useState<{ deeplink: string; expiresAt: string } | null>(null)
+  // Per-device client versions live only on the single-actor detail fetch (the
+  // directory list cache doesn't carry them), so we fetch lazily when the dialog
+  // opens and enrich the cached row once it lands. Never blocks first paint.
+  const [clientVersions, setClientVersions] = React.useState<ClientVersionEntry[]>([])
+  const [detailAvatarUrl, setDetailAvatarUrl] = React.useState<string | null>(null)
+  const [avatarFailed, setAvatarFailed] = React.useState(false)
 
   // Reset the re-invite result whenever the dialog targets a different actor
   // (or is reopened) so a stale link from a previous actor never leaks through.
   React.useEffect(() => {
     setReinvite(null)
     setReinviting(false)
+  }, [actor?.id])
+
+  // Fetch the full actor detail (client versions + freshest avatar/contact) when
+  // the dialog targets an actor. Guarded so a backend hiccup never breaks render.
+  React.useEffect(() => {
+    const id = actor?.id
+    setClientVersions([])
+    setDetailAvatarUrl(null)
+    setAvatarFailed(false)
+    if (!id) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const entry = await getBackend().actors.getActorDirectoryEntry(id)
+        if (cancelled || !entry) return
+        setClientVersions(entry.client_versions ?? [])
+        if (entry.avatar_url) setDetailAvatarUrl(entry.avatar_url)
+      } catch {
+        // Detail enrichment is best-effort; keep the cached-row view.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [actor?.id])
 
   if (!displayActor) return null
@@ -92,6 +123,16 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
       )
     : []
   const showSupportedAgentTypes = supportedAgentTypes.length > 1
+
+  // Prefer the freshest avatar from the detail fetch, then the cached row. When
+  // the image fails to load, fall back to the initials/icon placeholder.
+  const avatarUrl = detailAvatarUrl ?? displayActor.avatar_url ?? null
+  const showAvatarImage = !!avatarUrl && !avatarFailed
+  // Group devices by client kind, newest report first within each kind.
+  const sortedVersions = [...clientVersions].sort((a, b) => {
+    if (a.clientType !== b.clientType) return a.clientType.localeCompare(b.clientType)
+    return (b.lastReportedAt ?? '').localeCompare(a.lastReportedAt ?? '')
+  })
 
   const copyId = async () => {
     try {
@@ -183,13 +224,22 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
             <div className="relative">
               <div
                 className={cn(
-                  'flex h-24 w-24 shrink-0 items-center justify-center text-[38px] font-semibold text-white shadow-[0_8px_22px_-18px_rgba(26,26,20,0.45)]',
+                  'flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden text-[38px] font-semibold text-white shadow-[0_8px_22px_-18px_rgba(26,26,20,0.45)]',
                   isAgent ? 'rounded-[24px] ring-[2px] ring-coral' : 'rounded-full',
                 )}
-                style={{ background: c.bg, color: c.fg }}
+                style={showAvatarImage ? undefined : { background: c.bg, color: c.fg }}
               >
-                {displayActor.display_name?.slice(0, 1).toUpperCase()
-                  || (isAgent ? <Sparkles className="h-9 w-9" /> : <UserIcon className="h-9 w-9" />)}
+                {showAvatarImage ? (
+                  <img
+                    src={avatarUrl ?? undefined}
+                    alt={displayActor.display_name}
+                    className="h-full w-full object-cover"
+                    onError={() => setAvatarFailed(true)}
+                  />
+                ) : (
+                  displayActor.display_name?.slice(0, 1).toUpperCase()
+                    || (isAgent ? <Sparkles className="h-9 w-9" /> : <UserIcon className="h-9 w-9" />)
+                )}
               </div>
               <span
                 className={cn(
@@ -311,6 +361,40 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
               <dd className="min-w-0 truncate font-mono text-[12px] text-foreground">{displayActor.id}</dd>
             </dl>
           </div>
+
+          {sortedVersions.length > 0 && (
+            <div className="mt-8 border-t border-border-soft pt-5">
+              <div className="mb-4 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-faint">
+                {t('actors.detail.clientVersions', 'Client versions')}
+              </div>
+              <ul className="flex flex-col gap-2.5">
+                {sortedVersions.map((v) => (
+                  <li
+                    key={`${v.clientType}:${v.deviceId}`}
+                    className="flex items-center justify-between gap-3 text-[13px] leading-5"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="rounded-md border border-border-soft bg-paper px-2 py-0.5 font-mono text-[11.5px] text-ink-2">
+                        {v.clientType}
+                      </span>
+                      <span className="min-w-0 truncate font-medium text-foreground">
+                        {v.version}
+                        {v.build ? <span className="ml-1 text-muted-foreground">({v.build})</span> : null}
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2 text-[11.5px] text-faint">
+                      {v.lastReportedAt && (
+                        <span>{formatRelativeTime(new Date(v.lastReportedAt))}</span>
+                      )}
+                      <span className="font-mono" title={v.deviceId}>
+                        {v.deviceId.length > 8 ? `${v.deviceId.slice(0, 8)}…` : v.deviceId}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {teamId && (
             <div className="mt-8 border-t border-border-soft pt-5">

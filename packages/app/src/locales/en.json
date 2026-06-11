@@ -2650,6 +2650,7 @@
       "never": "Never",
       "actorId": "Actor ID",
       "teamId": "Team ID",
+      "clientVersions": "Client versions",
       "startSession": "Start session",
       "copyId": "Copy ID"
     },
