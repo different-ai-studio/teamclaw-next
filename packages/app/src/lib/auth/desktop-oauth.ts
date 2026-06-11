@@ -34,3 +34,17 @@ export async function runDesktopOAuth(
   }
   return authClient.exchangeOAuthCode(code, pkce.verifier);
 }
+
+/**
+ * Abort an in-flight desktop OAuth attempt. The blocked `oauth_loopback_await`
+ * resolves immediately as `oauth_cancelled`, so the caller's `runDesktopOAuth`
+ * promise rejects and the UI can re-enable its sign-in controls without waiting
+ * out the long loopback timeout. No-op when nothing is pending.
+ */
+export async function cancelDesktopOAuth(): Promise<void> {
+  try {
+    await invoke("oauth_loopback_cancel");
+  } catch {
+    // best-effort: a missing/absent listener is fine, nothing to cancel.
+  }
+}

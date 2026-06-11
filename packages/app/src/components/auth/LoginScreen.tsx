@@ -12,7 +12,7 @@ import type { OAuthProvider } from "@/lib/auth";
 
 export function OAuthButtons() {
   const { t } = useTranslation();
-  const { signInWithOAuth, loading } = useAuthStore();
+  const { signInWithOAuth, cancelOAuth, loading, oauthPending } = useAuthStore();
   const auth = buildConfig.features?.auth;
   const showGoogle = isTauri() && Boolean(auth?.google);
   const showWechat = isTauri() && Boolean(auth?.wechat);
@@ -29,6 +29,31 @@ export function OAuthButtons() {
       {label}
     </button>
   );
+
+  // While a provider page is open and the loopback is awaiting, give the user an
+  // explicit escape. Without it a broken provider page leaves every sign-in
+  // control disabled until the long loopback timeout, so the app looks frozen.
+  if (oauthPending) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-[11px] text-faint">
+          <span className="h-px flex-1 bg-border" />
+          {t("auth.orContinueWith", "or continue with")}
+          <span className="h-px flex-1 bg-border" />
+        </div>
+        <p className="text-center text-[12px] text-muted-foreground">
+          {t("auth.oauthWaiting", "Finish signing in in your browser, then come back.")}
+        </p>
+        <button
+          type="button"
+          onClick={() => cancelOAuth()}
+          className="flex h-10 w-full items-center justify-center rounded-[8px] border border-border bg-paper text-[13px] font-medium text-foreground transition-colors hover:bg-selected/45"
+        >
+          {t("auth.oauthCancel", "Cancel and try another way")}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">

@@ -342,6 +342,7 @@ pub fn run() {
             commands::mqtt_bus::mqtt_status,
             commands::oauth_loopback::oauth_loopback_start,
             commands::oauth_loopback::oauth_loopback_await,
+            commands::oauth_loopback::oauth_loopback_cancel,
             commands::filewatcher::watch_directory,
             commands::filewatcher::unwatch_directory,
             commands::filewatcher::unwatch_all,
