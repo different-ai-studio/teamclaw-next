@@ -39,7 +39,7 @@ targets:
         DEVELOPMENT_TEAM: 43G5A6G9QV
         MARKETING_VERSION: "1.1.5"
         CURRENT_PROJECT_VERSION: 20
-        SWIFT_VERSION: "5.10"
+        SWIFT_VERSION: "6.0"
 
   AMUXUITests:
     type: bundle.ui-testing
@@ -50,7 +50,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: tech.teamclaw.mobile.uitests
         DEVELOPMENT_TEAM: 43G5A6G9QV
-        SWIFT_VERSION: "5.10"
+        SWIFT_VERSION: "6.0"
         TEST_TARGET_NAME: AMUX
         GENERATE_INFOPLIST_FILE: YES
 
