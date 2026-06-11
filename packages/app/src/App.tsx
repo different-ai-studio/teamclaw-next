@@ -611,7 +611,7 @@ function AppContent() {
   // UI store - individual selectors
   const currentView = useUIStore((s) => s.currentView);
   const sidebarFilter = useUIStore((s) => s.sidebarFilter);
-  const teamShareMode = sidebarFilter?.kind === "teamShare";
+  const teamShareMode = sidebarFilter?.kind === "teamShare" && buildConfig.features.teamShareBrowser;
   const closeSettings = useUIStore((s) => s.closeSettings);
   const authSession = useAuthStore((s) => s.session);
   const loadCurrentTeam = useCurrentTeamStore((s) => s.load);

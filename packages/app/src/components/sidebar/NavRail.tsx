@@ -9,6 +9,7 @@ import { useQuickChatReadiness } from '@/hooks/use-quick-chat-readiness'
 import { ActorsSection } from '@/components/sidebar/ActorsSection'
 import { TeamShareNavSection } from '@/components/sidebar/TeamShareNavSection'
 import { NewChatSplitButton } from '@/components/sidebar/NewChatSplitButton'
+import { buildConfig } from '@/lib/build-config'
 import { cn } from '@/lib/utils'
 
 interface TopEntryProps {
@@ -135,7 +136,7 @@ export function NavRail() {
         />
       </div>
 
-      <TeamShareNavSection />
+      {buildConfig.features.teamShareBrowser && <TeamShareNavSection />}
 
       <ActorsSection />
     </div>
