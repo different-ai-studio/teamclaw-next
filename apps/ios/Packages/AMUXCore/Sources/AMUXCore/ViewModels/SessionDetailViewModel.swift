@@ -86,6 +86,10 @@ public final class SessionDetailViewModel {
     /// dropped while we were disconnected. Without that replay the
     /// active-stream card hangs until pull-to-refresh.
     private var streamingTurnIDByAgent: [String: String] = [:]
+    /// Pending throttled mirror of the reducer's streaming buffers onto
+    /// the @Observable fields above. Non-nil while a flush is scheduled;
+    /// see `scheduleStreamingMirrorFlush()`.
+    private var streamingMirrorFlushTask: Task<Void, Never>?
     /// Backwards-compat shim for callers that haven't migrated to the
     /// per-agent map. True when ANY agent is streaming raw text. Most call
     /// sites should prefer `streamingAgentSet` for correct multi-agent
@@ -1646,6 +1650,7 @@ public final class SessionDetailViewModel {
     public func stop() {
         task?.cancel(); task = nil
         spawningPollTask?.cancel(); spawningPollTask = nil
+        streamingMirrorFlushTask?.cancel(); streamingMirrorFlushTask = nil
         // Unsubscribe from extra runtime-state topics added for session agents
         // that aren't in ConnectedAgentsStore. SessionListViewModel manages its
         // own set; we only clean up the ones we added here.
@@ -1666,6 +1671,10 @@ public final class SessionDetailViewModel {
         // persisted incomplete event so it's visible when the user returns.
         // Multi-agent: each active stream gets its own synthetic row stamped
         // with the producing agent's actor id.
+        // The @Observable mirror lags the reducer by up to one throttle
+        // interval — sync it first so the persisted partial carries the
+        // full streamed text.
+        mirrorReducerStreamingState()
         if !streamingAgentSet.isEmpty, runtime != nil, let ctx = startModelContext {
             var seq = (events.last?.sequence ?? 0) + 1
             for agentID in streamingAgentSet {
@@ -1705,6 +1714,9 @@ public final class SessionDetailViewModel {
     /// `discardBackgroundSnapshot()` removes it again on the common
     /// path where the process survived.
     public func flushStreamingForBackground() {
+        // Sync the throttled mirror so the snapshot carries the full
+        // streamed text, not a buffer up to one flush interval stale.
+        mirrorReducerStreamingState()
         guard !streamingAgentSet.isEmpty,
               runtime != nil,
               let ctx = startModelContext else { return }
@@ -2439,29 +2451,29 @@ public final class SessionDetailViewModel {
                                     modelContext: ModelContext) -> Bool {
         let effect = ChatTimelineReducer.apply(input, to: &timelineState)
 
-        // Always mirror reducer-owned observable fields. These drive
-        // ActiveStreamCardView last-line and StreamingDetailView live text
-        // on every delta — they must update even when entries are unchanged.
-        streamingTextByAgent = timelineState.streamingTextByAgent
-        streamingModelByAgent = timelineState.streamingModelByAgent
-        streamingAgentSet = timelineState.streamingAgentSet
-        streamingTurnIDByAgent = timelineState.streamingTurnIDByAgent
         if !timelineState.availableCommands.isEmpty {
             dynamicAvailableCommands = timelineState.availableCommands
         }
 
         switch effect {
         case .noop:
+            mirrorReducerStreamingState()
             return false
         case .streamingBufferOnly:
-            // Hot path: buffer mirrors above are sufficient. Skip sort +
-            // SwiftData diff — entries didn't change, so the projection
-            // would be a no-op and callers will correctly skip recomputeGroups.
+            // Hot path: only the text buffer grew — entries are
+            // byte-identical, so we skip sort + SwiftData diff. The
+            // @Observable mirror is throttled too: at delta rates every
+            // per-token assignment invalidates ActiveStreamCardView /
+            // StreamingDetailView for a render pass, so coalesce to at
+            // most one mirror per interval. The first delta of a stream
+            // arrives via `.entriesChanged` and mirrors immediately.
+            scheduleStreamingMirrorFlush()
             #if DEBUG
             SessionDetailViewModel._testFastPathSkipCount &+= 1
             #endif
             return false
         case .entriesChanged:
+            mirrorReducerStreamingState()
             timelineState.entries.sort {
                 if $0.timestamp != $1.timestamp { return $0.timestamp < $1.timestamp }
                 if $0.sequence != $1.sequence { return $0.sequence < $1.sequence }
@@ -2473,6 +2485,38 @@ public final class SessionDetailViewModel {
                 agentId: eventScopeKey,
                 modelContext: modelContext
             )
+        }
+    }
+
+    /// Mirror the reducer-owned streaming buffers onto the VM's
+    /// @Observable fields. These drive ActiveStreamCardView last-line and
+    /// StreamingDetailView live text. Called synchronously on every
+    /// entries-changing input and on a throttle for pure text-growth deltas.
+    private func mirrorReducerStreamingState() {
+        streamingMirrorFlushTask?.cancel()
+        streamingMirrorFlushTask = nil
+        streamingTextByAgent = timelineState.streamingTextByAgent
+        streamingModelByAgent = timelineState.streamingModelByAgent
+        streamingAgentSet = timelineState.streamingAgentSet
+        streamingTurnIDByAgent = timelineState.streamingTurnIDByAgent
+    }
+
+    /// Throttle leg of `mirrorReducerStreamingState` for the per-token
+    /// hot path. Keeps the latest reducer text flowing to the UI at
+    /// ~10 Hz instead of once per delta. A pending flush is left in
+    /// place (not rescheduled) so a continuous stream flushes on a
+    /// steady cadence; immediate mirrors cancel it because they already
+    /// publish strictly newer state.
+    private func scheduleStreamingMirrorFlush() {
+        guard streamingMirrorFlushTask == nil else { return }
+        streamingMirrorFlushTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard let self, !Task.isCancelled else { return }
+            self.streamingMirrorFlushTask = nil
+            self.streamingTextByAgent = self.timelineState.streamingTextByAgent
+            self.streamingModelByAgent = self.timelineState.streamingModelByAgent
+            self.streamingAgentSet = self.timelineState.streamingAgentSet
+            self.streamingTurnIDByAgent = self.timelineState.streamingTurnIDByAgent
         }
     }
 
@@ -2741,6 +2785,7 @@ extension SessionDetailViewModel {
     /// the flush path.
     public func _test_stop(modelContext: ModelContext) {
         startModelContext = modelContext
+        mirrorReducerStreamingState()
         var seq = (events.last?.sequence ?? 0) + 1
         for agentID in streamingAgentSet {
             guard let text = streamingTextByAgent[agentID], !text.isEmpty else { continue }
@@ -2819,6 +2864,14 @@ extension SessionDetailViewModel {
     /// extension restriction on @Observable classes; tests that call this
     /// should be serial to avoid data races on the counter.
     nonisolated(unsafe) public static var _testFastPathSkipCount: Int = 0
+
+    /// Synchronously run the throttled streaming-buffer mirror so tests
+    /// can assert on the @Observable fields without sleeping through the
+    /// flush interval.
+    @MainActor
+    public func _testFlushStreamingMirror() {
+        mirrorReducerStreamingState()
+    }
 
     /// Direct test entry: build an AcpInput and run it through
     /// `applyTimelineInput` without a live MQTT session.
