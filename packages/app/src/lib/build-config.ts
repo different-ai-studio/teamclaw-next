@@ -50,6 +50,8 @@ export interface BuildConfig {
       wechat?: boolean
       phone?: boolean
     }
+    /** Browsable team-share sidebar (Skills / MCP / Env / Knowledge). Off by default. */
+    teamShareBrowser?: boolean
   }
   s3?: {
     teamEndpoint: string
@@ -94,7 +96,7 @@ const fallback: BuildConfig = {
     lockLlmConfig: false,
   },
   app: { name: 'TeamClaw', shortName: 'teamclaw' },
-  features: { teamMode: true, updater: true, channels: { ...allChannelsEnabled }, auth: { google: false, wechat: false, phone: false } },
+  features: { teamMode: true, updater: true, channels: { ...allChannelsEnabled }, auth: { google: false, wechat: false, phone: false }, teamShareBrowser: false },
   defaults: { locale: 'zh-CN', theme: 'system' },
 }
 

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { useWorkspaceStore } from '@/stores/workspace'
+import type { TeamShareSection } from '@/stores/team-share-browser'
 
 type View = 'chat' | 'settings'
 
@@ -28,6 +29,7 @@ export type SidebarFilter =
   | { kind: 'actor'; actorId: string; displayName: string; actorType: 'member' | 'agent' }
   | { kind: 'idea'; ideaId: string; title: string }
   | { kind: 'workspace'; workspaceId: string | null; path: string; name: string }
+  | { kind: 'teamShare'; section: TeamShareSection }
 
 export type SettingsSection = 'llm' | 'general' | 'voice' | 'prompt' | 'mcp' | 'channels' | 'automation' | 'daemonGeneral' | 'daemonWorkspaces' | 'daemonRuntimes' | 'team' | 'envVars' | 'skills' | 'roles' | 'rolesSkills' | 'knowledge' | 'deps' | 'tokenUsage' | 'privacy' | 'permissions' | 'leaderboard' | 'shortcuts' | 'cache'
 
@@ -53,6 +55,8 @@ interface UIState {
   sidebarFilter: SidebarFilter
   ideasSectionCollapsed: boolean
   actorsSectionCollapsed: boolean
+  /** Collapsed state of the team-share nav group (Skills/MCP/Env/Knowledge). */
+  teamShareCollapsed: boolean
   localDaemonExpanded: boolean
   draftIdeaId: string | null
   /** Modal "新会话" dialog (NavRail ▾ menu + intercepted send-with-no-session). */
@@ -66,6 +70,7 @@ interface UIState {
   setSidebarFilter: (filter: SidebarFilter) => void
   toggleIdeasSection: () => void
   toggleActorsSection: () => void
+  toggleTeamShareSection: () => void
   toggleLocalDaemon: () => void
   setDraftIdeaId: (ideaId: string) => void
   clearDraftIdeaId: () => void
@@ -106,6 +111,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   sidebarFilter: { kind: 'all' },
   ideasSectionCollapsed: false,
   actorsSectionCollapsed: false,
+  teamShareCollapsed: true,
   localDaemonExpanded: false,
   draftIdeaId: null,
   newSessionDialogOpen: false,
@@ -308,6 +314,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setSidebarFilter: (filter) => set({ sidebarFilter: filter }),
   toggleIdeasSection: () => set((s) => ({ ideasSectionCollapsed: !s.ideasSectionCollapsed })),
   toggleActorsSection: () => set((s) => ({ actorsSectionCollapsed: !s.actorsSectionCollapsed })),
+  toggleTeamShareSection: () => set((s) => ({ teamShareCollapsed: !s.teamShareCollapsed })),
   toggleLocalDaemon: () => set((s) => ({ localDaemonExpanded: !s.localDaemonExpanded })),
   setDraftIdeaId: (ideaId) => set({ draftIdeaId: ideaId }),
   clearDraftIdeaId: () => set({ draftIdeaId: null }),

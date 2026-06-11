@@ -7,7 +7,9 @@ import { useCronStore } from '@/stores/cron'
 import { createQuickDaemonSession } from '@/lib/quick-daemon-session'
 import { useQuickChatReadiness } from '@/hooks/use-quick-chat-readiness'
 import { ActorsSection } from '@/components/sidebar/ActorsSection'
+import { TeamShareNavSection } from '@/components/sidebar/TeamShareNavSection'
 import { NewChatSplitButton } from '@/components/sidebar/NewChatSplitButton'
+import { buildConfig } from '@/lib/build-config'
 import { cn } from '@/lib/utils'
 
 interface TopEntryProps {
@@ -133,6 +135,8 @@ export function NavRail() {
           onClick={() => setFilter({ kind: 'shortcuts' })}
         />
       </div>
+
+      {buildConfig.features.teamShareBrowser && <TeamShareNavSection />}
 
       <ActorsSection />
     </div>

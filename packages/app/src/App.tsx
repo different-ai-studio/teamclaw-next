@@ -50,6 +50,7 @@ import { useMCPFileWatcher } from "@/hooks/useMCPFileWatcher";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarSecondColumn } from "@/components/sidebar/SidebarSecondColumn";
+import { TeamShareDetailPane } from "@/components/teamshare/TeamShareDetailPane";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { NewSessionDialog } from "@/components/chat/NewSessionDialog";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -609,6 +610,8 @@ function AppContent() {
 
   // UI store - individual selectors
   const currentView = useUIStore((s) => s.currentView);
+  const sidebarFilter = useUIStore((s) => s.sidebarFilter);
+  const teamShareMode = sidebarFilter?.kind === "teamShare" && buildConfig.features.teamShareBrowser;
   const closeSettings = useUIStore((s) => s.closeSettings);
   const authSession = useAuthStore((s) => s.session);
   const loadCurrentTeam = useCurrentTeamStore((s) => s.load);
@@ -1896,6 +1899,10 @@ function AppContent() {
         </div>
         {/* Main column: header + main content */}
         <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+          {teamShareMode ? (
+            <TeamShareDetailPane />
+          ) : (
+          <>
           {/* Header with breadcrumb - sticky */}
           <header
             className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-2 bg-background px-4"
@@ -2002,6 +2009,8 @@ function AppContent() {
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <MainContent />
           </div>
+          </>
+          )}
         </div>
 
         {/* Right Panel - full height */}
