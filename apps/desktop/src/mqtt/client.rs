@@ -57,7 +57,7 @@ impl MqttClient {
 }
 
 pub async fn run_event_loop(bus: Arc<super::MqttBusInner>, app: tauri::AppHandle, generation: u64) {
-    use rumqttc::{Event, Packet};
+    use rumqttc::{ConnectReturnCode, Event, Packet};
     use tauri::Emitter;
 
     let mut backoff_secs: u64 = 1;
@@ -87,10 +87,22 @@ pub async fn run_event_loop(bus: Arc<super::MqttBusInner>, app: tauri::AppHandle
         }
         match poll_result {
             Ok(Event::Incoming(Packet::ConnAck(ack))) => {
-                backoff_secs = 1;
-                bus.set_connected(true);
-                tracing::info!("mqtt CONNACK: {:?}", ack.code);
-                let _ = app.emit("mqtt:connected", true);
+                if ack.code == ConnectReturnCode::Success {
+                    backoff_secs = 1;
+                    bus.set_connected(true);
+                    tracing::info!("mqtt CONNACK: success");
+                    let _ = app.emit("mqtt:connected", true);
+                } else {
+                    // The broker accepted the TCP/TLS socket but refused the MQTT
+                    // session (e.g. bad credentials). Surface the reason instead of
+                    // flashing "connected" and letting the socket-close error below
+                    // silently flip us back to red with no explanation.
+                    bus.set_connected(false);
+                    let msg = format!("broker refused connection: {:?}", ack.code);
+                    tracing::warn!("mqtt {msg}");
+                    let _ = app.emit("mqtt:connected", false);
+                    let _ = app.emit("mqtt:error", msg.as_str());
+                }
             }
             Ok(Event::Incoming(Packet::Disconnect)) => {
                 bus.set_connected(false);
@@ -110,8 +122,12 @@ pub async fn run_event_loop(bus: Arc<super::MqttBusInner>, app: tauri::AppHandle
             }
             Err(e) => {
                 bus.set_connected(false);
+                let msg = e.to_string();
                 let _ = app.emit("mqtt:connected", false);
-                tracing::warn!("mqtt event loop error: {e}, retry in {backoff_secs}s");
+                // Surface the connection failure (auth rejection, refused socket,
+                // TLS error, …) to the UI. Previously this only went to the log.
+                let _ = app.emit("mqtt:error", msg.as_str());
+                tracing::warn!("mqtt event loop error: {msg}, retry in {backoff_secs}s");
                 drop(event_loop);
                 tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
                 backoff_secs = (backoff_secs * 2).min(60);

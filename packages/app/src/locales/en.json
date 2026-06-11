@@ -949,6 +949,7 @@
       "mqttStatusDisconnected": "Disconnected",
       "mqttReconnect": "Reconnect",
       "mqttReconnecting": "Reconnecting…",
+      "mqttLastError": "Last error",
       "save": "Save",
       "server": "Server",
       "serverAddress": "Server address",
