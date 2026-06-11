@@ -58,7 +58,7 @@ export function DaemonOnboardingWizard({ onDone }: { onDone: () => void }) {
     useDaemonOnboardingStore()
   const [mode, setMode] = React.useState<'new' | 'bind'>('new')
   const [name, setName] = React.useState('')
-  const [visibility, setVisibility] = React.useState<Visibility>('team')
+  const [visibility, setVisibility] = React.useState<Visibility>('personal')
 
   React.useEffect(() => {
     void refresh()
