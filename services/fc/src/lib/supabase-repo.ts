@@ -102,7 +102,7 @@ export function createSupabaseBusinessRepository(options) {
       const { createServiceRoleClient } = await import("./supabase.js");
       admin = createServiceRoleClient();
     }
-    const { data, error } = await admin.schema("public").rpc(rpcName, args);
+    const { data, error } = await admin.rpc(rpcName, args);
     if (error) {
       const code = error?.code || "";
       if (code === "PGRST202") {
@@ -140,12 +140,12 @@ export function createSupabaseBusinessRepository(options) {
       let orgId = (caller?.user?.app_metadata as any)?.org_id;
       if (!orgId && caller?.user?.id) {
         const { data: provisioned, error: orgErr } =
-          await supabase.schema("public").rpc("ensure_personal_org");
+          await supabase.rpc("ensure_personal_org");
         if (orgErr) throw orgErr;
         orgId = provisioned as string | null;
       }
       if (orgId) args.p_oid = orgId;
-      const { data, error } = await supabase.schema("public").rpc("create_team", args);
+      const { data, error } = await supabase.rpc("create_team", args);
       if (error) throw error;
       const row = requiredRow(data, "teams.createTeam");
       return mapTeam({
@@ -167,7 +167,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async renameTeam(teamId, { name }) {
-      const { data, error } = await supabase.schema("public").rpc("rename_team", { p_team_id: teamId, p_name: name });
+      const { data, error } = await supabase.rpc("rename_team", { p_team_id: teamId, p_name: name });
       if (error) throw error;
       return mapTeam(requiredRow(data, "teams.renameTeam"));
     },
@@ -182,7 +182,7 @@ export function createSupabaseBusinessRepository(options) {
       if (input.agentKind != null) args.p_agent_kind = input.agentKind;
       if (input.ttlSeconds != null) args.p_ttl_seconds = input.ttlSeconds;
       if (input.targetActorId != null) args.p_target_actor_id = input.targetActorId;
-      const { data, error } = await supabase.schema("public").rpc("create_team_invite", args);
+      const { data, error } = await supabase.rpc("create_team_invite", args);
       if (error) throw error;
       const row = requiredRow(data, "teams.createTeamInvite");
       return {
@@ -193,12 +193,12 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async removeTeamActor(_teamId, actorId) {
-      const { error } = await supabase.schema("public").rpc("remove_team_actor", { p_actor_id: actorId });
+      const { error } = await supabase.rpc("remove_team_actor", { p_actor_id: actorId });
       if (error) throw error;
     },
 
     async updateCurrentActorProfile(actorId, { displayName, avatarUrl }) {
-      const { data, error } = await supabase.schema("public").rpc("update_current_actor_profile", {
+      const { data, error } = await supabase.rpc("update_current_actor_profile", {
         p_actor_id: actorId,
         p_display_name: displayName,
         p_avatar_url: avatarUrl ?? null,
@@ -209,7 +209,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async getMemberDefaultAgent(teamId) {
-      const { data, error } = await supabase.schema("public").rpc("get_member_default_agent", {
+      const { data, error } = await supabase.rpc("get_member_default_agent", {
         p_team_id: teamId,
       });
       if (error) throw mapDefaultAgentError(error);
@@ -219,7 +219,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async setMemberDefaultAgent(teamId, agentId) {
-      const { data, error } = await supabase.schema("public").rpc("set_member_default_agent", {
+      const { data, error } = await supabase.rpc("set_member_default_agent", {
         p_team_id: teamId,
         p_agent_id: agentId ?? null,
       });
@@ -229,7 +229,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async reportClientVersion(teamId, body) {
-      const { error } = await supabase.schema("public").rpc("report_client_version", {
+      const { error } = await supabase.rpc("report_client_version", {
         p_team_id: teamId,
         p_client_type: body.clientType,
         p_version: body.version,
@@ -315,7 +315,7 @@ export function createSupabaseBusinessRepository(options) {
       // Persist litellm_team_id + ai_gateway_endpoint via SECURITY DEFINER
       // RPC because team_workspace_config.litellm_team_id is guarded against
       // direct authenticated UPDATEs (see 20260527000004 guard trigger).
-      const { error: rpcErr } = await supabase.schema("public").rpc("update_team_litellm", {
+      const { error: rpcErr } = await supabase.rpc("update_team_litellm", {
         p_team_id: teamId,
         p_litellm_team_id: provisioning.litellmTeamId,
         p_ai_gateway_endpoint: provisioning.aiGatewayEndpoint,
@@ -385,7 +385,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async listSessions({ limit = 50, cursor = null } = {}) {
-      const { data, error } = await supabase.schema("public").rpc("list_current_actor_sessions", {
+      const { data, error } = await supabase.rpc("list_current_actor_sessions", {
         p_limit: limit,
         p_before_last_message_at: cursor?.lastMessageAt ?? null,
         p_before_created_at: cursor?.createdAt ?? null,
@@ -703,7 +703,7 @@ export function createSupabaseBusinessRepository(options) {
         p_description: body.description ?? body.body ?? "",
       };
       if (body.workspaceId != null) args.p_workspace_id = body.workspaceId;
-      const { data, error } = await supabase.schema("public").rpc("create_idea", args);
+      const { data, error } = await supabase.rpc("create_idea", args);
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
       const id = requiredString(row?.id, "ideas.createIdea", "id");
@@ -711,7 +711,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async updateIdea(ideaId, body) {
-      const { error } = await supabase.schema("public").rpc("update_idea", {
+      const { error } = await supabase.rpc("update_idea", {
         p_idea_id: ideaId,
         p_title: body.title ?? null,
         p_workspace_id: body.workspaceId ?? null,
@@ -723,7 +723,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async archiveIdea(ideaId, { archived = true } = {}) {
-      const { error } = await supabase.schema("public").rpc("archive_idea", { p_idea_id: ideaId, p_archived: archived });
+      const { error } = await supabase.rpc("archive_idea", { p_idea_id: ideaId, p_archived: archived });
       if (error) throw error;
     },
 
@@ -769,7 +769,7 @@ export function createSupabaseBusinessRepository(options) {
         p_order: body.order ?? body.position ?? 0,
         p_target: body.target ?? "",
       };
-      const { data, error } = await supabase.schema("public").rpc("shortcut_create", args);
+      const { data, error } = await supabase.rpc("shortcut_create", args);
       if (error) throw error;
       const id = requiredString(data, "shortcuts.createShortcut", "id");
       return this.getShortcut(id);
@@ -803,14 +803,14 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async batchMoveShortcuts({ moves }) {
-      const { error } = await supabase.schema("public").rpc("shortcut_batch_move", {
+      const { error } = await supabase.rpc("shortcut_batch_move", {
         p_moves: moves.map((m) => ({ shortcut_id: m.shortcutId, parent_id: m.parentId, position: m.position })),
       });
       if (error) throw error;
     },
 
     async setShortcutVisibleRoles(shortcutId, { roleIds }) {
-      const { error } = await supabase.schema("public").rpc("shortcut_set_visible_roles", {
+      const { error } = await supabase.rpc("shortcut_set_visible_roles", {
         p_shortcut_id: shortcutId,
         p_role_ids: roleIds,
       });
@@ -836,7 +836,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async createIdeaActivity(ideaId, body) {
-      const { data, error } = await supabase.schema("public").rpc("create_idea_activity", {
+      const { data, error } = await supabase.rpc("create_idea_activity", {
         p_idea_id: ideaId,
         p_activity_type: body.activityType ?? body.kind,
         p_content: body.content ?? null,
@@ -858,7 +858,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async reorderIdeas({ teamId, ideaIds }) {
-      const { error } = await supabase.schema("public").rpc("reorder_ideas", {
+      const { error } = await supabase.rpc("reorder_ideas", {
         p_team_id: teamId,
         p_idea_ids: ideaIds,
       });
@@ -1058,7 +1058,7 @@ export function createSupabaseBusinessRepository(options) {
 
     async getTeamLeaderboard(teamId, { period = "week" } = {}) {
       const { data, error } = await supabase
-        .schema("public").rpc("team_leaderboard", { p_team_id: teamId, p_period: period });
+        .rpc("team_leaderboard", { p_team_id: teamId, p_period: period });
       if (error) throw error;
       const rows = (data ?? []).slice().sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
       return { items: rows.map(mapLeaderboardRow) };
@@ -1539,7 +1539,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async markSessionViewed(sessionId, lastReadMessageId = null) {
-      const { error } = await supabase.schema("public").rpc("mark_current_actor_session_viewed", {
+      const { error } = await supabase.rpc("mark_current_actor_session_viewed", {
         p_session_id: sessionId,
         p_last_read_message_id: lastReadMessageId ?? null,
       });
@@ -1578,7 +1578,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async ensureGatewaySession(input) {
-      const { data, error } = await supabase.schema("public").rpc("ensure_gateway_session", {
+      const { data, error } = await supabase.rpc("ensure_gateway_session", {
         p_team_id: input.teamId,
         p_binding: input.binding,
         p_title: input.title,
@@ -1637,7 +1637,7 @@ export function createSupabaseBusinessRepository(options) {
       // desktop users can open cron run history via "查看对话". Without this,
       // sessions_select_if_participant_or_creator hides the row from members
       // who are not the agent actor (see 202605060001_sessions_select_only_participants).
-      const { data: adminRows, error: adminErr } = await supabase.schema("public").rpc(
+      const { data: adminRows, error: adminErr } = await supabase.rpc(
         "list_agent_admin_member_actor_ids",
         { p_agent_actor_id: input.primaryAgentActorId },
       );
@@ -1753,7 +1753,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async upsertExternalActor(input) {
-      const { data, error } = await supabase.schema("public").rpc("upsert_external_actor", {
+      const { data, error } = await supabase.rpc("upsert_external_actor", {
         p_team_id: input.teamId,
         p_source: input.source,
         p_source_id: input.sourceId,
@@ -1767,7 +1767,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async checkAgentPermission(agentActorId, actorId) {
-      const { data, error } = await supabase.schema("public").rpc("check_agent_permission", {
+      const { data, error } = await supabase.rpc("check_agent_permission", {
         p_agent_id: agentActorId,
         p_actor_id: actorId,
       });
@@ -1812,7 +1812,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async listAgentAdminMembers(agentActorId) {
-      const { data, error } = await supabase.schema("public").rpc("list_agent_admin_member_actor_ids", {
+      const { data, error } = await supabase.rpc("list_agent_admin_member_actor_ids", {
         p_agent_actor_id: agentActorId,
       });
       if (error) throw error;
@@ -1826,14 +1826,14 @@ export function createSupabaseBusinessRepository(options) {
 
     async heartbeat() {
       // Probe + update last_active_at so clients see the daemon as online.
-      const { error } = await supabase.schema("public").rpc("update_actor_last_active");
+      const { error } = await supabase.rpc("update_actor_last_active");
       if (error) throw error;
     },
 
     // --- Actor agent management (RPCs) ---
 
     async listConnectedAgents(teamId) {
-      const { data, error } = await supabase.schema("public").rpc("list_connected_agents", { p_team_id: teamId });
+      const { data, error } = await supabase.rpc("list_connected_agents", { p_team_id: teamId });
       if (error) throw error;
       const items = (data ?? []).map((row) => {
         const id = row.id ?? row.agent_id;
@@ -1865,17 +1865,17 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async shareAgentToTeam(agentActorId) {
-      const { error } = await supabase.schema("public").rpc("share_agent_to_team", { p_agent_id: agentActorId });
+      const { error } = await supabase.rpc("share_agent_to_team", { p_agent_id: agentActorId });
       if (error) throw error;
     },
 
     async makeAgentPersonal(agentActorId) {
-      const { error } = await supabase.schema("public").rpc("make_agent_personal", { p_agent_id: agentActorId });
+      const { error } = await supabase.rpc("make_agent_personal", { p_agent_id: agentActorId });
       if (error) throw error;
     },
 
     async updateOwnedAgentProfile(agentActorId, patch) {
-      const { error } = await supabase.schema("public").rpc("update_owned_agent_profile", {
+      const { error } = await supabase.rpc("update_owned_agent_profile", {
         p_agent_id: agentActorId,
         p_display_name: patch.displayName ?? null,
         p_visibility: patch.visibility ?? null,
@@ -1884,7 +1884,7 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     async updateAgentDefaults(agentActorId, patch) {
-      const { error } = await supabase.schema("public").rpc("update_agent_defaults", {
+      const { error } = await supabase.rpc("update_agent_defaults", {
         p_agent_id: agentActorId,
         p_default_workspace_id: patch.defaultWorkspaceId ?? null,
         p_agent_kind: patch.agentKind ?? null,
@@ -2143,7 +2143,7 @@ export function createSupabaseAuthRepository(options) {
     // for agent invites (daemon `amuxd init`), which the RPC self-provisions.
     async claimInvite(token, ctx: { accessToken?: string } = {}) {
       const client = clientForToken(ctx.accessToken);
-      const { data, error } = await client.schema("public").rpc("claim_team_invite", { p_token: token });
+      const { data, error } = await client.rpc("claim_team_invite", { p_token: token });
       if (error) {
         const msg = error.message || "claim_team_invite failed";
         const lower = msg.toLowerCase();
