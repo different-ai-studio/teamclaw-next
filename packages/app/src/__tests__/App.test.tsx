@@ -145,7 +145,6 @@ vi.mock('@/components/settings/FeedbackDialog', () => ({ FeedbackDialog: () => n
 vi.mock('@/components/SetupGuide', () => ({ SetupGuide: () => null }))
 vi.mock('@/components/telemetry/TelemetryConsentDialog', () => ({ TelemetryConsentDialog: () => null }))
 vi.mock('@/components/workspace', () => ({}))
-vi.mock('@/components/workspace/WorkspaceTypeDialog', () => ({ WorkspaceTypeDialog: () => null }))
 vi.mock('@/stores/session', () => ({
   useSessionStore: vi.fn((sel: (s: any) => any) => {
     const state = {
