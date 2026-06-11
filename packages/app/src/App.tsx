@@ -2091,6 +2091,17 @@ function App() {
         try {
           const claim = await claimInviteToken(token);
           await useCurrentTeamStore.getState().reloadAndSwitchTo(claim.teamId);
+          // Re-onboard the local daemon to the freshly-claimed team. The
+          // daemon-onboarding store's refresh() detects the team mismatch and
+          // the DaemonOnboardingWizard handles re-onboard. Best-effort only.
+          if (isTauri()) {
+            try {
+              const { useDaemonOnboardingStore } = await import("@/stores/daemon-onboarding");
+              await useDaemonOnboardingStore.getState().refresh();
+            } catch (e) {
+              console.warn("[invite] daemon refresh after claim failed", e);
+            }
+          }
           // TODO(Task 12): surface <JoinTeamFlow teamId={claim.teamId}
           //   workspacePath={currentWorkspacePath} /> in an onboarding sheet
           //   here so the joiner auto-pulls workspace config and enters the

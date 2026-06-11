@@ -252,6 +252,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     const { useCurrentTeamStore } = await import("@/stores/current-team");
     await useCurrentTeamStore.getState().reloadAndSwitchTo(result.teamId);
+    // Re-onboard the local daemon to the freshly-claimed team (Tauri only,
+    // best-effort). refresh() detects the team mismatch and the
+    // DaemonOnboardingWizard handles re-onboard.
+    try {
+      const { isTauri } = await import("@/lib/utils");
+      if (isTauri()) {
+        const { useDaemonOnboardingStore } = await import("@/stores/daemon-onboarding");
+        await useDaemonOnboardingStore.getState().refresh();
+      }
+    } catch (e) {
+      console.warn("[invite] daemon refresh after claim failed", e);
+    }
     set({ loading: false, authFlow: "idle" });
     return result;
   },
