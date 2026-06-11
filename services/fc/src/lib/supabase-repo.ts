@@ -126,6 +126,22 @@ export function createSupabaseBusinessRepository(options) {
       return (data ?? []).map(mapTeam);
     },
 
+    // List the caller's teams across ALL orgs they belong to (cross-org team
+    // picker). The `list_all_my_teams` function lives in the `app` schema and is
+    // SECURITY DEFINER (it bypasses teams_org_guard), so it must be addressed
+    // via `.schema("app")` — the default client schema here is `amux`.
+    async listAllMyTeams() {
+      const { data, error } = await supabase.schema("app").rpc("list_all_my_teams");
+      if (error) throw error;
+      return (data ?? []).map((r: any) => ({
+        id: r.team_id,
+        name: r.team_name,
+        slug: r.team_slug ?? null,
+        orgId: r.org_id ?? null,
+        orgName: r.org_name ?? null,
+      }));
+    },
+
     async createTeam(input) {
       const args: any = { p_name: input.name };
       if (input.slug !== undefined) args.p_slug = input.slug;
@@ -2162,6 +2178,30 @@ export function createSupabaseAuthRepository(options) {
         actorType: requiredString(row.actor_type, "auth.claimInvite", "actor_type"),
         displayName: requiredString(row.display_name, "auth.claimInvite", "display_name"),
         refreshToken: row.refresh_token ?? null,
+      };
+    },
+
+    // Switch the caller's active team (and org), minting a fresh server session.
+    // `switch_active_team` is a SECURITY DEFINER function in the `public` schema;
+    // like `claim_team_invite` above it resolves via a plain `.rpc(...)` even
+    // though clientForToken's default schema is `amux`. The caller bearer is
+    // forwarded so `auth.uid()` resolves to the switching user (member check +
+    // org swap). 42501 (non-member / unauthenticated) maps to 403.
+    async switchActiveTeam(teamId, ctx: { accessToken?: string } = {}) {
+      const client = clientForToken(ctx.accessToken);
+      const { data, error } = await client.rpc("switch_active_team", { p_team_id: teamId });
+      if (error) {
+        const code = error?.code || "";
+        if (code === "42501") {
+          throw new ApiError(403, "forbidden", error.message ?? "not a member of this team");
+        }
+        throw new ApiError(400, "validation_failed", error.message ?? "switch failed");
+      }
+      const row = requiredRow(data, "teams.switchActiveTeam");
+      return {
+        actorId: row.actor_id ?? null,
+        teamId: requiredString(row.team_id, "teams.switchActiveTeam", "team_id"),
+        refreshToken: requiredString(row.refresh_token, "teams.switchActiveTeam", "refresh_token"),
       };
     },
 
