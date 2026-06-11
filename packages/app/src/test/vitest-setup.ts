@@ -100,6 +100,36 @@ if (typeof Element !== 'undefined' && typeof Element.prototype.scrollIntoView !=
   }
 }
 
+// --- Focus re-entrancy guard (jsdom + Radix FocusScope) ----------------------
+// A Radix Select rendered inside a *modal* Radix Dialog mounts two trapped
+// FocusScopes. When the Select opens, its content is portaled outside the
+// dialog's DOM subtree, so each scope sees focus "leave" its boundary and
+// programmatically yanks it back. In a real browser this settles; in jsdom
+// focus events dispatch synchronously, so the two scopes bounce focus
+// (A.focus() → focusin → B.focus() → focusin → A.focus() → …) until the call
+// stack overflows — crashing the worker (manifests as a RangeError locally and
+// a RegExpCompiler OOM under CI's tighter memory). It's a jsdom artifact, not a
+// product bug. Guard against it by ignoring any focus() invoked *synchronously
+// while another focus dispatch is already in flight* — the exact re-entrant
+// trap-fight. Legitimate autofocus (run from effects, not nested inside a focus
+// event) and ordinary sequential focus() calls are unaffected.
+if (typeof HTMLElement !== 'undefined') {
+  const proto = HTMLElement.prototype as unknown as {
+    focus: (this: HTMLElement, options?: FocusOptions) => void
+  }
+  const realFocus = proto.focus
+  let focusing = false
+  proto.focus = function (this: HTMLElement, options?: FocusOptions) {
+    if (focusing) return
+    focusing = true
+    try {
+      return realFocus.call(this, options)
+    } finally {
+      focusing = false
+    }
+  }
+}
+
 // --- Supabase client mock (prevents module evaluation throw in tests) --------
 // supabase-client.ts throws at module eval time when env vars are missing.
 // The test vite.config.ts provides stub env vars, but as a belt-and-suspenders
