@@ -942,6 +942,7 @@
       "mqttStatusDisconnected": "未连接",
       "mqttReconnect": "重连",
       "mqttReconnecting": "正在重连…",
+      "mqttLastError": "上次错误",
       "save": "保存",
       "server": "服务器",
       "serverAddress": "服务器地址",

@@ -356,6 +356,7 @@ function ServerAddressCard() {
   }, [reload])
 
   const mqttConnected = useMqttConnected()
+  const mqttLastError = useMqttReconnectStore((s) => s.lastError)
   const bumpMqttReconnect = useMqttReconnectStore((s) => s.bump)
 
   const mqttBroker = React.useMemo(() => {
@@ -439,6 +440,16 @@ function ServerAddressCard() {
                 </Button>
               ) : null}
             </dd>
+            {mqttConnected === false && mqttLastError ? (
+              <>
+                <dt className="text-muted-foreground">
+                  {t('settings.general.mqttLastError', 'Last error')}
+                </dt>
+                <dd className="font-mono text-[11.5px] text-red-600 break-all dark:text-red-400">
+                  {mqttLastError}
+                </dd>
+              </>
+            ) : null}
           </dl>
         ) : (
           <p className="text-[12px] text-muted-foreground italic">
