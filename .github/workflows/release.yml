@@ -206,7 +206,7 @@ jobs:
 
             ### macOS (one-line install)
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/different-ai-studio/teamclaw/main/scripts/install-mac.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/different-ai-studio/teamclaw-next/main/scripts/install-mac.sh | bash
             ```
 
             ### macOS (manual)
@@ -255,8 +255,9 @@ jobs:
           oss_base = f'https://{os.environ["OSS_BUCKET"]}.{host}'
 
           files = glob.glob(f'apps/desktop/target/{target}/release/bundle/dmg/*.dmg')
+          files += glob.glob(f'apps/desktop/target/{target}/release/bundle/macos/*.tar.gz')
           if not files:
-              print(f'No DMG found for target {target}, skipping')
+              print(f'No release artifacts found for target {target}, skipping')
               sys.exit(0)
 
           for f in files:
@@ -428,7 +429,7 @@ jobs:
 
             ### macOS (one-line install)
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/different-ai-studio/teamclaw/main/scripts/install-mac.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/different-ai-studio/teamclaw-next/main/scripts/install-mac.sh | bash
             ```
 
             ### macOS (manual)
@@ -508,12 +509,14 @@ jobs:
           fi
           gh release download "$VERSION" \
             --repo ${{ github.repository }} \
-            --pattern 'latest.json' \
-            --dir /tmp/oss-latest
+            --dir /tmp/oss-release
           python3 -m pip install oss2 --quiet --break-system-packages 2>/dev/null || pip3 install oss2 --quiet --break-system-packages
           python3 - <<'EOF'
           import json
-          import oss2, os
+          import glob
+          import os
+          import oss2
+
           auth = oss2.Auth(os.environ['OSS_ACCESS_KEY_ID'], os.environ['OSS_ACCESS_KEY_SECRET'])
           endpoint = os.environ['OSS_ENDPOINT']
           if not endpoint.startswith('http'):
@@ -521,7 +524,23 @@ jobs:
           bucket = oss2.Bucket(auth, endpoint, os.environ['OSS_BUCKET'])
           version = os.environ['VERSION']
           cdn_base = 'https://teamclaw.ucar.cc'
-          manifest_path = '/tmp/oss-latest/latest.json'
+          release_dir = '/tmp/oss-release'
+          manifest_path = os.path.join(release_dir, 'latest.json')
+
+          if not os.path.isfile(manifest_path):
+              raise SystemExit('latest.json not found in release assets')
+
+          # Mirror every release binary referenced by auto-update / installers.
+          for asset_path in sorted(glob.glob(os.path.join(release_dir, '*'))):
+              if not os.path.isfile(asset_path):
+                  continue
+              basename = os.path.basename(asset_path)
+              if basename == 'latest.json':
+                  continue
+              key = f'releases/{version}/{basename}'
+              print(f'Uploading {basename} -> oss://{os.environ["OSS_BUCKET"]}/{key}')
+              bucket.put_object_from_file(key, asset_path)
+              print(f'✅ {cdn_base}/{key}')
 
           with open(manifest_path, 'r', encoding='utf-8') as f:
               manifest = json.load(f)
@@ -534,24 +553,33 @@ jobs:
               if filename:
                   entry['url'] = f'{cdn_base}/releases/{version}/{filename}'
 
-          mirrored_manifest_path = '/tmp/oss-latest/latest.oss.json'
+          mirrored_manifest_path = os.path.join(release_dir, 'latest.oss.json')
           with open(mirrored_manifest_path, 'w', encoding='utf-8') as f:
               json.dump(manifest, f, indent=2)
               f.write('\n')
 
-          # Root pointer: must re-validate so the Tauri updater sees new releases.
-          # Per-version archive: immutable, default long cache is fine.
+          short_cache = {
+              'Cache-Control': 'max-age=60, must-revalidate',
+          }
+
+          # Root pointer: must re-validate so the updater sees new releases.
           bucket.put_object_from_file(
               'releases/latest.json',
               mirrored_manifest_path,
               headers={
-                  'Cache-Control': 'max-age=60, must-revalidate',
+                  **short_cache,
                   'Content-Type': 'application/json; charset=utf-8',
               },
           )
           bucket.put_object_from_file(f'releases/{version}/latest.json', mirrored_manifest_path)
-          print(f'Mirrored latest.json -> {oss_base}/releases/latest.json')
-          print(f'Also archived -> {oss_base}/releases/{version}/latest.json')
+          bucket.put_object(
+              'releases/latest.txt',
+              version.encode(),
+              headers={**short_cache, 'Content-Type': 'text/plain; charset=utf-8'},
+          )
+          print(f'Mirrored latest.json -> {cdn_base}/releases/latest.json')
+          print(f'Also archived -> {cdn_base}/releases/{version}/latest.json')
+          print(f'Updated latest.txt -> {version}')
           EOF
 
       - name: Append CN mirror section to release notes

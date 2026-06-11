@@ -28,18 +28,29 @@ fn resolve_updater_url(url: &str) -> Option<String> {
     }
 }
 
-fn resolve_updater_endpoint(config: &serde_json::Value) -> Option<String> {
+fn resolve_updater_endpoints(config: &serde_json::Value) -> Vec<String> {
     let updater = &config["app"]["updater"];
+    let mut endpoints = Vec::new();
+
+    let mut push_unique = |url: String| {
+        if !endpoints.iter().any(|existing| existing == &url) {
+            endpoints.push(url);
+        }
+    };
+
     if let Some(endpoint) = updater["endpoint"].as_str().and_then(resolve_updater_url) {
-        return Some(endpoint);
+        push_unique(endpoint);
     }
 
-    updater["endpoints"].as_array().and_then(|endpoints| {
-        endpoints
-            .iter()
-            .filter_map(|endpoint| endpoint.as_str())
-            .find_map(resolve_updater_url)
-    })
+    if let Some(list) = updater["endpoints"].as_array() {
+        for endpoint in list.iter().filter_map(|endpoint| endpoint.as_str()) {
+            if let Some(url) = resolve_updater_url(endpoint) {
+                push_unique(url);
+            }
+        }
+    }
+
+    endpoints
 }
 
 fn main() {
@@ -103,10 +114,12 @@ fn main() {
     println!("cargo:rustc-env=APP_SHORT_NAME={}", short_name);
     println!("cargo:warning=Using APP_SHORT_NAME={}", short_name);
 
-    // Export updater config from build.config.json
-    if let Some(endpoint) = resolve_updater_endpoint(&config) {
-        println!("cargo:rustc-env=UPDATER_ENDPOINT={}", endpoint);
-        println!("cargo:warning=Using UPDATER_ENDPOINT={}", endpoint);
+    // Export updater config from build.config.json (comma-separated for runtime fallback)
+    let updater_endpoints = resolve_updater_endpoints(&config);
+    if !updater_endpoints.is_empty() {
+        let joined = updater_endpoints.join(",");
+        println!("cargo:rustc-env=UPDATER_ENDPOINTS={}", joined);
+        println!("cargo:warning=Using UPDATER_ENDPOINTS={}", joined);
     }
     if let Some(pubkey) = config["app"]["updater"]["pubkey"].as_str() {
         println!("cargo:rustc-env=UPDATER_PUBKEY={}", pubkey);
