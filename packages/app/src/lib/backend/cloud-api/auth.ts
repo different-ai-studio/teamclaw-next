@@ -78,6 +78,11 @@ export function createAuthModule(
       const next = await authClient.verifyOtp(email, code, "email_change");
       return mapSession(next);
     },
+    async adoptSession(refreshToken: string): Promise<AuthSession | null> {
+      const { adoptRefreshToken } = await import("@/lib/auth");
+      const next = await adoptRefreshToken(refreshToken);
+      return mapSession(next);
+    },
     async claimInvite(token: string): Promise<AuthClaimResult> {
       const claim = await client.post<AuthClaimResult>("/v1/invites/claim", { token });
       if (!claim) {

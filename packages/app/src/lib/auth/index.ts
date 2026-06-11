@@ -13,6 +13,7 @@ export {
   subscribe,
   subscribe as onAuthStateChange,
   refreshSession,
+  adoptRefreshToken,
   configureSessionStore,
   __resetSessionStoreForTests,
 } from "./session-store";

@@ -330,6 +330,19 @@ export function refreshSession(): Promise<Session> {
 }
 
 /**
+ * Adopt a session minted out-of-band (e.g. switch_active_team returns a fresh
+ * refresh_token for a brand-new server session). Exchanges it via the configured
+ * refresher for a full Session — that refresh re-runs the access-token hook, so
+ * the new JWT carries the new org_id — then installs it (emits TOKEN_REFRESHED).
+ */
+export async function adoptRefreshToken(refreshToken: string): Promise<Session> {
+  if (!refresher) throw new Error("SessionStore not configured with a refresher.");
+  const next = await refresher(refreshToken);
+  setSession(next, "TOKEN_REFRESHED");
+  return next;
+}
+
+/**
  * Return a guaranteed-fresh user access token for direct FC calls made from
  * Tauri commands (Design 2: "Tauri uses its own token; the daemon uses its
  * own; neither crosses"). Reads the current session and, if it is within the
