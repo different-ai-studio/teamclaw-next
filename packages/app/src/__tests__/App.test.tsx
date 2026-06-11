@@ -195,6 +195,22 @@ vi.mock('@/lib/webview-utils', () => ({ urlToLabel: (u: string) => u }))
 vi.mock('@/stores/team-mode', () => ({
   useTeamModeStore: vi.fn((sel: (s: any) => any) => sel(teamModeState)),
 }))
+vi.mock('@/stores/actor-directory-store', () => ({
+  useActorDirectory: () => ({
+    actors: [],
+    loading: false,
+    error: false,
+    refetch: vi.fn(),
+  }),
+}))
+vi.mock('@/stores/current-team', () => ({
+  useCurrentTeamStore: Object.assign(
+    vi.fn((sel: (s: any) => any) =>
+      sel({ team: null, currentMember: null, load: vi.fn(), reloadAndSwitchTo: vi.fn() })
+    ),
+    { getState: () => ({ team: null, currentMember: null, load: vi.fn(), reloadAndSwitchTo: vi.fn() }) }
+  ),
+}))
 vi.mock('@/components/ui/sidebar', () => ({
   SidebarInset: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SidebarProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,

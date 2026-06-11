@@ -1,6 +1,6 @@
 {
   "name": "teamclaw",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "TeamClaw - AI Agent Desktop Platform",
   "scripts": {
@@ -47,6 +47,9 @@
     "test:e2e:functional": "vitest run --config vitest.config.e2e.ts tests/functional",
     "test:stress": "vitest run --config vitest.config.stress.ts",
     "verify-release": "./scripts/verify-release-build.sh",
+    "release:check": "./scripts/check-desktop-version.sh",
+    "release:bump": "node scripts/bump-desktop-version.mjs",
+    "release:preflight": "./scripts/preflight-desktop-release.sh",
     "ship": "./scripts/ship-pr.sh"
   },
   "devDependencies": {
