@@ -15,6 +15,8 @@ import { TeamBootstrapErrorScreen } from "@/components/auth/TeamBootstrapErrorSc
 import { useDaemonOnboardingStore } from "@/stores/daemon-onboarding";
 import { humanizeFcError } from "@/lib/fc-error";
 import { markStartup } from "@/lib/startup-perf";
+import { TeamPicker } from "./TeamPicker";
+import type { MembershipTeam } from "@/lib/backend";
 
 interface AuthGateProps {
   children: React.ReactNode;
@@ -46,9 +48,44 @@ export function AuthGate({ children }: AuthGateProps) {
   const refreshDaemonOnboarding = useDaemonOnboardingStore((s) => s.refresh);
   const [daemonOnboardingAck, setDaemonOnboardingAck] = useState(() => devSkipDaemonOnboarding());
 
+  // Multi-team (cross-org) picker: shown on EVERY login when the user belongs to
+  // 2+ teams so they can choose which one to enter. `teamChosen` marks "already
+  // picked this session" so it doesn't re-open after selection; both reset on a
+  // new session (login). Applies on web and Tauri alike (multi-team is backend-
+  // driven, not platform-specific).
+  const [myTeams, setMyTeams] = useState<MembershipTeam[] | null>(null);
+  const [teamChosen, setTeamChosen] = useState(false);
+
   useEffect(() => {
     if (isTauri()) void listSetup();
   }, [listSetup]);
+
+  // Re-evaluate the picker on every login: clear the pick flag + cached list
+  // whenever the signed-in user changes.
+  useEffect(() => {
+    setTeamChosen(false);
+    setMyTeams(null);
+  }, [session?.user?.id]);
+
+  // After login + team-bootstrap ready, fetch "all my teams (across orgs)" to
+  // decide whether to show the picker. A fetch failure must not block login:
+  // treat it as "no picker needed" and fall through.
+  useEffect(() => {
+    if (!session || bootstrap !== "ready" || teamChosen) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const teams = await getBackend().teams.listAllMyTeams();
+        if (!cancelled) setMyTeams(teams);
+      } catch (e) {
+        console.warn("[AuthGate] listAllMyTeams failed", e);
+        if (!cancelled) setMyTeams([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, bootstrap, teamChosen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -232,6 +269,29 @@ export function AuthGate({ children }: AuthGateProps) {
 
   if (isTauri() && bootstrap !== "ready") {
     return null;
+  }
+
+  // Multi-team picker gate: after team-bootstrap, before the daemon gate. If the
+  // user belongs to 2+ teams (possibly across orgs) and hasn't picked this
+  // session yet, choose a team first. Selecting calls switchToTeam (activates
+  // the team server-side, adopts the org-switched JWT, switches current team,
+  // and refreshes the daemon) — so the daemon gate below then evaluates against
+  // the chosen team and triggers re-onboard on mismatch.
+  if (session && bootstrap === "ready" && !teamChosen) {
+    if (myTeams === null) {
+      return null; // Still loading the team list — keep the skeleton.
+    }
+    if (myTeams.length >= 2) {
+      removeStartupSkeleton();
+      const currentId = useCurrentTeamStore.getState().team?.id ?? null;
+      return (
+        <TeamPicker
+          teams={myTeams}
+          currentTeamId={currentId}
+          onDone={() => setTeamChosen(true)}
+        />
+      );
+    }
   }
 
   // Daemon readiness gate: after login + workspace bootstrap, ensure the local
