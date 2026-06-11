@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Neutralize any baked cloudApiUrl from a local build.config.local.json so the
 // committed-state resolution logic is tested deterministically (the production
@@ -38,14 +38,14 @@ describe("backend provider facade", () => {
   beforeEach(() => {
     vi.resetModules();
     localStorage.clear();
-    delete window.__TEAMCLAW_SERVER_CONFIG__;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("returns a singleton Cloud API backend", async () => {
-    localStorage.setItem(
-      "teamclaw.serverConfig",
-      JSON.stringify({ backendKind: "cloud_api", cloudApiUrl: "https://cloud.ucar.cc" }),
-    );
+    vi.stubEnv("VITE_CLOUD_API_URL", "https://cloud.ucar.cc");
 
     const { getBackend, getBackendKind } = await import("../provider");
 
@@ -58,15 +58,12 @@ describe("backend provider facade", () => {
   });
 
   it("hasBackendConfig reflects whether a cloudApiUrl resolves", async () => {
-    // No saved config + no baked default (build config mocked) -> not configured.
+    // No env override + no baked default (build config mocked) -> not configured.
     const { hasBackendConfig } = await import("../provider");
     expect(hasBackendConfig()).toBe(false);
 
-    // A saved cloudApiUrl makes it configured.
-    localStorage.setItem(
-      "teamclaw.serverConfig",
-      JSON.stringify({ cloudApiUrl: "https://fc.example.com" }),
-    );
+    // The Cloud API URL comes from the build config / env, never localStorage.
+    vi.stubEnv("VITE_CLOUD_API_URL", "https://fc.example.com");
     vi.resetModules();
     const fresh = await import("../provider");
     expect(fresh.hasBackendConfig()).toBe(true);

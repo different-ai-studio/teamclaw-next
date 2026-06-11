@@ -44,8 +44,8 @@ function patchFromPayload(mqtt: BootstrapMqttPayload | undefined): Partial<Serve
 
 // Drop every field that bootstrap may write so a different account
 // doesn't inherit the previous user's MQTT broker / credentials. Called
-// from auth-store.signOut. cloudApiUrl is left alone — it's user-supplied,
-// not bootstrap-delivered.
+// from auth-store.signOut. cloudApiUrl is not persisted here — it comes
+// solely from the build config, not from bootstrap.
 export async function clearBootstrapAppliedFields(): Promise<void> {
   const saved = await getSavedServerConfig();
   await saveServerConfig({

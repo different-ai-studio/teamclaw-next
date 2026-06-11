@@ -1,4 +1,54 @@
 {
+  "teamShare": {
+    "skills": "技能",
+    "mcp": "MCP",
+    "env": "团队环境变量",
+    "knowledge": "知识库",
+    "toggle": "团队共享",
+    "empty": "团队尚未共享任何内容。",
+    "manageInSettings": "在设置中管理",
+    "selectPrompt": "选择一项{{section}}在此查看。",
+    "save": "保存",
+    "saved": "已保存",
+    "saveFailed": "保存失败：{{msg}}",
+    "readFailed": "无法读取文件：{{msg}}",
+    "edit": "编辑",
+    "knowledgeRoot": "根目录",
+    "scope": {
+      "label": "作用域",
+      "team": "团队"
+    },
+    "mcpDetail": {
+      "server": "MCP 服务器",
+      "connected": "已连接",
+      "failed": "需关注",
+      "idle": "空闲",
+      "toolCount": "{{count}} 个工具",
+      "resync": "重新同步",
+      "connection": "连接信息",
+      "transport": "传输",
+      "endpoint": "端点",
+      "command": "命令",
+      "scope": "作用域",
+      "env": "环境变量",
+      "headers": "请求头",
+      "tools": "工具",
+      "probeHint": "重新同步以加载工具。",
+      "noTools": "未报告任何工具。",
+      "config": "配置"
+    },
+    "envDetail": {
+      "secret": "密钥",
+      "value": "值",
+      "encryptedHint": "团队变量已加密，此处不显示。请用「编辑」替换。",
+      "details": "详情",
+      "key": "键名",
+      "category": "类型",
+      "createdBy": "创建者",
+      "updatedBy": "更新者",
+      "updatedAt": "更新时间"
+    }
+  },
   "common": {
     "save": "保存",
     "expand": "展开",
@@ -96,18 +146,12 @@
       "signInOrRegisterDesc": "使用邮箱验证码继续，和 iOS 流程保持一致。",
       "joinTeam": "加入团队",
       "joinTeamDesc": "粘贴邀请链接或邀请码，加入已有团队。",
-      "selfHosted": "使用自建 server",
       "inviteParseError": "请输入有效的邀请码或邀请链接。",
       "inviteTitle": "加入团队",
       "inviteDesc": "粘贴邀请链接或邀请码。我们会先创建匿名会话，再领取团队邀请。",
       "inviteLabel": "邀请链接或邀请码",
       "joining": "加入中…",
-      "continue": "继续",
-      "serverTitle": "自建 server",
-      "serverDesc": "保存后会写入本机 TeamClaw 配置，并重启前端以重新初始化 Supabase。",
-      "serverAddress": "服务器地址",
-      "savingServer": "保存中…",
-      "saveServer": "保存并重启"
+      "continue": "继续"
     }
   },
   "navigation": {
@@ -930,11 +974,8 @@
       "mqttReconnect": "重连",
       "mqttReconnecting": "正在重连…",
       "save": "保存",
-      "saving": "保存中…",
       "server": "服务器",
       "serverAddress": "服务器地址",
-      "serverAddressHint": "例如: http://localhost:8787",
-      "serverSaved": "Server 已保存",
       "serverSynced": "Server 已同步",
       "serverSyncedEmpty": "尚未同步",
       "serverSyncedHint": "如可用，将从 daemon 读取。",

@@ -5,12 +5,11 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { parseInviteTokenInput } from "@/lib/invite-deeplink";
-import { saveServerConfig, type ServerConfig } from "@/lib/server-config";
 import { useAppVersion } from "@/lib/version";
 import { useAuthStore } from "@/stores/auth-store";
 import { LoginScreen } from "./LoginScreen";
 
-type Step = "choose" | "login" | "invite" | "server";
+type Step = "choose" | "login" | "invite";
 
 function Shell({ children }: { children: React.ReactNode }) {
   const appVersion = useAppVersion();
@@ -98,12 +97,10 @@ function ChooseStep({
   onQuickTrial,
   onLogin,
   onInvite,
-  onServer,
 }: {
   onQuickTrial: () => void;
   onLogin: () => void;
   onInvite: () => void;
-  onServer: () => void;
 }) {
   const { t } = useTranslation();
   const { loading, errorMessage } = useAuthStore();
@@ -148,15 +145,6 @@ function ChooseStep({
             {loading
               ? t("auth.onboarding.startingTrial", "Preparing…")
               : t("auth.onboarding.quickTrial", "Quick trial")}
-          </button>
-          <span aria-hidden className="text-faint">·</span>
-          <button
-            type="button"
-            disabled={loading}
-            onClick={onServer}
-            className="rounded-[6px] px-1 py-0.5 underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {t("auth.onboarding.selfHosted", "Use self-hosted server")}
           </button>
         </div>
         {errorMessage && (
@@ -208,50 +196,6 @@ function InviteStep({ onBack }: { onBack: () => void }) {
   );
 }
 
-function ServerStep({ onBack }: { onBack: () => void }) {
-  const { t } = useTranslation();
-  const [config, setConfig] = useState<ServerConfig>({});
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const update = (patch: Partial<ServerConfig>) => setConfig((current) => ({ ...current, ...patch }));
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      const saved = await saveServerConfig(config);
-      window.__TEAMCLAW_SERVER_CONFIG__ = saved;
-      window.location.reload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setSaving(false);
-    }
-  };
-
-  return (
-    <DetailFrame onBack={onBack}>
-      <form onSubmit={submit} className="rounded-[16px] border border-border bg-paper p-5">
-        <h1 className="text-[18px] font-semibold">{t("auth.onboarding.serverTitle", "Self-hosted server")}</h1>
-        <p className="mt-2 text-[13px] leading-6 text-muted-foreground">
-          {t("auth.onboarding.serverDesc", "Saving writes the local TeamClaw config and restarts the frontend so Cloud API initializes again.")}
-        </p>
-        <div className="mt-5 grid gap-4">
-          <label className="space-y-2">
-            <span className="text-[12px] font-medium text-ink-2">{t("auth.onboarding.serverAddress", "Server address")}</span>
-            <Input value={config.cloudApiUrl ?? ""} onChange={(event) => update({ cloudApiUrl: event.target.value })} placeholder="https://cloud.ucar.cc" />
-          </label>
-        </div>
-        {error && <p className="mt-3 text-[12px] text-destructive">{error}</p>}
-        <Button type="submit" disabled={saving} className="mt-5 h-10 w-full bg-coral text-paper">
-          {saving ? t("auth.onboarding.savingServer", "Saving…") : t("auth.onboarding.saveServer", "Save and restart")}
-        </Button>
-      </form>
-    </DetailFrame>
-  );
-}
-
 export function DesktopOnboarding() {
   const [step, setStep] = useState<Step>("choose");
   const signInAnonymously = useAuthStore((state) => state.signInAnonymously);
@@ -264,14 +208,12 @@ export function DesktopOnboarding() {
     );
   }
   if (step === "invite") return <InviteStep onBack={() => setStep("choose")} />;
-  if (step === "server") return <ServerStep onBack={() => setStep("choose")} />;
 
   return (
     <ChooseStep
       onQuickTrial={() => void signInAnonymously()}
       onLogin={() => setStep("login")}
       onInvite={() => setStep("invite")}
-      onServer={() => setStep("server")}
     />
   );
 }
