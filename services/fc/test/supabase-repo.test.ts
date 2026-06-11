@@ -634,7 +634,32 @@ function createTableQuery(table: any, calls: any, data: any, error: any, hooks: 
         },
       };
     },
+    update(row) {
+      calls.push({ table, op: "update", row });
+      return createUpdatableQuery(table, calls, data, error);
+    },
   };
+}
+
+function createUpdatableQuery(table, calls, data, error) {
+  let eqValue = null;
+  const query = {
+    eq(column, value) {
+      calls.push({ table, op: "update.eq", column, value });
+      eqValue = value;
+      return query;
+    },
+    select(columns) {
+      calls.push({ table, op: "update.select", columns });
+      return {
+        async maybeSingle() {
+          calls.push({ table, op: "update.maybeSingle" });
+          return { data: eqValue ? { id: eqValue } : data[0] ?? null, error };
+        },
+      };
+    },
+  };
+  return query;
 }
 
 function createSelectableQuery(table, calls, data, error) {
@@ -705,6 +730,43 @@ test("listTeamActors selects actor_directory columns without removed agent_kind"
   assert.ok(!selectCall.columns.includes("agent_kind"), "must not select removed agent_kind column");
   assert.equal(page.items[0].defaultAgentType, "claude");
   assert.equal(page.items[0].agentKind, null);
+});
+
+test("ensureAgentTypes updates the caller's own agent actor, not an arbitrary team agent", async () => {
+  const tableCalls = [];
+  const repo = createRepo(fakeSupabase({
+    tableCalls,
+    tableData: {
+      actors: [{ id: "agent-self", user_id: "daemon-user-1", actor_type: "agent" }],
+    },
+    auth: {
+      async getUser() {
+        return { data: { user: { id: "daemon-user-1" } }, error: null };
+      },
+    },
+  }));
+
+  await repo.ensureAgentTypes({
+    supportedTypes: ["claude", "opencode"],
+    defaultAgentType: "opencode",
+  });
+
+  const actorUserEq = tableCalls.find(
+    (c) => c.table === "actors" && c.op === "eq" && c.column === "user_id",
+  );
+  assert.equal(actorUserEq?.value, "daemon-user-1");
+  assert.ok(
+    !tableCalls.some((c) => c.table === "actors" && c.op === "limit"),
+    "must not pick an arbitrary agent via limit(1)",
+  );
+  const updateEq = tableCalls.find((c) => c.table === "agents" && c.op === "update.eq");
+  assert.equal(updateEq?.column, "id");
+  assert.equal(updateEq?.value, "agent-self");
+  const updateRow = tableCalls.find((c) => c.table === "agents" && c.op === "update");
+  assert.deepEqual(updateRow?.row, {
+    agent_types: ["claude", "opencode"],
+    default_agent_type: "opencode",
+  });
 });
 
 // --- Telemetry TDD tests ---

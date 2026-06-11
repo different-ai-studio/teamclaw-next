@@ -328,7 +328,16 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
       supportedTypes: string[];
       defaultAgentType: string;
     }) {
-      if (!ctx.callerActorId) {
+      let agentActorId = ctx.callerActorId;
+      if (!agentActorId && ctx.userId) {
+        const [row] = await db
+          .select({ id: actors.id })
+          .from(actors)
+          .where(and(eq(actors.userId, ctx.userId), eq(actors.actorType, "agent")))
+          .limit(1);
+        agentActorId = row?.id;
+      }
+      if (!agentActorId) {
         throw new ApiError(403, "forbidden", "ensureAgentTypes: no agent actor visible to caller");
       }
       // Keep the default a member of the supported set (see normalizeAgentTypes).
@@ -339,7 +348,7 @@ export function makeAgentsRepo(db: DbLike, ctx: AgentsCtx = {}) {
           defaultAgentType: norm.defaultAgentType,
           updatedAt: new Date(),
         })
-        .where(eq(agents.id, ctx.callerActorId));
+        .where(eq(agents.id, agentActorId));
     },
 
     /**

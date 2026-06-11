@@ -955,24 +955,39 @@ export function createSupabaseBusinessRepository(options) {
     async ensureAgentTypes({ supportedTypes, defaultAgentType }) {
       // Keep the default a member of the supported set (see normalizeAgentTypes).
       const norm = normalizeAgentTypes(supportedTypes, defaultAgentType);
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      if (authErr || !authData?.user?.id) {
+        throw new Error("ensureAgentTypes: authenticated user required");
+      }
+      // Resolve the caller's own agent actor — NOT `.limit(1)` on all team
+      // agents (that picks the wrong row when multiple agents exist). Daemon
+      // JWTs may have empty app_metadata; actors.user_id = auth.uid() is the
+      // stable routing identity (see app.is_current_agent).
       const { data: actorRow, error: actorErr } = await supabase
         .from("actors")
         .select("id")
+        .eq("user_id", authData.user.id)
         .eq("actor_type", "agent")
-        .limit(1)
         .maybeSingle();
       if (actorErr) throw actorErr;
       if (!actorRow?.id) {
         throw new Error("ensureAgentTypes: no agent actor visible to caller");
       }
-      const { error } = await supabase
+      const { data: updated, error } = await supabase
         .from("agents")
         .update({
           agent_types: norm.supportedTypes,
           default_agent_type: norm.defaultAgentType,
         })
-        .eq("id", actorRow.id);
+        .eq("id", actorRow.id)
+        .select("id")
+        .maybeSingle();
       if (error) throw error;
+      if (!updated?.id) {
+        throw new Error(
+          "ensureAgentTypes: update did not apply (agent row missing or RLS denied)",
+        );
+      }
     },
 
     async uploadAttachment({ path, mime, bytes, bucket }) {
