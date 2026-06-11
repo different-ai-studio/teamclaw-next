@@ -35,6 +35,7 @@ import { SessionSearchDialog } from "@/components/sidebar/session-search-dialog"
 import { SessionDetailDialog, type SessionDetailListHints } from "@/components/sidebar/SessionDetailDialog"
 import { NavRail } from "@/components/sidebar/NavRail"
 import { MqttDisconnectedNotice } from "@/components/sidebar/MqttDisconnectedNotice"
+import { LocalDaemonCard } from "@/components/sidebar/LocalDaemonCard"
 
 /** Sidebar collapse control only (workspace variant sidebar header). */
 export function SidebarCollapseToggle({ className }: { className?: string }) {
@@ -428,6 +429,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </SidebarContent>
 
         <SidebarFooter className="gap-1 px-2 pb-1 pt-1">
+          <LocalDaemonCard />
           <MqttDisconnectedNotice />
 
             <div className="flex min-w-0 items-center justify-between gap-1 overflow-hidden">
