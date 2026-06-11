@@ -2603,6 +2603,12 @@
   "nativeContent": {
     "notFound": "组件未找到"
   },
+  "teamPicker": {
+    "title": "选择团队",
+    "subtitle": "你属于多个团队，请选择要进入的一个。",
+    "switching": "切换中…",
+    "ungrouped": "其它"
+  },
   "team": {
     "viewerReadOnly": "只读模式 - 你没有编辑权限",
     "createDialog": {

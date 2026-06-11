@@ -2603,6 +2603,12 @@
   "nativeContent": {
     "notFound": "Component not found"
   },
+  "teamPicker": {
+    "title": "Choose a team",
+    "subtitle": "You belong to multiple teams. Pick one to continue.",
+    "switching": "Switching…",
+    "ungrouped": "Other"
+  },
   "team": {
     "viewerReadOnly": "Read-only mode — you don't have edit permissions",
     "createDialog": {
