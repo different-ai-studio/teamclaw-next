@@ -90,6 +90,19 @@ public final class SessionDetailViewModel {
     /// the @Observable fields above. Non-nil while a flush is scheduled;
     /// see `scheduleStreamingMirrorFlush()`.
     private var streamingMirrorFlushTask: Task<Void, Never>?
+    /// Agents with an in-flight cancel awaiting the daemon's
+    /// `statusChange:.idle` acknowledgment. Membership blocks duplicate
+    /// cancels; resolved by the idle event or the ack-timeout fallback.
+    public private(set) var interruptPendingAgents: Set<String> = []
+    /// Per-agent ack-timeout fallbacks armed by `interruptAgent`. The
+    /// daemon normally answers a cancel with `statusChange:.idle` within
+    /// a second; when that never arrives (broker drop, runtime wedge,
+    /// or an ACP host that ignores session/cancel — opencode does), the
+    /// timeout synthesizes the idle locally so the stream still settles
+    /// and the partial text still lands. The desktop client has no such
+    /// fallback and hangs forever — don't copy that.
+    private var interruptTimeoutTasks: [String: Task<Void, Never>] = [:]
+    private let interruptAckTimeout: TimeInterval = 8
     /// Backwards-compat shim for callers that haven't migrated to the
     /// per-agent map. True when ANY agent is streaming raw text. Most call
     /// sites should prefer `streamingAgentSet` for correct multi-agent
@@ -478,15 +491,28 @@ public final class SessionDetailViewModel {
     }
 
     /// Cancel a specific agent's currently-running ACP turn.
+    ///
+    /// Deliberately does NOT clear any streaming state here. The daemon
+    /// answers the cancel with `statusChange:.idle`, and the reducer's
+    /// idle path flushes the partial text into a completed entry for
+    /// exactly this bucket — clearing optimistically (the old behavior)
+    /// discarded everything the user had watched stream in AND wiped
+    /// concurrent agents' live buffers via the global markAgentDone().
+    /// An 8s ack-timeout synthesizes the idle locally if the daemon
+    /// never responds, so the card can't hang forever either.
     public func interruptAgent(_ agentActorID: String) {
+        guard !interruptPendingAgents.contains(agentActorID) else { return }
+        interruptPendingAgents.insert(agentActorID)
         Task {
             do {
                 try await sendCommand(agentActorID: agentActorID) {
                     $0.command = .cancel(Amux_AcpCancel())
                 }
-                markAgentDone()
+                armInterruptAckTimeout(for: agentActorID)
             } catch {
-                // sendCommand / cancelTask already surfaced the user-facing error.
+                // sendCommand already surfaced the user-facing error.
+                // Keep the stream live so the user can retry the stop.
+                interruptPendingAgents.remove(agentActorID)
             }
         }
     }
@@ -1651,6 +1677,9 @@ public final class SessionDetailViewModel {
         task?.cancel(); task = nil
         spawningPollTask?.cancel(); spawningPollTask = nil
         streamingMirrorFlushTask?.cancel(); streamingMirrorFlushTask = nil
+        for (_, t) in interruptTimeoutTasks { t.cancel() }
+        interruptTimeoutTasks = [:]
+        interruptPendingAgents = []
         // Unsubscribe from extra runtime-state topics added for session agents
         // that aren't in ConnectedAgentsStore. SessionListViewModel manages its
         // own set; we only clean up the ones we added here.
@@ -1975,13 +2004,13 @@ public final class SessionDetailViewModel {
 
         // Reducer is source of truth for entry mutations. Apply +
         // project. Side effects the reducer doesn't track (runtime
-        // status flip, markAgentDone heartbeat reset) are handled
-        // below.
+        // status flip, heartbeat reset) are handled below.
+        let bucket = bucketKey(forRuntimeID: runtimeID) ?? eventScopeKey
         let dirty = applyTimelineInput(
             .acp(AcpInput(
                 envelopeSequence: UInt64(sequence),
                 runtimeID: runtimeID ?? "",
-                agentBucketKey: bucketKey(forRuntimeID: runtimeID) ?? eventScopeKey,
+                agentBucketKey: bucket,
                 timestamp: .now,
                 turnID: turnID,
                 acpEvent: acp
@@ -1989,10 +2018,14 @@ public final class SessionDetailViewModel {
             modelContext: modelContext
         )
 
-        // Runtime status + heartbeat side effects.
+        // Runtime status + heartbeat side effects. Idle settles ONLY this
+        // bucket — the reducer just flushed its partial text and cleared
+        // its streaming slots; concurrent agents' live buffers stay
+        // untouched (the old global markAgentDone() wiped them, losing
+        // their streamed text mid-turn).
         if case .statusChange(let sc) = acp.event {
             runtime?.status = Int(sc.newStatus.rawValue)
-            if sc.newStatus == .idle { markAgentDone() }
+            if sc.newStatus == .idle { settleAgentTurn(bucket: bucket) }
         }
 
         // Hand-rolled raw tool_title_update parser. The reducer
@@ -2389,7 +2422,13 @@ public final class SessionDetailViewModel {
 
     public func cancelTask() async throws {
         try await sendCommand { $0.command = .cancel(Amux_AcpCancel()) }
-        markAgentDone()
+        // Same wait-for-idle semantics as interruptAgent: the bound
+        // runtime's bucket settles when the daemon acknowledges, with
+        // the timeout as backstop. No optimistic global clear.
+        if let bucket = bucketKey(forRuntimeID: runtime?.runtimeId) {
+            interruptPendingAgents.insert(bucket)
+            armInterruptAckTimeout(for: bucket)
+        }
     }
 
     /// Flip isAgentWorking on and arm a long safety reset so a missed
@@ -2431,6 +2470,69 @@ public final class SessionDetailViewModel {
         recomputeGroups()
         agentWorkingResetTask?.cancel()
         agentWorkingResetTask = nil
+    }
+
+    /// Per-agent turn settle on `statusChange:.idle`. By the time this
+    /// runs, the reducer has already flushed the bucket's partial text
+    /// into a completed entry and cleared its streaming slots (see
+    /// `ChatTimelineReducer` `.statusChange`), and `applyTimelineInput`
+    /// mirrored the result. Only the VM-level side effects the reducer
+    /// doesn't own happen here — and nothing global: other agents'
+    /// in-flight streams must survive one agent finishing.
+    private func settleAgentTurn(bucket: String) {
+        interruptTimeoutTasks[bucket]?.cancel()
+        interruptTimeoutTasks[bucket] = nil
+        interruptPendingAgents.remove(bucket)
+        // Single session-level "working" chip: idle from any runtime
+        // drops it; the next real work event from a still-running agent
+        // flips it back on (handleAcpEvent → markAgentWorking).
+        isAgentWorking = false
+        agentWorkingResetTask?.cancel()
+        agentWorkingResetTask = nil
+        recomputeGroups()
+    }
+
+    /// Arm the ack-timeout fallback for an in-flight cancel. Resolved
+    /// early (cancelled) when the daemon's real `statusChange:.idle`
+    /// arrives via `settleAgentTurn`.
+    private func armInterruptAckTimeout(for bucket: String) {
+        interruptTimeoutTasks[bucket]?.cancel()
+        interruptTimeoutTasks[bucket] = Task { [weak self, interruptAckTimeout] in
+            try? await Task.sleep(for: .seconds(interruptAckTimeout))
+            guard let self, !Task.isCancelled else { return }
+            self.forceSettleInterruptedAgent(bucket)
+        }
+    }
+
+    /// Timeout leg: the daemon never acknowledged the cancel. Synthesize
+    /// the `statusChange:.idle` locally and run it through the normal
+    /// reducer path, so the partial text lands as a completed entry
+    /// exactly as a real idle would — then settle the bucket.
+    private func forceSettleInterruptedAgent(_ bucket: String) {
+        interruptTimeoutTasks[bucket] = nil
+        guard interruptPendingAgents.contains(bucket) else { return }
+        guard let ctx = startModelContext else {
+            interruptPendingAgents.remove(bucket)
+            return
+        }
+        var sc = Amux_AcpStatusChange()
+        sc.newStatus = .idle
+        var acp = Amux_AcpEvent()
+        acp.event = .statusChange(sc)
+        let seq = UInt64(max(events.last?.sequence ?? 0, 0)) + 1
+        let dirty = applyTimelineInput(
+            .acp(AcpInput(
+                envelopeSequence: seq,
+                runtimeID: "",
+                agentBucketKey: bucket,
+                timestamp: .now,
+                turnID: streamingTurnIDByAgent[bucket],
+                acpEvent: acp
+            )),
+            modelContext: ctx
+        )
+        if dirty { try? ctx.save() }
+        settleAgentTurn(bucket: bucket)
     }
 
     // MARK: - Phase 4 reducer apply + project
@@ -2871,6 +2973,30 @@ extension SessionDetailViewModel {
     @MainActor
     public func _testFlushStreamingMirror() {
         mirrorReducerStreamingState()
+    }
+
+    /// Direct test entry: run a full ACP event through `handleAcpEvent`
+    /// (reducer + VM side effects like per-agent idle settle) without a
+    /// live MQTT session. `runtimeID` doubles as the bucket key when it
+    /// isn't in `memberSheetAgents` (raw-id fallback in `bucketKey`).
+    @MainActor
+    public func _testHandleAcp(_ acp: Amux_AcpEvent,
+                               sequence: Int,
+                               runtimeID: String,
+                               modelContext: ModelContext) {
+        startModelContext = modelContext
+        _ = handleAcpEvent(acp, sequence: sequence, runtimeID: runtimeID,
+                           modelContext: modelContext)
+    }
+
+    /// Simulate an in-flight cancel (membership only, no MQTT publish)
+    /// and immediately run the ack-timeout leg, so tests can exercise
+    /// the force-settle path without sleeping through the timeout.
+    @MainActor
+    public func _testForceSettleInterrupt(bucket: String, modelContext: ModelContext) {
+        startModelContext = modelContext
+        interruptPendingAgents.insert(bucket)
+        forceSettleInterruptedAgent(bucket)
     }
 
     /// Direct test entry: build an AcpInput and run it through
