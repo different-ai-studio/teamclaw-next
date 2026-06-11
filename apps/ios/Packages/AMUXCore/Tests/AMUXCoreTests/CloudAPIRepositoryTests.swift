@@ -55,6 +55,23 @@ struct CloudAPIRepositoryTests {
                           "model": null,
                           "createdAt": "2026-05-27T10:00:00Z",
                           "updatedAt": null
+                        },
+                        {
+                          "id": "message-2",
+                          "teamId": "team-1",
+                          "sessionId": "session-1",
+                          "turnId": null,
+                          "senderActorId": "actor-2",
+                          "replyToMessageId": "message-1",
+                          "kind": "user_message",
+                          "content": "hi @agent",
+                          "metadata": {
+                            "mention_actor_ids": ["agent-1", "agent-2"],
+                            "some_future_key": {"nested": true}
+                          },
+                          "model": "claude-opus-4-7",
+                          "createdAt": "2026-05-27T10:01:00Z",
+                          "updatedAt": "2026-05-27T10:02:00Z"
                         }
                       ],
                       "nextCursor": null
@@ -77,8 +94,19 @@ struct CloudAPIRepositoryTests {
         #expect(sessions.first?.createdByActorID == "actor-1")
         #expect(sessions.first?.summary == "topic")
         #expect(sessions.first?.participantCount == 3)
-        #expect(messages.map(\.id) == ["message-1"])
+        #expect(messages.map(\.id) == ["message-1", "message-2"])
         #expect(messages.first?.turnID == "turn-1")
+        // Full contract round-trip: every field of the OpenAPI Message
+        // schema must survive decoding, including the typed metadata path.
+        let second = try #require(messages.last)
+        #expect(second.teamID == "team-1")
+        #expect(second.replyToMessageID == "message-1")
+        #expect(second.mentionActorIDs == ["agent-1", "agent-2"])
+        #expect(second.model == "claude-opus-4-7")
+        #expect(second.updatedAt == ISO8601DateFormatter().date(from: "2026-05-27T10:02:00Z"))
+        // null metadata must decode to "no mentions", not a decode failure.
+        #expect(messages.first?.mentionActorIDs == [])
+        #expect(messages.first?.updatedAt == nil)
         let requests = await recorder.requests
         #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer access-token" })
         #expect(requests.map { $0.value(forHTTPHeaderField: "X-Request-Id")?.isEmpty == false }.allSatisfy { $0 })

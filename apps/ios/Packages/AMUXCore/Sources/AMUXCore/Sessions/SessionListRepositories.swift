@@ -52,11 +52,13 @@ public protocol SessionIDsRepository: Sendable {
 /// not represented here.
 public struct MessageRecord: Equatable, Sendable {
     public let id: String
+    public let teamID: String
     public let sessionID: String
     public let senderActorID: String
     public let kind: String
     public let content: String
     public let createdAt: Date
+    public let updatedAt: Date?
     /// Model id is currently stored inside `messages.metadata` JSON; not
     /// surfaced through the seed today. Left nil here until we add a typed
     /// metadata path.
@@ -67,6 +69,11 @@ public struct MessageRecord: Equatable, Sendable {
     /// to merge those rows into a single bubble. nil for pre-turn_id
     /// rows or non-agent kinds.
     public let turnID: String?
+    public let replyToMessageID: String?
+    /// Chip-bar mentions the sender attached, decoded from
+    /// `messages.metadata.mention_actor_ids`. Empty when the row carries
+    /// no metadata — distinguishing directed from broadcast turns.
+    public let mentionActorIDs: [String]
     /// Daemon-assigned per-runtime envelope sequence, stamped on every
     /// emit by `emit_agent_message`. Stable order across multi-runtime
     /// fanouts where `created_at` would collide. 0 means "legacy row
