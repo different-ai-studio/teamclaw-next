@@ -40,6 +40,10 @@ public struct SessionDetailView: View {
     /// the modelContext (and therefore its container) is available.
     private let pendingTeamclawService: TeamclawService?
     private let pushPrefs: (any PushPreferencesAPI)?
+    /// Preferred mute backend — the team-runtime store keeps the session
+    /// list's muted set in sync with toggles made here. `pushPrefs` stays
+    /// as the fallback for hosts that don't carry a team runtime.
+    private let notificationPrefsStore: NotificationPrefsStore?
     private let workspacesRepository: (any WorkspaceRepository)?
 
     let connectedAgentsStore: ConnectedAgentsStore?
@@ -49,7 +53,8 @@ public struct SessionDetailView: View {
                 messagesRepository: (any MessagesRepository)? = nil,
                 workspacesRepository: (any WorkspaceRepository)? = nil,
                 sessionsRepository: (any SessionRepository)? = nil,
-                pushPrefs: (any PushPreferencesAPI)? = nil) {
+                pushPrefs: (any PushPreferencesAPI)? = nil,
+                notificationPrefsStore: NotificationPrefsStore? = nil) {
         _viewModel = State(initialValue: SessionDetailViewModel(
             runtime: runtime, mqtt: mqtt, hub: hub, peerId: peerId,
             connectedAgentsStore: connectedAgentsStore,
@@ -59,6 +64,7 @@ public struct SessionDetailView: View {
         self.connectedAgentsStore = connectedAgentsStore
         self.pendingTeamclawService = nil
         self.pushPrefs = pushPrefs
+        self.notificationPrefsStore = notificationPrefsStore
         self.workspacesRepository = workspacesRepository
     }
 
@@ -68,7 +74,8 @@ public struct SessionDetailView: View {
                 messagesRepository: (any MessagesRepository)? = nil,
                 workspacesRepository: (any WorkspaceRepository)? = nil,
                 sessionsRepository: (any SessionRepository)? = nil,
-                pushPrefs: (any PushPreferencesAPI)? = nil) {
+                pushPrefs: (any PushPreferencesAPI)? = nil,
+                notificationPrefsStore: NotificationPrefsStore? = nil) {
         _viewModel = State(initialValue: SessionDetailViewModel(
             runtime: nil, mqtt: mqtt, hub: hub, teamID: session.teamId,
             peerId: peerId, session: session,
@@ -80,6 +87,7 @@ public struct SessionDetailView: View {
         self.connectedAgentsStore = connectedAgentsStore
         self.pendingTeamclawService = teamclawService
         self.pushPrefs = pushPrefs
+        self.notificationPrefsStore = notificationPrefsStore
         self.workspacesRepository = workspacesRepository
     }
 
@@ -226,13 +234,18 @@ public struct SessionDetailView: View {
                     } label: {
                         Label("Members", systemImage: "person.2")
                     }
-                    if pushPrefs != nil {
+                    if notificationPrefsStore != nil || pushPrefs != nil {
                         Button {
                             Task {
-                                let next = !muted
-                                muted = next
                                 let sessionID = viewModel.session?.sessionId ?? ""
-                                try? await pushPrefs?.setSessionMuted(sessionID: sessionID, muted: next)
+                                if let store = notificationPrefsStore {
+                                    await store.toggleMute(sessionID: sessionID)
+                                    muted = store.isMuted(sessionID)
+                                } else {
+                                    let next = !muted
+                                    muted = next
+                                    try? await pushPrefs?.setSessionMuted(sessionID: sessionID, muted: next)
+                                }
                             }
                         } label: {
                             Label(
@@ -247,7 +260,10 @@ public struct SessionDetailView: View {
                 .accessibilityLabel("Session options")
                 .task {
                     let sessionID = viewModel.session?.sessionId ?? ""
-                    if let api = pushPrefs, !sessionID.isEmpty {
+                    guard !sessionID.isEmpty else { return }
+                    if let store = notificationPrefsStore {
+                        muted = store.isMuted(sessionID)
+                    } else if let api = pushPrefs {
                         muted = (try? await api.isSessionMuted(sessionID: sessionID)) ?? false
                     }
                 }

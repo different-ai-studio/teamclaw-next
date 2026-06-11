@@ -17,7 +17,7 @@ public struct SettingsView: View {
     let connectedAgentsStore: ConnectedAgentsStore?
     let activeTeam: TeamSummary?
     let onSignOut: (() -> Void)?
-    let preferencesAPI: (any PushPreferencesAPI)?
+    let notificationPrefsStore: NotificationPrefsStore?
     let teamRepository: (any TeamRepository)?
     let actorRepository: (any ActorRepository)?
 
@@ -35,13 +35,13 @@ public struct SettingsView: View {
     public init(connectedAgentsStore: ConnectedAgentsStore?,
                 activeTeam: TeamSummary? = nil,
                 onSignOut: (() -> Void)? = nil,
-                preferencesAPI: (any PushPreferencesAPI)? = nil,
+                notificationPrefsStore: NotificationPrefsStore? = nil,
                 teamRepository: (any TeamRepository)? = nil,
                 actorRepository: (any ActorRepository)? = nil) {
         self.connectedAgentsStore = connectedAgentsStore
         self.activeTeam = activeTeam
         self.onSignOut = onSignOut
-        self.preferencesAPI = preferencesAPI
+        self.notificationPrefsStore = notificationPrefsStore
         self.teamRepository = teamRepository
         self.actorRepository = actorRepository
     }
@@ -87,8 +87,8 @@ public struct SettingsView: View {
                         if onboarding?.isAnonymous == true { upgradeBanner }
                         connectedAgentsSection
                         teamSection
-                        if let api = preferencesAPI {
-                            notificationsSection(api: api)
+                        if let store = notificationPrefsStore {
+                            notificationsSection(store: store)
                         }
                         aboutSection
                         if let id = currentActorID, !id.isEmpty {
@@ -378,12 +378,12 @@ public struct SettingsView: View {
 
     // MARK: - Notifications
 
-    private func notificationsSection(api: any PushPreferencesAPI) -> some View {
+    private func notificationsSection(store: NotificationPrefsStore) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             SettingsSectionLabel("Preferences")
             VStack(spacing: 0) {
                 NavigationLink {
-                    NotificationsSettingsView(api: api)
+                    NotificationsSettingsView(store: store)
                 } label: {
                     HStack {
                         Text("Notifications")

@@ -3,74 +3,95 @@ import AMUXCore
 
 @MainActor
 public struct NotificationsSettingsView: View {
-    @State private var prefs = NotificationPrefs()
-    @State private var loading = true
-    let api: any PushPreferencesAPI
+    let store: NotificationPrefsStore
 
-    public init(api: any PushPreferencesAPI) {
-        self.api = api
+    public init(store: NotificationPrefsStore) {
+        self.store = store
     }
 
     public var body: some View {
         Form {
             Section {
-                Toggle("Enable push notifications", isOn: $prefs.enabled)
-                    .onChange(of: prefs.enabled) { _, _ in
-                        Task { try? await api.save(prefs) }
-                    }
+                Toggle("Enable push notifications", isOn: Binding(
+                    get: { store.prefs.enabled },
+                    set: { on in Task { await store.setEnabled(on) } }
+                ))
             }
 
             Section("Do Not Disturb") {
                 Toggle("Enabled", isOn: Binding(
-                    get: { prefs.dndStartMin != nil },
+                    get: { store.prefs.dndStartMin != nil },
                     set: { on in
-                        if on {
-                            if prefs.dndStartMin == nil { prefs.dndStartMin = 22 * 60 }
-                            if prefs.dndEndMin == nil   { prefs.dndEndMin   = 7  * 60 }
-                        } else {
-                            prefs.dndStartMin = nil
-                            prefs.dndEndMin   = nil
+                        Task {
+                            if on {
+                                await store.setQuietHours(
+                                    startMin: store.prefs.dndStartMin ?? 22 * 60,
+                                    endMin: store.prefs.dndEndMin ?? 7 * 60
+                                )
+                            } else {
+                                await store.setQuietHours(startMin: nil, endMin: nil)
+                            }
                         }
-                        Task { try? await api.save(prefs) }
                     }
                 ))
 
-                if prefs.dndStartMin != nil {
-                    DatePicker("Start", selection: bindMin($prefs.dndStartMin),
-                               displayedComponents: .hourAndMinute)
-                        .onChange(of: prefs.dndStartMin) { _, _ in
-                            Task { try? await api.save(prefs) }
+                if store.prefs.dndStartMin != nil {
+                    DatePicker("Start", selection: bindMinute(
+                        get: { store.prefs.dndStartMin },
+                        set: { newStart in
+                            Task {
+                                await store.setQuietHours(
+                                    startMin: newStart,
+                                    endMin: store.prefs.dndEndMin
+                                )
+                            }
                         }
+                    ), displayedComponents: .hourAndMinute)
 
-                    DatePicker("End", selection: bindMin($prefs.dndEndMin),
-                               displayedComponents: .hourAndMinute)
-                        .onChange(of: prefs.dndEndMin) { _, _ in
-                            Task { try? await api.save(prefs) }
+                    DatePicker("End", selection: bindMinute(
+                        get: { store.prefs.dndEndMin },
+                        set: { newEnd in
+                            Task {
+                                await store.setQuietHours(
+                                    startMin: store.prefs.dndStartMin,
+                                    endMin: newEnd
+                                )
+                            }
                         }
+                    ), displayedComponents: .hourAndMinute)
+                }
+            }
+
+            if let error = store.errorMessage {
+                Section {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(Color.amux.cinnabarDeep)
                 }
             }
         }
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.large)
         .task {
-            if loading {
-                prefs = (try? await api.load()) ?? NotificationPrefs()
-                loading = false
-            }
+            await store.reload()
         }
     }
 
-    private func bindMin(_ source: Binding<Int?>) -> Binding<Date> {
+    /// Bridge a minute-of-day Int? to the hour+minute DatePicker.
+    private func bindMinute(
+        get: @escaping () -> Int?,
+        set: @escaping (Int) -> Void
+    ) -> Binding<Date> {
         Binding(
             get: {
-                let m = source.wrappedValue ?? 0
+                let m = get() ?? 0
                 return Calendar.current.date(
                     bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()
                 ) ?? Date()
             },
             set: { newDate in
                 let comps = Calendar.current.dateComponents([.hour, .minute], from: newDate)
-                source.wrappedValue = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
+                set((comps.hour ?? 0) * 60 + (comps.minute ?? 0))
             }
         )
     }

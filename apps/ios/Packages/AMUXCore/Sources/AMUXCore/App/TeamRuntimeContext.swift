@@ -21,6 +21,7 @@ public struct TeamRuntimeContext {
     public let actorStore: ActorStore
     public let connectedAgentsStore: ConnectedAgentsStore
     public let shortcutsStore: ShortcutsStore?
+    public let notificationPrefsStore: NotificationPrefsStore?
 
     public let sessionIDsRepo: (any SessionIDsRepository)?
     public let sessionsRepo: (any SessionsRepository)?
@@ -39,6 +40,7 @@ public struct TeamRuntimeContext {
         actorStore: ActorStore,
         connectedAgentsStore: ConnectedAgentsStore,
         shortcutsStore: ShortcutsStore?,
+        notificationPrefsStore: NotificationPrefsStore? = nil,
         sessionIDsRepo: (any SessionIDsRepository)?,
         sessionsRepo: (any SessionsRepository)?,
         messagesRepo: (any MessagesRepository)?,
@@ -55,6 +57,7 @@ public struct TeamRuntimeContext {
         self.actorStore = actorStore
         self.connectedAgentsStore = connectedAgentsStore
         self.shortcutsStore = shortcutsStore
+        self.notificationPrefsStore = notificationPrefsStore
         self.sessionIDsRepo = sessionIDsRepo
         self.sessionsRepo = sessionsRepo
         self.messagesRepo = messagesRepo

@@ -25,6 +25,7 @@ public struct SessionsTab: View {
     var onReconnect: (() -> Void)?
     var onSignOut: (() -> Void)?
     let preferencesAPI: (any PushPreferencesAPI)?
+    let notificationPrefsStore: NotificationPrefsStore?
 
     @Environment(\.modelContext) private var modelContext
 
@@ -58,7 +59,8 @@ public struct SessionsTab: View {
                 actorRepository: (any ActorRepository)? = nil,
                 onReconnect: (() -> Void)? = nil,
                 onSignOut: (() -> Void)? = nil,
-                preferencesAPI: (any PushPreferencesAPI)? = nil) {
+                preferencesAPI: (any PushPreferencesAPI)? = nil,
+                notificationPrefsStore: NotificationPrefsStore? = nil) {
         self.mqtt = mqtt
         self.hub = hub
         self.pairing = pairing
@@ -79,6 +81,7 @@ public struct SessionsTab: View {
         self.onReconnect = onReconnect
         self.onSignOut = onSignOut
         self.preferencesAPI = preferencesAPI
+        self.notificationPrefsStore = notificationPrefsStore
     }
 
     public var body: some View {
@@ -96,7 +99,8 @@ public struct SessionsTab: View {
                     actorId: "ios-\(pairing.authToken.prefix(6))",
                     currentActorID: currentActorID,
                     noAccessibleAgent: connectedAgentsStore?.agents.isEmpty == true,
-                    onInviteFirstAgent: actorStore == nil ? nil : { showInvite = true }
+                    onInviteFirstAgent: actorStore == nil ? nil : { showInvite = true },
+                    notificationPrefsStore: notificationPrefsStore
                 )
                 .navigationTitle("Sessions")
                 .navigationBarTitleDisplayMode(.large)
@@ -139,14 +143,15 @@ public struct SessionsTab: View {
                         messagesRepository: messagesRepository,
                         workspacesRepository: workspacesRepository,
                         sessionsRepository: sessionsRepository,
-                        preferencesAPI: preferencesAPI
+                        preferencesAPI: preferencesAPI,
+                        notificationPrefsStore: notificationPrefsStore
                     )
                 }
                 .sheet(isPresented: $showSettings) {
                     SettingsView(connectedAgentsStore: connectedAgentsStore,
                                  activeTeam: activeTeam,
                                  onSignOut: onSignOut,
-                                 preferencesAPI: preferencesAPI,
+                                 notificationPrefsStore: notificationPrefsStore,
                                  teamRepository: teamRepository,
                                  actorRepository: actorRepository)
                 }
@@ -245,6 +250,7 @@ private struct SessionDestinationView: View {
     let workspacesRepository: (any WorkspaceRepository)?
     let sessionsRepository: (any SessionRepository)?
     let preferencesAPI: (any PushPreferencesAPI)?
+    let notificationPrefsStore: NotificationPrefsStore?
 
     @Environment(\.modelContext) private var modelContext
 
@@ -271,7 +277,8 @@ private struct SessionDestinationView: View {
                     messagesRepository: messagesRepository,
                     workspacesRepository: workspacesRepository,
                     sessionsRepository: sessionsRepository,
-                    pushPrefs: preferencesAPI
+                    pushPrefs: preferencesAPI,
+                    notificationPrefsStore: notificationPrefsStore
                 )
                 .id("session:\(session.sessionId)")
             } else {

@@ -271,6 +271,18 @@ public final class AppOnboardingCoordinator {
         }()
         if let shortcutsStore { Task { await shortcutsStore.reload() } }
 
+        // Notification prefs + per-session mutes are user-scoped, not
+        // team-scoped — rebuilding on team switch just re-fetches the same
+        // row, which keeps the store's lifecycle identical to its siblings.
+        let notificationPrefsStore: NotificationPrefsStore? = {
+            guard let config = CloudAPIConfigurationStore.configuration() else { return nil }
+            let repo = CloudAPIRepositoryFactory.notificationsRepository(configuration: config) { [store] in
+                try await store.accessToken()
+            }
+            return NotificationPrefsStore(repository: repo)
+        }()
+        if let notificationPrefsStore { Task { await notificationPrefsStore.reload() } }
+
         let cloudAPIConfig = CloudAPIConfigurationStore.configuration()
         let cloudAPISessionsRepo: (any SessionsRepository)? = cloudAPIConfig.map { config in
             CloudAPIRepositoryFactory.sessionsRepository(configuration: config) { [store] in
@@ -335,6 +347,7 @@ public final class AppOnboardingCoordinator {
             actorStore: actorStore,
             connectedAgentsStore: connectedAgentsStore,
             shortcutsStore: shortcutsStore,
+            notificationPrefsStore: notificationPrefsStore,
             sessionIDsRepo: cloudAPISessionIDsRepo,
             sessionsRepo: cloudAPISessionsRepo,
             messagesRepo: cloudAPIMessagesRepo,

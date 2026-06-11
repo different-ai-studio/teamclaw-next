@@ -84,7 +84,8 @@ public struct RootTabView: View {
                             actorRepository: teamRuntime?.actorRepo,
                             onReconnect: onReconnect,
                             onSignOut: onSignOut,
-                            preferencesAPI: preferencesAPI)
+                            preferencesAPI: preferencesAPI,
+                            notificationPrefsStore: teamRuntime?.notificationPrefsStore)
             }
             Tab(IdeaUIPresentation.pluralTitle, systemImage: IdeaUIPresentation.systemImage, value: AppTab.ideas) {
                 IdeasTab(mqtt: mqtt,
