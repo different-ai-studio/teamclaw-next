@@ -1086,10 +1086,14 @@ impl DaemonServer {
         self.register_startup_workspace_at(std::env::current_dir())
             .await;
 
-        {
-            let mut mgr = self.agents.lock().await;
-            mgr.prewarm_acp_hosts().await;
-        }
+        // NOTE: ACP host prewarming is deliberately deferred to a background
+        // task spawned *after* the HTTP listener binds (see below). Prewarming
+        // claude+opencode ACP hosts can take 20s+ on a cold start; doing it
+        // synchronously here gated `/v1/healthz` (and MQTT) behind that delay,
+        // which made the desktop's daemon-onboarding health poll time out and
+        // report "failed to start the background service" even though the
+        // daemon was seconds from being ready. Prewarm is a first-turn latency
+        // optimization — it must not block readiness.
 
         // Browser-facing HTTP+SSE listener. Desktop TeamClaw requires this
         // control plane; when `[http]` is absent from daemon.toml we still
@@ -1182,6 +1186,20 @@ impl DaemonServer {
                 }
             }
         };
+
+        // Prewarm ACP hosts in the background now that the HTTP control plane is
+        // bound. This warms claude/opencode ACP hosts (20s+ cold) without gating
+        // `/v1/healthz`, the Unix socket, or the MQTT loop on it — the daemon
+        // reports healthy immediately while first-turn latency is still primed.
+        // Spawned here (after the HTTP setup released its `self.agents` lock) so
+        // the long-held prewarm lock can't stall the listener bind.
+        {
+            let agents = self.agents.clone();
+            tokio::spawn(async move {
+                let mut mgr = agents.lock().await;
+                mgr.prewarm_acp_hosts().await;
+            });
+        }
 
         // Bind the control socket and spawn a listener that funnels parsed
         // commands into the main loop via mpsc. Done after channel start so
