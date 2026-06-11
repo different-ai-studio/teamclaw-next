@@ -3934,6 +3934,10 @@ components:
           type:
             - string
             - "null"
+        visibility:
+          type: string
+          enum: [team, personal]
+          description: Agent visibility scope. Omit to leave unchanged.
     AgentDefaultsPatch:
       type: object
       properties:

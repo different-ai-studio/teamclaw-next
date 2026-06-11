@@ -93,6 +93,7 @@ export function registerActors(router) {
       displayName: body.displayName ?? null,
       avatarUrl: body.avatarUrl ?? null,
       description: body.description ?? null,
+      visibility: body.visibility ?? null,
     });
     return { statusCode: 204, body: null };
   });
