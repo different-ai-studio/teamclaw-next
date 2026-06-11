@@ -18,10 +18,12 @@ import { cn, isTauri } from '@/lib/utils'
 import { DaemonOnboardingWizard } from '@/components/auth/DaemonOnboardingWizard'
 import { TeamSyncPaths } from './TeamSyncPaths'
 import { TeamShareDisconnect } from './TeamShareDisconnect'
+import { TeamShareSection } from './TeamShareSection'
+import { useTeamPermissions } from '@/lib/team-permissions'
 import { useDaemonOnboardingStore } from '@/stores/daemon-onboarding'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useCurrentTeamStore } from '@/stores/current-team'
-import { useTeamShareStore } from '@/stores/team-share'
+import { useTeamShareStore, isShareModeLocked } from '@/stores/team-share'
 import { linkDaemonTeamWorkspace } from '@/lib/daemon-local-client'
 import { buildConfig, TEAM_SYNCED_EVENT, TEAM_REPO_DIR } from '@/lib/build-config'
 import { Button } from '@/components/ui/button'
@@ -52,6 +54,19 @@ async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Prom
   return invoke<T>(cmd, args)
 }
 
+/**
+ * The daemon refused sync because it can't read this team's share-mode on the
+ * cloud (FC returns unset/404 for the daemon's own identity), so it replies
+ * with the dedicated `team_share_not_enabled_for_daemon` 422. The desktop
+ * proxy forwards the daemon's problem+json body verbatim inside the error
+ * string, so we branch on the stable machine-readable `code` rather than the
+ * human-readable detail. This happens when team_id matches but the daemon's
+ * binding/credentials are stale — the fix is to rebind the daemon.
+ */
+function isDaemonShareUnsetError(message: string | null | undefined): boolean {
+  return !!message && message.includes('team_share_not_enabled_for_daemon')
+}
+
 // ─── Reusable Components (local to git config) ─────────────────────────────
 
 function SettingCard({
@@ -69,9 +84,65 @@ function SettingCard({
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export function TeamGitConfig() {
-  const { t } = useTranslation()
   const workspacePath = useWorkspaceStore((s) => s.workspacePath)
   const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
+  const status = useTeamShareStore((s) => s.status)
+  const shareLoading = useTeamShareStore((s) => s.loading)
+  const { isOwner } = useTeamPermissions()
+  const { t } = useTranslation()
+
+  const isCloudGitEnabled = isShareModeLocked(status.mode)
+
+  if (!teamId || !workspacePath) return null
+
+  if (!isCloudGitEnabled) {
+    if (shareLoading) {
+      return (
+        <div className="flex items-center gap-2 py-8 text-[13px] text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {t('settings.team.loadingShareMode', 'Loading team share status…')}
+        </div>
+      )
+    }
+    return (
+      <div className="space-y-4">
+        <SettingCard className="border-amber-500/30 bg-amber-500/5">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div className="min-w-0 space-y-1">
+              <p className="text-[13px] font-medium text-amber-800 dark:text-amber-300">
+                {t('settings.team.cloudShareRequiredTitle', 'Team share is not enabled on the cloud yet')}
+              </p>
+              <p className="text-[12px] leading-5 text-amber-800/80 dark:text-amber-300/80">
+                {t(
+                  'settings.team.cloudShareRequiredDesc',
+                  'Sync requires locking a share mode on the server first. Use Enable below (Self-hosted Git), then Sync Now.',
+                )}
+              </p>
+            </div>
+          </div>
+        </SettingCard>
+        <TeamShareSection
+          teamId={teamId}
+          workspacePath={workspacePath}
+          isOwner={isOwner}
+          skipInitialRefresh
+        />
+      </div>
+    )
+  }
+
+  return <TeamGitConfigConnected teamId={teamId} workspacePath={workspacePath} />
+}
+
+function TeamGitConfigConnected({
+  teamId,
+  workspacePath,
+}: {
+  teamId: string
+  workspacePath: string
+}) {
+  const { t } = useTranslation()
   const status = useTeamShareStore((s) => s.status)
   const refresh = useTeamShareStore((s) => s.refresh)
 
@@ -84,6 +155,7 @@ export function TeamGitConfig() {
   const [rebinding, setRebinding] = React.useState(false)
   const onboardingStatus = useDaemonOnboardingStore((s) => s.status)
   const onboardingBusy = useDaemonOnboardingStore((s) => s.busy)
+  const forceResetDaemon = useDaemonOnboardingStore((s) => s.forceReset)
 
   const sharedDirName = TEAM_REPO_DIR
 
@@ -115,6 +187,12 @@ export function TeamGitConfig() {
     }
   }, [teamId, workspacePath])
 
+  const isCloudGitEnabled = isShareModeLocked(status.mode)
+  const isWorkspaceLinked =
+    status.linkStatus === 'symlink' || status.linkStatus === 'real_dir'
+
+  const linkRepairKeyRef = React.useRef<string | null>(null)
+
   // Keep the FC share-mode status fresh (TeamSection resolves it before mounting
   // us; this re-fetch covers team/workspace switches while the pane is open).
   React.useEffect(() => {
@@ -123,6 +201,18 @@ export function TeamGitConfig() {
     void refreshDaemonTeamId()
     void refreshSyncStatus()
   }, [teamId, workspacePath, refresh, refreshDaemonTeamId, refreshSyncStatus])
+
+  // Repair workspace symlink once per team+workspace when cloud git is enabled.
+  React.useEffect(() => {
+    if (!isCloudGitEnabled || isWorkspaceLinked) return
+    const key = `${teamId}:${workspacePath}`
+    if (linkRepairKeyRef.current === key) return
+    linkRepairKeyRef.current = key
+    void (async () => {
+      await linkDaemonTeamWorkspace(workspacePath)
+      setPathsRefreshKey((k) => k + 1)
+    })()
+  }, [teamId, workspacePath, isCloudGitEnabled, isWorkspaceLinked])
 
   // Poll while the daemon reports an in-flight sync (e.g. background timer clone).
   React.useEffect(() => {
@@ -142,7 +232,44 @@ export function TeamGitConfig() {
 
   const daemonSyncing = syncing || (syncStatus?.syncing ?? false)
   const teamMismatch = !!daemonTeamId && !!teamId && daemonTeamId !== teamId
-  const combinedError = teamMismatch ? null : (errorMessage ?? syncStatus?.lastError ?? null)
+  const rawSyncError = errorMessage ?? syncStatus?.lastError ?? null
+  // team_id matches but the daemon's identity can't read this team's share-mode
+  // on the cloud — same remedy as a mismatch (rebind), so funnel it into the
+  // same amber card + action and hide the raw 422 from the user.
+  const daemonShareUnset = isCloudGitEnabled && isDaemonShareUnsetError(rawSyncError)
+  const needsRebind = teamMismatch || daemonShareUnset
+  const combinedError = needsRebind ? null : rawSyncError
+
+  // Open the re-onboard flow. For a true team mismatch the wizard already lands
+  // on its 'mismatch' screen (reset + re-init). But in the share-unset case the
+  // daemon team *equals* the current team, so onboarding status computes as
+  // 'ready' and the wizard would immediately self-close (onDone) without doing
+  // anything. Force a reset first (clears the stale binding → status flips to
+  // 'needs-onboard'), then open the wizard so the user can re-onboard and the
+  // daemon's agent actually (re)joins the current team. Awaiting the reset
+  // before opening avoids the 'ready' self-close race.
+  const handleRebind = async () => {
+    if (daemonShareUnset && !teamMismatch) {
+      await forceResetDaemon()
+    }
+    setRebinding(true)
+  }
+
+  // Close the rebind overlay (whether the user finished or cancelled) and clear
+  // the stale 422 that drove the rebind card. Otherwise that error lingers in
+  // state, keeps the card up + Sync Now disabled, and the user can't click Sync
+  // Now to clear it — a dead end. refreshSyncStatus repopulates real state.
+  const closeRebindAndRefresh = () => {
+    setRebinding(false)
+    setErrorMessage(null)
+    setSyncStatus((prev) => (prev ? { ...prev, lastError: null } : prev))
+    void refreshDaemonTeamId()
+    if (teamId && workspacePath) {
+      void refresh(teamId, workspacePath)
+      void refreshSyncStatus()
+    }
+    setPathsRefreshKey((k) => k + 1)
+  }
 
   // ─── Sync flow — daemon-owned; the proxy only needs workspacePath ─────────
 
@@ -154,6 +281,18 @@ export function TeamGitConfig() {
     setSyncing(true)
     setErrorMessage(null)
     try {
+      if (teamId) {
+        const latest = await refresh(teamId, workspacePath)
+        if (!isShareModeLocked(latest.mode) || latest.mode === 'oss') {
+          setErrorMessage(
+            t(
+              'settings.team.cloudShareRequiredBeforeSync',
+              'Team share is not locked on the cloud yet. Use Enable (Self-hosted Git) first — Sync Now cannot enable it.',
+            ),
+          )
+          return
+        }
+      }
       const { invoke } = await import('@tauri-apps/api/core')
       const boundTeamId = await invoke<string | null>('get_daemon_team_id')
       setDaemonTeamId(boundTeamId ?? null)
@@ -200,46 +339,79 @@ export function TeamGitConfig() {
     }
   }
 
+  // Legacy routing (or stale local state) can land here while Cloud share_mode is
+  // still unset. Sync Now only talks to the daemon, which reads FC — show the
+  // enable flow instead of a misleading Connected + Sync surface.
+  // (Handled by TeamGitConfig wrapper before this component mounts.)
+
   return (
     <>
-      {teamMismatch && (
+      {needsRebind && (
         <SettingCard className="border-amber-500/30 bg-amber-500/5">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
             <div className="min-w-0 space-y-1.5">
               <p className="text-[13px] font-medium text-amber-700 dark:text-amber-400">
-                {t('settings.daemonGeneral.teamMismatchTitle', '本机 Daemon 与当前团队不一致')}
+                {teamMismatch
+                  ? t('settings.daemonGeneral.teamMismatchTitle', '本机 Daemon 与当前团队不一致')
+                  : t('settings.team.daemonShareUnsetTitle', '本机 Daemon 无法读取团队共享配置')}
               </p>
               <p className="text-[12px] leading-5 text-amber-700/80 dark:text-amber-400/80">
-                {t('settings.team.daemonTeamMismatch', {
-                  daemonTeamId,
-                  currentTeamId: teamId,
-                  defaultValue:
-                    `Local daemon is bound to team ${daemonTeamId}, but you are signed in as ${teamId}. Click "Rebind to current team" below, then sync again.`,
-                })}
+                {teamMismatch
+                  ? t('settings.team.daemonTeamMismatch', {
+                      daemonTeamId,
+                      currentTeamId: teamId,
+                      defaultValue:
+                        `Local daemon is bound to team ${daemonTeamId}, but you are signed in as ${teamId}. Click "Rebind to current team" below, then sync again.`,
+                    })
+                  : t(
+                      'settings.team.daemonShareUnsetDesc',
+                      'Team share is enabled on the cloud, but the local daemon’s credentials can’t read this team’s share config. Click "Rebind to current team" below, then sync again.',
+                    )}
               </p>
-              <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-0.5 pt-0.5 text-[11px]">
-                <dt className="text-amber-700/70 dark:text-amber-400/70">
-                  {t('settings.daemonGeneral.daemonTeam', 'Daemon 团队')}
-                </dt>
-                <dd className="truncate font-mono text-amber-800 dark:text-amber-300">{daemonTeamId}</dd>
-                <dt className="text-amber-700/70 dark:text-amber-400/70">
-                  {t('settings.daemonGeneral.currentTeam', '当前团队')}
-                </dt>
-                <dd className="truncate font-mono text-amber-800 dark:text-amber-300">{teamId}</dd>
-              </dl>
+              {teamMismatch && (
+                <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-0.5 pt-0.5 text-[11px]">
+                  <dt className="text-amber-700/70 dark:text-amber-400/70">
+                    {t('settings.daemonGeneral.daemonTeam', 'Daemon 团队')}
+                  </dt>
+                  <dd className="truncate font-mono text-amber-800 dark:text-amber-300">{daemonTeamId}</dd>
+                  <dt className="text-amber-700/70 dark:text-amber-400/70">
+                    {t('settings.daemonGeneral.currentTeam', '当前团队')}
+                  </dt>
+                  <dd className="truncate font-mono text-amber-800 dark:text-amber-300">{teamId}</dd>
+                </dl>
+              )}
               <div className="pt-1.5">
                 <Button
                   variant="outline"
                   size="sm"
                   className="h-8 gap-1.5 border-amber-500/40 bg-transparent text-amber-700 hover:bg-amber-500/10 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200"
-                  onClick={() => setRebinding(true)}
-                  disabled={rebinding}
+                  onClick={() => void handleRebind()}
+                  disabled={rebinding || onboardingBusy}
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                   {t('settings.daemonGeneral.rebind', '重新绑定到当前团队')}
                 </Button>
               </div>
+            </div>
+          </div>
+        </SettingCard>
+      )}
+
+      {isCloudGitEnabled && !isWorkspaceLinked && !needsRebind && (
+        <SettingCard className="border-amber-500/30 bg-amber-500/5">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div className="min-w-0 space-y-1">
+              <p className="text-[13px] font-medium text-amber-800 dark:text-amber-300">
+                {t('settings.team.localLinkPendingTitle', 'Cloud share is enabled; local directory not linked yet')}
+              </p>
+              <p className="text-[12px] leading-5 text-amber-800/80 dark:text-amber-300/80">
+                {t(
+                  'settings.team.localLinkPendingDesc',
+                  'Team share is locked on the server. Click Sync Now to clone the repo and create the workspace symlink.',
+                )}
+              </p>
             </div>
           </div>
         </SettingCard>
@@ -282,10 +454,17 @@ export function TeamGitConfig() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <p className="text-[13px] font-medium">{modeLabel}</p>
-                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-                  <CheckCircle2 className="h-3 w-3" />
-                  {t('settings.llm.connected', 'Connected')}
-                </span>
+                {isWorkspaceLinked ? (
+                  <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
+                    <CheckCircle2 className="h-3 w-3" />
+                    {t('settings.llm.connected', 'Connected')}
+                  </span>
+                ) : (
+                  <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+                    <AlertTriangle className="h-3 w-3" />
+                    {t('settings.team.pendingLocalLink', 'Pending local link')}
+                  </span>
+                )}
               </div>
               {status.gitRemoteUrl && (
                 <div className="flex items-center gap-2 mt-0.5 min-w-0">
@@ -332,7 +511,7 @@ export function TeamGitConfig() {
                 variant="outline"
                 size="sm"
                 onClick={() => void performSync()}
-                disabled={daemonSyncing || !workspacePath || teamMismatch}
+                disabled={daemonSyncing || !workspacePath || needsRebind}
                 className="shrink-0 gap-2"
               >
                 <RefreshCw className={cn('h-3 w-3 shrink-0', daemonSyncing && 'animate-spin')} />
@@ -420,26 +599,17 @@ export function TeamGitConfig() {
 
       {rebinding && (
         <div className="fixed inset-0 z-50">
-          {onboardingStatus === 'mismatch' && !onboardingBusy && (
-            <button
-              type="button"
-              onClick={() => setRebinding(false)}
-              className="absolute right-5 top-5 z-10 rounded-[8px] px-3 py-1.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-panel hover:text-foreground"
-            >
-              {t('common.cancel', '取消')}
-            </button>
-          )}
-          <DaemonOnboardingWizard
-            onDone={() => {
-              setRebinding(false)
-              void refreshDaemonTeamId()
-              if (teamId && workspacePath) {
-                void refresh(teamId, workspacePath)
-                void refreshSyncStatus()
-              }
-              setPathsRefreshKey((k) => k + 1)
-            }}
-          />
+          {(onboardingStatus === 'mismatch' || onboardingStatus === 'needs-onboard') &&
+            !onboardingBusy && (
+              <button
+                type="button"
+                onClick={closeRebindAndRefresh}
+                className="absolute right-5 top-5 z-10 rounded-[8px] px-3 py-1.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-panel hover:text-foreground"
+              >
+                {t('common.cancel', '取消')}
+              </button>
+            )}
+          <DaemonOnboardingWizard onDone={closeRebindAndRefresh} />
         </div>
       )}
     </>

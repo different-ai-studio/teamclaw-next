@@ -24,6 +24,7 @@ use crate::commands::oss_sync::get_fc_endpoint;
 use crate::commands::team_share::custom_git;
 use crate::commands::team_sync_proxy;
 use crate::commands::{team_secret_store, TEAM_REPO_DIR};
+use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -167,6 +168,7 @@ pub async fn enable_oss_impl(
     // post_share_mode returns a clear error and we bail out BEFORE mutating any
     // local state — otherwise we would overwrite the existing team secret and
     // break decryption of data already synced under the original secret.
+    info!(team_id = %team_id, share_mode = "oss", "team_share_enable_oss: locking share-mode on FC");
     post_share_mode(
         &workspace_path,
         &team_id,
@@ -174,6 +176,7 @@ pub async fn enable_oss_impl(
         &access_token,
     )
     .await?;
+    info!(team_id = %team_id, share_mode = "oss", "team_share_enable_oss: share-mode locked");
 
     let secret = resolve_team_secret_hex(team_secret_hex)?;
     team_secret_store::save_team_secret(&workspace_path, &team_id, &secret)?;
@@ -261,7 +264,9 @@ pub async fn enable_managed_git_impl(
             "credentialRef": cred_ref,
         }
     });
+    info!(team_id = %team_id, share_mode = "managed_git", remote_url = %repo_url, "team_share_enable_managed_git: locking share-mode on FC");
     post_share_mode(&workspace_path, &team_id, &body, &access_token).await?;
+    info!(team_id = %team_id, share_mode = "managed_git", "team_share_enable_managed_git: share-mode locked");
 
     ensure_team_repo_dir(&workspace_path)?;
 
@@ -348,7 +353,16 @@ pub async fn enable_custom_git_impl(
         "mode": "custom_git",
         "gitConfig": git_config,
     });
+    info!(
+        team_id = %team_id,
+        share_mode = "custom_git",
+        remote_url = %input.remote_url,
+        auth_kind = %input.auth_kind,
+        local_ssh = local_ssh,
+        "team_share_enable_custom_git: locking share-mode on FC"
+    );
     post_share_mode(&workspace_path, &team_id, &body, &access_token).await?;
+    info!(team_id = %team_id, share_mode = "custom_git", "team_share_enable_custom_git: share-mode locked");
 
     ensure_team_repo_dir(&workspace_path)?;
 

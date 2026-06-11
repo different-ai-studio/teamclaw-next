@@ -12,6 +12,8 @@ interface Props {
   teamId: string
   workspacePath: string
   isOwner: boolean
+  /** Parent already fetched share-mode (e.g. TeamSection) — skip duplicate refresh. */
+  skipInitialRefresh?: boolean
 }
 
 // OSS is a brand token; the git modes resolve through i18n at render time.
@@ -29,7 +31,12 @@ const MODE_LABEL_KEY: Record<Exclude<ShareMode, null>, string | null> = {
  *   - mode === null: "团队共享未开通" + (owner) "开通" button → opens wizard
  *   - mode !== null: "已开通：{label}" — locked, no toggle
  */
-export function TeamShareSection({ teamId, workspacePath, isOwner }: Props) {
+export function TeamShareSection({
+  teamId,
+  workspacePath,
+  isOwner,
+  skipInitialRefresh = false,
+}: Props) {
   const { t } = useTranslation()
   const status = useTeamShareStore((s) => s.status)
   const loading = useTeamShareStore((s) => s.loading)
@@ -40,12 +47,9 @@ export function TeamShareSection({ teamId, workspacePath, isOwner }: Props) {
   const [wizardOpen, setWizardOpen] = useState(false)
 
   useEffect(() => {
-    // Status lives behind the Cloud API, which needs a logged-in JWT. Skip the
-    // call when signed out so we don't surface a raw "supabase_jwt not found"
-    // error — the signed-out state is rendered explicitly below.
-    if (!teamId || !workspacePath || !isLoggedIn) return
+    if (skipInitialRefresh || !teamId || !workspacePath || !isLoggedIn) return
     void refresh(teamId, workspacePath)
-  }, [teamId, workspacePath, isLoggedIn, refresh])
+  }, [teamId, workspacePath, isLoggedIn, refresh, skipInitialRefresh])
 
   // Don't echo the backend's not-logged-in error in red — it's an expected
   // signed-out state, handled with a friendly message instead.

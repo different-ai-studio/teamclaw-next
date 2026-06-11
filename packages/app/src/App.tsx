@@ -13,6 +13,7 @@ import { buildConfig } from "@/lib/build-config";
 import { markStartup } from "@/lib/startup-perf";
 import {
   BookOpen,
+  Share2,
   FolderGit,
   ChevronLeft,
   X,
@@ -620,7 +621,7 @@ function AppContent() {
   const hasHiddenTabs = useTabsStore(selectHasHiddenTabs);
   /** Shortcuts open in the left dock for both shells.
    * Only the workspace shell temporarily replaces the sidebar with that dock.
-   * Knowledge pops out from the right (via the top-right Knowledge icon). */
+   * Files pops out from the right (via the top-right files icon). */
   const leftDockActive =
     isPanelOpen &&
     activeTab === "shortcuts";
@@ -1978,9 +1979,17 @@ function AppContent() {
               )}
               <HeaderPanelTab
                 icon={BookOpen}
-                label={t("navigation.knowledge", "Knowledge")}
-                isActive={isPanelOpen && activeTab === "knowledge"}
-                onClick={() => isPanelOpen && activeTab === "knowledge" ? closePanel() : openPanel("knowledge")}
+                label={t("navigation.files", "files")}
+                isActive={isPanelOpen && activeTab === "files"}
+                onClick={() => isPanelOpen && activeTab === "files" ? closePanel() : openPanel("files")}
+              />
+              <HeaderPanelTab
+                icon={Share2}
+                label={t("navigation.teamSharedFiles", "team shared files")}
+                isActive={isPanelOpen && activeTab === "teamShared"}
+                onClick={() =>
+                  isPanelOpen && activeTab === "teamShared" ? closePanel() : openPanel("teamShared")
+                }
               />
               {hasCurrentSession && (
                 <HeaderPanelTab

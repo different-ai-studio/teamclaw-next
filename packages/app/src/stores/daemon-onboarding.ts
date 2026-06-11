@@ -105,7 +105,18 @@ async function onboard(teamId: string, displayName: string, targetActorId: strin
     inviteUrl += `&cloud_api_url=${encodeURIComponent(cloudApiUrl)}`
   }
   const result = await invoke<{ actorId: string; teamId: string }>('daemon_init', { inviteUrl })
-  await invoke('daemon_install_service')
+  // `daemon_init` already claimed the invite and wrote fresh credentials — the
+  // actor is onboarded to the team at this point. `install-service` only
+  // registers the launchd background service, which fails when the amuxd binary
+  // isn't deployed to ~/.amuxd/bin (e.g. a dev daemon run via `cargo run`/pnpm).
+  // Don't fail the whole onboard over it: that would trap the user in the wizard
+  // even though the team binding succeeded. The caller's refresh()/ensureHealthy
+  // verifies the running daemon and surfaces a real problem if it isn't healthy.
+  try {
+    await invoke('daemon_install_service')
+  } catch (e) {
+    console.warn('[daemon-onboarding] install-service failed (non-fatal):', e)
+  }
   return result.actorId
 }
 

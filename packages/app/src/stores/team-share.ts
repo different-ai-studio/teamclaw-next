@@ -10,6 +10,37 @@ import { linkDaemonTeamWorkspace } from '@/lib/daemon-local-client'
 
 export type ShareMode = 'oss' | 'managed_git' | 'custom_git' | null
 
+export type LockedShareMode = Exclude<ShareMode, null>
+
+export function isShareModeLocked(
+  mode: ShareMode | undefined | null,
+): mode is LockedShareMode {
+  return mode === 'oss' || mode === 'managed_git' || mode === 'custom_git'
+}
+
+/** Match daemon: when FC mode is unset, ignore stray git fields in the payload. */
+export function normalizeShareStatus(raw: Partial<ShareStatus>): ShareStatus {
+  const mode = (raw?.mode ?? null) as ShareMode
+  if (!isShareModeLocked(mode)) {
+    return {
+      mode: null,
+      gitRemoteUrl: null,
+      gitAuthKind: null,
+      enabledAt: null,
+      linkStatus: raw?.linkStatus,
+      globalPath: raw?.globalPath ?? null,
+    }
+  }
+  return {
+    mode,
+    gitRemoteUrl: raw?.gitRemoteUrl ?? null,
+    gitAuthKind: raw?.gitAuthKind ?? null,
+    enabledAt: raw?.enabledAt ?? null,
+    linkStatus: raw?.linkStatus,
+    globalPath: raw?.globalPath ?? null,
+  }
+}
+
 // What the workspace `teamclaw-team` entry currently is, as reported by the
 // daemon-aware `team_share_get_status` command.
 export type LinkStatus = 'symlink' | 'real_dir' | 'missing'
@@ -49,7 +80,7 @@ export interface TeamShareState {
   loading: boolean
   lastError: string | null
 
-  refresh(teamId: string, workspacePath: string): Promise<void>
+  refresh(teamId: string, workspacePath: string): Promise<ShareStatus>
   enableOss(
     teamId: string,
     workspacePath: string,
@@ -82,38 +113,56 @@ const EMPTY_STATUS: ShareStatus = {
   enabledAt: null,
 }
 
+/** Coalesce concurrent refresh calls for the same team + workspace. */
+let shareRefreshInflight: Promise<ShareStatus> | null = null
+let shareRefreshInflightKey: string | null = null
+
 export const useTeamShareStore = create<TeamShareState>((set, get) => ({
   status: EMPTY_STATUS,
   loading: false,
   lastError: null,
 
   async refresh(teamId, workspacePath) {
-    if (!isTauri()) return
-    set({ loading: true, lastError: null })
-    try {
-      // Design 2: Tauri uses the user's own fresh session token (not a stale
-      // cached JWT); pass it straight into the FC-calling command.
-      const accessToken = await getFreshAccessToken()
-      const raw = await invoke<ShareStatus>('team_share_get_status', {
-        teamId,
-        workspacePath,
-        accessToken,
-      })
-      set({
-        status: {
+    if (!isTauri()) return { ...EMPTY_STATUS }
+
+    const key = `${teamId}\0${workspacePath}`
+    if (shareRefreshInflight && shareRefreshInflightKey === key) {
+      return shareRefreshInflight
+    }
+
+    shareRefreshInflightKey = key
+    shareRefreshInflight = (async () => {
+      // Keep the previous status visible while loading — clearing to EMPTY here
+      // made TeamSection flip TeamGitConfig ↔ TeamShareSection and spam daemon APIs.
+      set({ loading: true, lastError: null })
+      try {
+        const accessToken = await getFreshAccessToken()
+        const raw = await invoke<ShareStatus>('team_share_get_status', {
+          teamId,
+          workspacePath,
+          accessToken,
+        })
+        const next = normalizeShareStatus({
           mode: (raw?.mode ?? null) as ShareMode,
           gitRemoteUrl: raw?.gitRemoteUrl ?? null,
           gitAuthKind: raw?.gitAuthKind ?? null,
           enabledAt: raw?.enabledAt ?? null,
           linkStatus: raw?.linkStatus,
           globalPath: raw?.globalPath ?? null,
-        },
-      })
-    } catch (e) {
-      set({ lastError: String(e) })
-    } finally {
-      set({ loading: false })
-    }
+        })
+        set({ status: next })
+        return next
+      } catch (e) {
+        set({ lastError: String(e), status: { ...EMPTY_STATUS } })
+        return { ...EMPTY_STATUS }
+      } finally {
+        set({ loading: false })
+        shareRefreshInflight = null
+        shareRefreshInflightKey = null
+      }
+    })()
+
+    return shareRefreshInflight
   },
 
   async enableOss(teamId, workspacePath, teamSecretHex) {

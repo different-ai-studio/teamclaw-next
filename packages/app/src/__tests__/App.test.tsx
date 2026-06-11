@@ -289,19 +289,19 @@ describe('App', () => {
     expect(screen.getByText('settings')).toBeInTheDocument()
   })
 
-  it('opens knowledge in the right panel (not the left dock) in default layout', () => {
+  it('opens files in the right panel (not the left dock) in default layout', () => {
     workspaceStoreState.workspacePath = '/workspace'
     workspaceStoreState.isPanelOpen = true
-    workspaceStoreState.activeTab = 'knowledge'
+    workspaceStoreState.activeTab = 'files'
 
     render(<App />)
 
-    // Knowledge no longer triggers the left dock — the "Back to sidebar"
+    // Files no longer triggers the left dock — the "Back to sidebar"
     // chrome only appears for shortcuts.
     expect(screen.queryByTitle('Back to sidebar')).toBeNull()
   })
 
-  it('shows a header Knowledge icon in default layout', () => {
+  it('shows a header files icon in default layout', () => {
     workspaceStoreState.workspacePath = '/workspace'
 
     const { container } = render(<App />)

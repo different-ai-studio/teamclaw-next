@@ -8,7 +8,12 @@ import { TeamShareSection } from './team/TeamShareSection'
 import { useTeamModeStore } from '@/stores/team-mode'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { useTeamShareStore } from '@/stores/team-share'
+import {
+  useTeamShareStore,
+  isShareModeLocked,
+  type ShareStatus,
+  type ShareMode,
+} from '@/stores/team-share'
 import { isTauri } from '@/lib/utils'
 import { useTeamPermissions } from '@/lib/team-permissions'
 
@@ -88,45 +93,63 @@ export function TeamSection() {
   const teamModeType = useTeamModeStore((s) => s.teamModeType)
   const teamId = useCurrentTeamStore((s) => s.team?.id ?? null)
   const workspacePath = useWorkspaceStore((s) => s.workspacePath)
-  const shareMode = useTeamShareStore((s) => s.status.mode)
   const refreshShare = useTeamShareStore((s) => s.refresh)
   const { isOwner } = useTeamPermissions()
 
-  // Resolve the FC share mode before deciding which page to render. Without
-  // this, a configured team starts with shareMode === null and would flash the
-  // onboarding wizard until some child component happened to refresh — which
-  // read like "it jumped back to setup". Gate the decision on shareResolved so
-  // we show a spinner instead of the wrong screen during that window.
-  const [shareResolved, setShareResolved] = React.useState(false)
+  // Route from the FC refresh result — never from a stale zustand snapshot left
+  // over from another team or a prior session (that was showing Git "Connected"
+  // while share_mode was unset on the server).
+  const [resolvedShare, setResolvedShare] = React.useState<
+    ShareStatus | 'pending' | 'idle'
+  >('idle')
   React.useEffect(() => {
     if (!teamId || !workspacePath || !isTauri()) {
-      setShareResolved(true)
+      setResolvedShare('idle')
       return
     }
     let cancelled = false
-    setShareResolved(false)
-    void refreshShare(teamId, workspacePath).finally(() => {
-      if (!cancelled) setShareResolved(true)
-    })
+    setResolvedShare('pending')
+    void refreshShare(teamId, workspacePath)
+      .then((status) => {
+        if (!cancelled) setResolvedShare(status)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setResolvedShare({
+            mode: null,
+            gitRemoteUrl: null,
+            gitAuthKind: null,
+            enabledAt: null,
+          })
+        }
+      })
     return () => {
       cancelled = true
     }
   }, [teamId, workspacePath, refreshShare])
 
+  const shareResolved = resolvedShare !== 'pending' && resolvedShare !== 'idle'
+  const shareMode: ShareMode =
+    resolvedShare !== 'pending' && resolvedShare !== 'idle'
+      ? resolvedShare.mode
+      : null
+
   // Two notions of "mode" coexist:
   //   - teamModeType ('git' | 'webdav' | null): legacy, from local teamclaw.json
   //   - shareMode ('oss' | 'managed_git' | 'custom_git' | null): the FC-locked share mode
-  // A team is "already configured" if either source reports a mode. New teams (PR #213
-  // no longer auto-create team-share) report neither — those land in the onboarding wizard.
   //
-  // Route on the FC shareMode first: a team that locked 'oss' via the share-mode
-  // flow has shareMode === 'oss' but its local teamModeType is still null until
-  // the OSS directory is configured locally. Keying isOss on teamModeType alone
-  // sent those freshly-OSS-enabled teams to the Git config form. Fall back to the
-  // legacy teamModeType only when shareMode is absent (older teams).
+  // Only the FC shareMode gates git/managed sync surfaces. Legacy teamModeType === 'git'
+  // must NOT route to TeamGitConfig — the daemon reads share_mode from Cloud API and
+  // sync fails with 422 when it is unset, while the git form misleadingly shows
+  // "Connected". Legacy webdav (teamModeType === 'webdav') still maps to OSS status
+  // for older teams that never migrated to the share-mode flow.
   const isOss =
     shareMode === 'oss' || (shareMode === null && teamModeType === 'webdav')
-  const isConfigured = shareMode !== null || teamModeType !== null
+  const isGitShare =
+    shareMode === 'managed_git' || shareMode === 'custom_git'
+  const isConfigured =
+    isShareModeLocked(shareMode) ||
+    (shareMode === null && teamModeType === 'webdav')
 
   return (
     <div className="space-y-6">
@@ -156,6 +179,7 @@ export function TeamSection() {
             teamId={teamId}
             workspacePath={workspacePath}
             isOwner={isOwner}
+            skipInitialRefresh
           />
         ) : (
           <MissingPrereqNotice teamId={teamId} workspacePath={workspacePath} />

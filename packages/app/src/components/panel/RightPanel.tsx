@@ -3,6 +3,7 @@ import { SessionList } from '@/components/chat/SessionList'
 import { SessionActorPanel } from '@/components/chat/SessionActorSheet'
 import { ShortcutsPanel } from './ShortcutsPanel'
 import { KnowledgeBrowser } from '@/components/knowledge/KnowledgeBrowser'
+import { TeamSharedFilesBrowser } from '@/components/workspace/TeamSharedFilesBrowser'
 import { ActorsView } from '@/components/panel/ActorsView'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useSessionStore } from '@/stores/session'
@@ -14,7 +15,7 @@ import type { ComponentProps } from 'react'
 interface RightPanelProps {
   diff?: FileDiff[]
   // Override the active tab from store
-  defaultTab?: 'diff' | 'session' | 'shortcuts' | 'knowledge' | 'actors'
+  defaultTab?: 'diff' | 'session' | 'shortcuts' | 'files' | 'teamShared' | 'actors'
   // Compact mode for file mode layout
   compact?: boolean
   knowledgeBrowserProps?: ComponentProps<typeof KnowledgeBrowser>
@@ -43,8 +44,11 @@ export function RightPanel({ diff, defaultTab, compact, knowledgeBrowserProps }:
       {activeTab === 'session' && (
         <SessionList compact={compact} />
       )}
-      {activeTab === 'knowledge' && (
+      {activeTab === 'files' && (
         <KnowledgeBrowser {...knowledgeBrowserProps} />
+      )}
+      {activeTab === 'teamShared' && (
+        <TeamSharedFilesBrowser />
       )}
       {activeTab === 'actors' && (
         activeSessionId
