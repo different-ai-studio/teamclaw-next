@@ -61,13 +61,4 @@ declare let webkitSpeechRecognition: { new (): SpeechRecognitionInstance };
 interface Window {
   SpeechRecognition?: typeof SpeechRecognition;
   webkitSpeechRecognition?: typeof webkitSpeechRecognition;
-  __TEAMCLAW_SERVER_CONFIG__?: {
-    backendKind?: "cloud_api";
-    cloudApiUrl?: string;
-    mqttHost?: string;
-    mqttPort?: number;
-    mqttUseTls?: boolean;
-    mqttUsername?: string;
-    mqttPassword?: string;
-  };
 }

@@ -231,10 +231,12 @@ pub fn run() {
     // RAG state for Tauri commands (MCP bridge uses standalone rag-mcp-server; see binaries README)
     let rag_state = commands::knowledge::RagState::default();
 
+    // The Cloud API URL comes solely from the frontend build config now; remove
+    // any deprecated on-disk server config so a stale persisted cloudApiUrl can
+    // never shadow it. Best-effort, non-fatal.
+    commands::server_config::cleanup_deprecated_server_config();
+
     tauri::Builder::default()
-        .append_invoke_initialization_script(
-            commands::server_config::server_config_initialization_script(),
-        )
         .plugin(tauri_plugin_log::Builder::new()
             .level(log::LevelFilter::Info)
             .filter(|metadata| {
@@ -340,8 +342,6 @@ pub fn run() {
             commands::mqtt_bus::mqtt_status,
             commands::oauth_loopback::oauth_loopback_start,
             commands::oauth_loopback::oauth_loopback_await,
-            commands::server_config::get_server_config,
-            commands::server_config::save_server_config,
             commands::filewatcher::watch_directory,
             commands::filewatcher::unwatch_directory,
             commands::filewatcher::unwatch_all,
