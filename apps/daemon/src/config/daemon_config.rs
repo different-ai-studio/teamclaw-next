@@ -204,14 +204,29 @@ fn default_transport_kind() -> TransportKind {
     TransportKind::Mqtt
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentsConfig {
+    /// When true (default), amuxd probes the host for agent binaries on start
+    /// and writes missing `[agents.*]` sections to `daemon.toml`.
+    #[serde(default = "default_true")]
+    pub auto_discover: bool,
     #[serde(default)]
     pub claude_code: Option<AgentBackendConfig>,
     #[serde(default)]
     pub opencode: Option<AgentBackendConfig>,
     #[serde(default)]
     pub codex: Option<AgentBackendConfig>,
+}
+
+impl Default for AgentsConfig {
+    fn default() -> Self {
+        Self {
+            auto_discover: true,
+            claude_code: None,
+            opencode: None,
+            codex: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

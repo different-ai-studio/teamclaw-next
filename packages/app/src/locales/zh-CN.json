@@ -1814,7 +1814,7 @@
       "disconnectSuccessHint": "已清除云端绑定，可重新选择 OSS / 托管 Git / 自建 Git。",
       "disconnectMigrationRequired": "云端数据库缺少 disable_team_share 迁移。请应用 services/supabase/migrations/20260604120000_disable_team_share.sql 并重新部署 FC。",
       "disconnectSchemaDrift": "Cloud API 架构过旧（缺少 disable_team_share）。请部署最新 FC 与 Supabase 迁移后重试。",
-      "daemonTeamMismatch": "本机 daemon 绑定团队为 {{daemonTeamId}}，当前登录团队为 {{currentTeamId}}。请在设置中重新绑定 daemon 到当前团队后再同步。",
+      "daemonTeamMismatch": "本机 daemon 绑定团队为 {{daemonTeamId}}，当前登录团队为 {{currentTeamId}}。请点击下方「重新绑定到当前团队」后再同步。",
       "desktopOnly": "团队共享目录操作需在桌面客户端中进行",
       "disconnectDesc": "此操作将删除本地团队数据（{{teamclawDir}} 和 {{teamRepoDir}} 目录），无法撤销。",
       "repoGuide": {

@@ -12,12 +12,12 @@ pub mod provider_auth;
 pub mod workspace_control;
 
 pub use daemon_config::{
-    AgentsConfig, ActorConfig, DaemonConfig, DiscordChannel, EmailChannel, FeishuChannel,
-    HttpConfig, KookChannel, MqttConfig, TransportKind, WeChatChannel, WeComChannel,
+    AgentBackendConfig, AgentsConfig, ActorConfig, DaemonConfig, DiscordChannel, EmailChannel,
+    FeishuChannel, HttpConfig, KookChannel, MqttConfig, TransportKind, WeChatChannel, WeComChannel,
 };
 // Constructed only by the test suite (runtime_resolution / server tests).
 #[cfg(test)]
-pub use daemon_config::{AgentBackendConfig, ChannelsConfig};
+pub use daemon_config::ChannelsConfig;
 pub use member_store::{MemberStore, PendingInvite, StoredMember};
 pub use session_store::{SessionStore, StoredSession};
 pub use workspace_store::{AddWorkspaceOutcome, StoredWorkspace, WorkspaceStore};

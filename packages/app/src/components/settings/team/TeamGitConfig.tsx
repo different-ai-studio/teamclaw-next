@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import {
   Users,
   AlertCircle,
+  AlertTriangle,
   RefreshCw,
   CheckCircle2,
   Clock,
@@ -11,10 +12,13 @@ import {
   ChevronRight,
   BookOpen,
   Loader2,
+  RotateCcw,
 } from 'lucide-react'
 import { cn, isTauri } from '@/lib/utils'
+import { DaemonOnboardingWizard } from '@/components/auth/DaemonOnboardingWizard'
 import { TeamSyncPaths } from './TeamSyncPaths'
 import { TeamShareDisconnect } from './TeamShareDisconnect'
+import { useDaemonOnboardingStore } from '@/stores/daemon-onboarding'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { useTeamShareStore } from '@/stores/team-share'
@@ -76,8 +80,22 @@ export function TeamGitConfig() {
   const [syncStatus, setSyncStatus] = React.useState<DaemonSyncStatus | null>(null)
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
   const [repoGuideOpen, setRepoGuideOpen] = React.useState(false)
+  const [daemonTeamId, setDaemonTeamId] = React.useState<string | null>(null)
+  const [rebinding, setRebinding] = React.useState(false)
+  const onboardingStatus = useDaemonOnboardingStore((s) => s.status)
+  const onboardingBusy = useDaemonOnboardingStore((s) => s.busy)
 
   const sharedDirName = TEAM_REPO_DIR
+
+  const refreshDaemonTeamId = React.useCallback(async () => {
+    if (!isTauri()) return
+    try {
+      const id = await invoke<string | null>('get_daemon_team_id')
+      setDaemonTeamId(id ?? null)
+    } catch {
+      setDaemonTeamId(null)
+    }
+  }, [])
 
   const refreshSyncStatus = React.useCallback(async () => {
     if (!workspacePath || !teamId || !isTauri()) return
@@ -102,8 +120,9 @@ export function TeamGitConfig() {
   React.useEffect(() => {
     if (!teamId || !workspacePath || !isTauri()) return
     void refresh(teamId, workspacePath)
+    void refreshDaemonTeamId()
     void refreshSyncStatus()
-  }, [teamId, workspacePath, refresh, refreshSyncStatus])
+  }, [teamId, workspacePath, refresh, refreshDaemonTeamId, refreshSyncStatus])
 
   // Poll while the daemon reports an in-flight sync (e.g. background timer clone).
   React.useEffect(() => {
@@ -122,7 +141,8 @@ export function TeamGitConfig() {
         : t('settings.team.teamRepo', 'Team Shared Directory')
 
   const daemonSyncing = syncing || (syncStatus?.syncing ?? false)
-  const combinedError = errorMessage ?? syncStatus?.lastError ?? null
+  const teamMismatch = !!daemonTeamId && !!teamId && daemonTeamId !== teamId
+  const combinedError = teamMismatch ? null : (errorMessage ?? syncStatus?.lastError ?? null)
 
   // ─── Sync flow — daemon-owned; the proxy only needs workspacePath ─────────
 
@@ -135,16 +155,9 @@ export function TeamGitConfig() {
     setErrorMessage(null)
     try {
       const { invoke } = await import('@tauri-apps/api/core')
-      const daemonTeamId = await invoke<string | null>('get_daemon_team_id')
-      if (daemonTeamId && teamId && daemonTeamId !== teamId) {
-        setErrorMessage(
-          t('settings.team.daemonTeamMismatch', {
-            daemonTeamId,
-            currentTeamId: teamId,
-            defaultValue:
-              `Local daemon is bound to team ${daemonTeamId}, but you are signed in as ${teamId}. Re-bind the daemon to the current team in settings, then sync again.`,
-          }),
-        )
+      const boundTeamId = await invoke<string | null>('get_daemon_team_id')
+      setDaemonTeamId(boundTeamId ?? null)
+      if (boundTeamId && teamId && boundTeamId !== teamId) {
         return
       }
       // Materialize workspace symlink → global copy before sync.
@@ -189,6 +202,49 @@ export function TeamGitConfig() {
 
   return (
     <>
+      {teamMismatch && (
+        <SettingCard className="border-amber-500/30 bg-amber-500/5">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div className="min-w-0 space-y-1.5">
+              <p className="text-[13px] font-medium text-amber-700 dark:text-amber-400">
+                {t('settings.daemonGeneral.teamMismatchTitle', '本机 Daemon 与当前团队不一致')}
+              </p>
+              <p className="text-[12px] leading-5 text-amber-700/80 dark:text-amber-400/80">
+                {t('settings.team.daemonTeamMismatch', {
+                  daemonTeamId,
+                  currentTeamId: teamId,
+                  defaultValue:
+                    `Local daemon is bound to team ${daemonTeamId}, but you are signed in as ${teamId}. Click "Rebind to current team" below, then sync again.`,
+                })}
+              </p>
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-0.5 pt-0.5 text-[11px]">
+                <dt className="text-amber-700/70 dark:text-amber-400/70">
+                  {t('settings.daemonGeneral.daemonTeam', 'Daemon 团队')}
+                </dt>
+                <dd className="truncate font-mono text-amber-800 dark:text-amber-300">{daemonTeamId}</dd>
+                <dt className="text-amber-700/70 dark:text-amber-400/70">
+                  {t('settings.daemonGeneral.currentTeam', '当前团队')}
+                </dt>
+                <dd className="truncate font-mono text-amber-800 dark:text-amber-300">{teamId}</dd>
+              </dl>
+              <div className="pt-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 border-amber-500/40 bg-transparent text-amber-700 hover:bg-amber-500/10 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200"
+                  onClick={() => setRebinding(true)}
+                  disabled={rebinding}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {t('settings.daemonGeneral.rebind', '重新绑定到当前团队')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </SettingCard>
+      )}
+
       {/* Error Banner */}
       {combinedError && (
         <SettingCard className="bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-950/30 dark:to-rose-950/30 border-red-200 dark:border-red-800">
@@ -276,7 +332,7 @@ export function TeamGitConfig() {
                 variant="outline"
                 size="sm"
                 onClick={() => void performSync()}
-                disabled={daemonSyncing || !workspacePath}
+                disabled={daemonSyncing || !workspacePath || teamMismatch}
                 className="shrink-0 gap-2"
               >
                 <RefreshCw className={cn('h-3 w-3 shrink-0', daemonSyncing && 'animate-spin')} />
@@ -361,6 +417,31 @@ export function TeamGitConfig() {
           </CollapsibleContent>
         </SettingCard>
       </Collapsible>
+
+      {rebinding && (
+        <div className="fixed inset-0 z-50">
+          {onboardingStatus === 'mismatch' && !onboardingBusy && (
+            <button
+              type="button"
+              onClick={() => setRebinding(false)}
+              className="absolute right-5 top-5 z-10 rounded-[8px] px-3 py-1.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-panel hover:text-foreground"
+            >
+              {t('common.cancel', '取消')}
+            </button>
+          )}
+          <DaemonOnboardingWizard
+            onDone={() => {
+              setRebinding(false)
+              void refreshDaemonTeamId()
+              if (teamId && workspacePath) {
+                void refresh(teamId, workspacePath)
+                void refreshSyncStatus()
+              }
+              setPathsRefreshKey((k) => k + 1)
+            }}
+          />
+        </div>
+      )}
     </>
   )
 }

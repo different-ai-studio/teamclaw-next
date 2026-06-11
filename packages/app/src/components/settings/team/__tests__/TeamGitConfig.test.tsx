@@ -81,6 +81,15 @@ vi.mock('./TeamSyncPaths', () => ({
   TeamSyncPaths: () => <div>Team Sync Paths</div>,
 }))
 
+vi.mock('@/components/auth/DaemonOnboardingWizard', () => ({
+  DaemonOnboardingWizard: () => <div data-testid="daemon-onboarding-wizard">wizard</div>,
+}))
+
+vi.mock('@/stores/daemon-onboarding', () => ({
+  useDaemonOnboardingStore: (sel: (s: { status: string; busy: boolean }) => unknown) =>
+    sel({ status: 'idle', busy: false }),
+}))
+
 vi.mock('@/components/ui/button', () => ({
   Button: ({ children, ...props }: any) => <button {...props}>{children}</button>,
 }))
@@ -184,6 +193,29 @@ describe('TeamGitConfig status panel', () => {
         config: { workspacePath: '/workspace-a' },
         force: false,
       })
+    })
+  })
+
+  it('shows a rebind action and disables sync when daemon team mismatches', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_daemon_team_id') return 'daemon-team-old'
+      if (cmd === 'oss_sync_status') {
+        return {
+          mode: 'git',
+          lastSyncAt: null,
+          syncing: false,
+          lastError: null,
+        }
+      }
+      return null
+    })
+
+    render(<TeamGitConfig />)
+
+    await waitFor(() => {
+      expect(screen.getByText('daemon-team-old')).toBeTruthy()
+      expect(screen.getByRole('button', { name: '重新绑定到当前团队' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Sync Now' })).toBeDisabled()
     })
   })
 
