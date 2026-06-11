@@ -3,7 +3,7 @@ import { useMqttReconnectStore } from './mqtt-reconnect'
 
 describe('useMqttReconnectStore', () => {
   beforeEach(() => {
-    useMqttReconnectStore.setState({ nonce: 0, lastError: null })
+    useMqttReconnectStore.setState({ nonce: 0, lastError: null, connected: null })
   })
 
   it('bump increments the reconnect nonce', () => {
@@ -26,5 +26,26 @@ describe('useMqttReconnectStore', () => {
     useMqttReconnectStore.getState().setError('connection timed out')
     useMqttReconnectStore.getState().setError(null)
     expect(useMqttReconnectStore.getState().lastError).toBeNull()
+  })
+
+  it('setConnected updates the shared connection state', () => {
+    useMqttReconnectStore.getState().setConnected(false)
+    expect(useMqttReconnectStore.getState().connected).toBe(false)
+    useMqttReconnectStore.getState().setConnected(true)
+    expect(useMqttReconnectStore.getState().connected).toBe(true)
+  })
+
+  it('setConnected(true) clears a stale error (a successful connect is healthy)', () => {
+    useMqttReconnectStore.getState().setError('bad username or password')
+    useMqttReconnectStore.getState().setConnected(true)
+    expect(useMqttReconnectStore.getState().connected).toBe(true)
+    expect(useMqttReconnectStore.getState().lastError).toBeNull()
+  })
+
+  it('setConnected(false) preserves the error so the reason stays visible', () => {
+    useMqttReconnectStore.getState().setError('connection refused')
+    useMqttReconnectStore.getState().setConnected(false)
+    expect(useMqttReconnectStore.getState().connected).toBe(false)
+    expect(useMqttReconnectStore.getState().lastError).toBe('connection refused')
   })
 })
