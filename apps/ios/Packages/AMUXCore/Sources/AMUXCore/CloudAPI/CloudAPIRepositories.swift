@@ -57,6 +57,12 @@ public actor CloudAPISessionsRepository: SessionsRepository {
         let body = CloudMarkViewedRequest(lastReadMessageId: lastReadMessageId)
         try await client.postVoid("/v1/sessions/\(sessionId)/mark-viewed", body: body)
     }
+
+    public func markSessionUnread(sessionId: String) async throws {
+        // FC resolves the actor from the bearer token; the empty JSON body
+        // just keeps the shared postVoid encoder path.
+        try await client.postVoid("/v1/sessions/\(sessionId)/mark-unread", body: CloudEmptyBody())
+    }
 }
 
 public actor CloudAPISessionIDsRepository: SessionIDsRepository {
@@ -251,6 +257,21 @@ public actor CloudAPIMessagesRepository: MessagesRepository {
             body: body,
             idempotencyKey: input.id
         )
+    }
+
+    public func patch(messageID: String, content: String) async throws {
+        let encoded = messageID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? messageID
+        // FC echoes the updated row; decode it for contract validation but
+        // discard — the caller mutates its local copy from the input.
+        let _: CloudMessage = try await client.patch(
+            "/v1/messages/\(encoded)",
+            body: CloudPatchMessageRequest(content: content)
+        )
+    }
+
+    public func delete(messageID: String) async throws {
+        let encoded = messageID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? messageID
+        try await client.deleteVoid("/v1/messages/\(encoded)")
     }
 }
 
@@ -1139,6 +1160,10 @@ private struct CloudWorkspace: Decodable, Sendable {
 
 private struct CloudMarkViewedRequest: Encodable, Sendable {
     let lastReadMessageId: String?
+}
+
+private struct CloudPatchMessageRequest: Encodable, Sendable {
+    let content: String
 }
 
 private struct CloudInsertMessageRequest<Metadata: Encodable & Sendable>: Encodable, Sendable {

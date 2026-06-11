@@ -35,6 +35,10 @@ public struct SessionDetailView: View {
     @State private var initialAutoScrollSettled: Bool = false
     @State private var isAtBottom: Bool = true
     @State private var scrollProxy: ScrollViewProxy? = nil
+    /// User-prompt bubble currently being edited (drives the edit sheet).
+    @State private var editingEvent: AgentEvent?
+    /// User-prompt bubble pending delete confirmation (drives the dialog).
+    @State private var pendingDeleteEvent: AgentEvent?
     private let nearBottomThreshold: CGFloat = 80
     /// Cached TeamclawService used to lazily build the OutboxSender once
     /// the modelContext (and therefore its container) is available.
@@ -407,6 +411,36 @@ public struct SessionDetailView: View {
                 }
             }
         }
+        .sheet(item: $editingEvent) { event in
+            EditMessageSheet(initialText: event.text ?? "") { newContent in
+                guard let messageID = event.supabaseMessageId else { return }
+                Task {
+                    await viewModel.editUserMessage(
+                        supabaseMessageID: messageID,
+                        newContent: newContent
+                    )
+                }
+            }
+        }
+        .confirmationDialog(
+            "Delete this message?",
+            isPresented: Binding(
+                get: { pendingDeleteEvent != nil },
+                set: { if !$0 { pendingDeleteEvent = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDeleteEvent
+        ) { event in
+            Button("Delete", role: .destructive) {
+                guard let messageID = event.supabaseMessageId else { return }
+                Task {
+                    await viewModel.deleteUserMessage(supabaseMessageID: messageID)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("The message is removed for everyone in this session.")
+        }
         .task {
             // Build & start the outbox sender once the modelContext (and
             // its container) is available. Idempotent — `OutboxSender.start`
@@ -593,7 +627,9 @@ public struct SessionDetailView: View {
                         Task { await sender.retry(messageID: msgID) }
                     }
                 },
-                actorMap: cachedActorMap
+                actorMap: cachedActorMap,
+                onEdit: canModifyMessage(event) ? { editingEvent = event } : nil,
+                onDelete: canModifyMessage(event) ? { pendingDeleteEvent = event } : nil
             )
         case .activeStream(_, let agentID, let runtimeEvents):
             // NavigationLink(destination:) instead of value-based push
@@ -674,6 +710,20 @@ public struct SessionDetailView: View {
         }
     }
 
+    /// Edit/delete are offered only for the signed-in user's own prompts
+    /// that have already landed in the backend — `supabaseMessageId` is the
+    /// PATCH/DELETE routing key, so a still-in-outbox bubble (nil id) has
+    /// nothing to mutate remotely yet. Agent replies and system rows never
+    /// qualify (eventType gate).
+    private func canModifyMessage(_ event: AgentEvent) -> Bool {
+        guard event.eventType == "user_prompt",
+              event.supabaseMessageId != nil,
+              let sender = event.senderActorID, !sender.isEmpty,
+              let me = viewModel.currentHumanActorIDRef, !me.isEmpty
+        else { return false }
+        return sender == me
+    }
+
     private func mentionTargets() -> [MentionTarget] {
         let members = viewModel.memberSheetHumans.map { h in
             MentionTarget(id: h.id, displayName: h.displayName, subtitle: "Member", kind: .member)
@@ -687,6 +737,63 @@ public struct SessionDetailView: View {
             MentionTarget(id: a.id, displayName: a.displayName, subtitle: a.agentType, kind: .agent)
         }
         return agents + members
+    }
+}
+
+// MARK: - EditMessageSheet
+//
+// Minimal Hai editor for rewriting an own prompt: mist canvas, a single
+// paper card holding the TextEditor, Cancel/Save in the nav bar. Save is
+// disabled while the draft trims to empty so the PATCH can never blank a
+// message out.
+
+private struct EditMessageSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: String
+    private let onSave: (String) -> Void
+
+    init(initialText: String, onSave: @escaping (String) -> Void) {
+        _draft = State(initialValue: initialText)
+        self.onSave = onSave
+    }
+
+    private var trimmedDraft: String {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                TextEditor(text: $draft)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.amux.onyx)
+                    .scrollContentBackground(.hidden)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, minHeight: 160, maxHeight: .infinity, alignment: .topLeading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color.amux.paper)
+                    )
+                    .padding(16)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(Color.amux.mist)
+            .navigationTitle("Edit Message")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(trimmedDraft)
+                        dismiss()
+                    }
+                    .disabled(trimmedDraft.isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 

@@ -311,6 +311,87 @@ struct CloudAPIRepositoryTests {
         #expect(workspaces.last?.path == "")
     }
 
+    @Test
+    func markSessionUnreadPostsToMarkUnread() async throws {
+        let recorder = RequestRecorder()
+        let client = CloudAPIClient(
+            configuration: configuration(),
+            accessToken: { "access-token" },
+            send: { request in
+                await recorder.append(request)
+                let url = URL(string: "https://fc.example.com")!
+                let http = try #require(HTTPURLResponse(url: url, statusCode: 204, httpVersion: nil, headerFields: nil))
+                return (Data(), http)
+            }
+        )
+        let repo = CloudAPISessionsRepository(client: client)
+        try await repo.markSessionUnread(sessionId: "session-1")
+
+        let request = try #require(await recorder.requests.first)
+        #expect(request.url?.path == "/v1/sessions/session-1/mark-unread")
+        #expect(request.httpMethod == "POST")
+    }
+
+    @Test
+    func patchMessageSendsContentAndDecodesResponse() async throws {
+        let recorder = RequestRecorder()
+        let client = CloudAPIClient(
+            configuration: configuration(),
+            accessToken: { "access-token" },
+            send: { request in
+                await recorder.append(request)
+                return try response("""
+                {
+                  "id": "message-1",
+                  "teamId": "team-1",
+                  "sessionId": "session-1",
+                  "turnId": null,
+                  "senderActorId": "actor-1",
+                  "replyToMessageId": null,
+                  "kind": "user_message",
+                  "content": "edited",
+                  "metadata": null,
+                  "model": null,
+                  "createdAt": "2026-05-27T10:00:00Z",
+                  "updatedAt": "2026-06-11T10:00:00Z"
+                }
+                """)
+            }
+        )
+        let repo = CloudAPIMessagesRepository(client: client)
+        try await repo.patch(messageID: "message-1", content: "edited")
+
+        let request = try #require(await recorder.requests.first)
+        #expect(request.url?.path == "/v1/messages/message-1")
+        #expect(request.httpMethod == "PATCH")
+        let body = try #require(request.httpBody)
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(json["content"] as? String == "edited")
+        #expect(json.count == 1, "PATCH body must carry only the rewritten content")
+    }
+
+    @Test
+    func deleteMessageUsesDeleteVerb() async throws {
+        let recorder = RequestRecorder()
+        let client = CloudAPIClient(
+            configuration: configuration(),
+            accessToken: { "access-token" },
+            send: { request in
+                await recorder.append(request)
+                let url = URL(string: "https://fc.example.com")!
+                let http = try #require(HTTPURLResponse(url: url, statusCode: 204, httpVersion: nil, headerFields: nil))
+                return (Data(), http)
+            }
+        )
+        let repo = CloudAPIMessagesRepository(client: client)
+        try await repo.delete(messageID: "message-1")
+
+        let request = try #require(await recorder.requests.first)
+        #expect(request.url?.path == "/v1/messages/message-1")
+        #expect(request.httpMethod == "DELETE")
+        #expect(request.httpBody == nil)
+    }
+
     private func configuration() -> CloudAPIConfiguration {
         CloudAPIConfiguration(
             baseURL: URL(string: "https://fc.example.com")!,
