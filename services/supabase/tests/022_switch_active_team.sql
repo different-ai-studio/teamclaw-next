@@ -74,8 +74,9 @@ declare
   v_orgB  uuid;
   v_rt    text;
 begin
-  select auth_user_id into v_uid from public.users limit 1;            -- 复用上面的 fixture 用户
   select id, oid into v_teamB, v_orgB from amux.teams where slug = 'team-b';
+  -- 复用上面的 fixture 用户：经 team-b 的 actor 确定地定位它（不依赖未过滤表上的 limit 1）。
+  select a.user_id into v_uid from amux.actors a where a.team_id = v_teamB;
   select refresh_token into v_rt from public.switch_active_team(v_teamB);
   perform ok(v_rt is not null, 'switch returns a refresh token');
   perform is(
@@ -85,6 +86,8 @@ begin
 end $$;
 
 -- 非成员的 team 调用被拒（42501）。
+-- 注：'…00ff' 是一个故意不存在的 team id —— actor-membership 查询先查不到 actor，
+-- 因而在换 org 前就抛 42501（非成员），覆盖到拒绝路径。
 select ok(
   pg_temp.raises_sqlstate(
     'select public.switch_active_team(''00000000-0000-0000-0000-0000000000ff''::uuid)',

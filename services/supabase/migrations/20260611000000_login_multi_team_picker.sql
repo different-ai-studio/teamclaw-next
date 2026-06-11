@@ -70,11 +70,11 @@ begin
   -- 换 org：把用户的活跃 org 设为该 team 的 org。
   select oid into v_team_org from amux.teams where id = p_team_id;
   if v_team_org is not null then
-    if exists (select 1 from public.users where auth_user_id = v_user_id) then
-      update public.users set org_id = v_team_org, updated_at = now() where auth_user_id = v_user_id;
-    else
-      insert into public.users (auth_user_id, org_id) values (v_user_id, v_team_org);
-    end if;
+    -- 幂等 upsert（race-safe）：仲裁器须带 uq_users_auth_user_id 的 partial 谓词。
+    insert into public.users (auth_user_id, org_id)
+    values (v_user_id, v_team_org)
+    on conflict (auth_user_id) where auth_user_id is not null do update
+      set org_id = excluded.org_id, updated_at = now();
   end if;
 
   v_rt := auth._mint_session(v_user_id);
