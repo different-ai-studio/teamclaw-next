@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { OAuthProvider } from "@/lib/auth";
+import { cancelDesktopOAuth, type OAuthProvider } from "@/lib/auth";
 import {
   BACKEND_CONFIG_MISSING_MESSAGE,
   getBackend,
@@ -28,6 +28,10 @@ interface AuthState {
   // would unmount the upgrade dialog (and reset its open state) mid-request.
   upgradeLoading: boolean;
   authFlow: AuthFlow;
+  // Which OAuth provider is mid-flight (browser open, loopback awaiting), if any.
+  // Drives a cancel affordance so a broken provider page doesn't leave every
+  // sign-in button disabled until the long loopback timeout.
+  oauthPending: OAuthProvider | null;
   errorMessage: string | null;
   otpEmail: string | null;
   otpPhone: string | null;
@@ -40,6 +44,7 @@ interface AuthState {
   resetOtp: () => void;
   signInAnonymously: () => Promise<boolean>;
   signInWithOAuth: (provider: OAuthProvider) => Promise<boolean>;
+  cancelOAuth: () => void;
   claimInvite: (token: string) => Promise<AuthClaimResult | null>;
   claimInviteAfterAnonymousSignIn: (token: string) => Promise<AuthClaimResult | null>;
   sendUpgradeEmailOtp: (email: string) => Promise<boolean>;
@@ -75,6 +80,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   loading: true,
   upgradeLoading: false,
   authFlow: "idle",
+  oauthPending: null,
   errorMessage: null,
   otpEmail: null,
   otpPhone: null,
@@ -184,15 +190,30 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ loading: false, errorMessage: BACKEND_CONFIG_MISSING_MESSAGE });
       return false;
     }
-    set({ loading: true, authFlow: "idle", errorMessage: null });
+    set({ loading: true, authFlow: "idle", errorMessage: null, oauthPending: provider });
     try {
       const session = await getBackend().auth.signInWithOAuth(provider);
-      set({ session: storeSession(session), loading: false, otpEmail: null });
+      set({ session: storeSession(session), loading: false, otpEmail: null, oauthPending: null });
     } catch (error) {
-      set({ loading: false, errorMessage: errorMessageFor(error) });
+      // A user-initiated cancel is not an error to surface — just re-enable the
+      // controls. friendlyError tags cancellations with code "oauth_cancelled".
+      const cancelled =
+        error instanceof Error &&
+        (error as { code?: string }).code === "oauth_cancelled";
+      set({
+        loading: false,
+        oauthPending: null,
+        errorMessage: cancelled ? null : errorMessageFor(error),
+      });
       return false;
     }
     return true;
+  },
+  cancelOAuth: () => {
+    if (!get().oauthPending) return;
+    // Fire-and-forget: the loopback abort makes the in-flight signInWithOAuth
+    // promise reject with oauth_cancelled, whose catch block resets the state.
+    void cancelDesktopOAuth();
   },
   claimInvite: async (token) => {
     if (!hasBackendConfig()) {

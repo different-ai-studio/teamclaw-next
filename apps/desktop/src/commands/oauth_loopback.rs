@@ -4,6 +4,13 @@
 //! that accepts a single connection, parses `?code=` (or `?error=`) from the
 //! request line, replies with a small HTML page, and hands the result back via
 //! a oneshot channel. `oauth_loopback_await` awaits that result with a timeout.
+//!
+//! `oauth_loopback_cancel` lets the UI abort an in-flight attempt (e.g. the user
+//! returned from a broken provider page) instead of being stuck behind the long
+//! await timeout. The accept-task abort handle lives in the state separately
+//! from the result receiver so cancel can fire it even while `await` holds the
+//! receiver: aborting the task drops its sender, which makes the awaiting
+//! receiver resolve with a recv error that maps to `oauth_cancelled`.
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -22,14 +29,13 @@ const ERROR_HTML: &str =
      <body style=\"font-family:system-ui;text-align:center;padding-top:18vh\">\
      <h2>登录失败 / Sign-in failed</h2><p>请返回 TeamClaw 重试。<br>Please return to TeamClaw and try again.</p></body>";
 
-type Pending = (
-    oneshot::Receiver<Result<String, String>>,
-    tokio::task::AbortHandle,
-);
-
 #[derive(Default)]
 pub struct OAuthLoopbackState {
-    pending: Mutex<Option<Pending>>,
+    /// Result receiver for the current attempt. Taken by `await`.
+    pending: Mutex<Option<oneshot::Receiver<Result<String, String>>>>,
+    /// Abort handle for the parked accept() task. Kept here (not bundled into
+    /// `pending`) so `cancel` can fire it while `await` holds the receiver.
+    accept_task: Mutex<Option<tokio::task::AbortHandle>>,
 }
 
 #[derive(serde::Serialize)]
@@ -59,11 +65,12 @@ pub async fn oauth_loopback_start(
     });
     // Replace any in-flight listener (e.g. a prior cancelled attempt) and abort
     // its task so we don't leak a parked accept() / bound port across retries.
-    if let Some((_, prev)) = state
-        .pending
+    state.pending.lock().unwrap().replace(rx);
+    if let Some(prev) = state
+        .accept_task
         .lock()
         .unwrap()
-        .replace((rx, handle.abort_handle()))
+        .replace(handle.abort_handle())
     {
         prev.abort();
     }
@@ -74,8 +81,9 @@ pub async fn oauth_loopback_start(
 pub async fn oauth_loopback_await(
     state: State<'_, OAuthLoopbackState>,
 ) -> Result<LoopbackCode, String> {
-    let (rx, abort) = {
+    let rx = {
         // Drop the guard before awaiting — never hold a std Mutex across .await.
+        // Leave `accept_task` in place so `cancel` can still abort us.
         state
             .pending
             .lock()
@@ -83,16 +91,32 @@ pub async fn oauth_loopback_await(
             .take()
             .ok_or_else(|| "oauth_no_pending".to_string())?
     };
-    match tokio::time::timeout(Duration::from_secs(300), rx).await {
-        Err(_) => {
-            // Timed out — abort the parked accept() task so the port is freed.
-            abort.abort();
-            Err("oauth_timeout".to_string())
-        }
+    let outcome = match tokio::time::timeout(Duration::from_secs(300), rx).await {
+        Err(_) => Err("oauth_timeout".to_string()),
+        // Sender dropped without a value — almost always `cancel`/`start` aborted
+        // the accept() task.
         Ok(Err(_)) => Err("oauth_cancelled".to_string()),
         Ok(Ok(Err(e))) => Err(e),
-        Ok(Ok(Ok(code))) => Ok(LoopbackCode { code }),
+        Ok(Ok(Ok(code))) => Ok(code),
+    };
+    // The attempt is over: abort the parked accept() task (if any) so the port is
+    // freed, and clear the handle so a later stray cancel can't hit a new flow.
+    if let Some(handle) = state.accept_task.lock().unwrap().take() {
+        handle.abort();
     }
+    outcome.map(|code| LoopbackCode { code })
+}
+
+/// Abort the in-flight OAuth attempt so a blocked `await` returns immediately as
+/// `oauth_cancelled`. Safe to call when nothing is pending (no-op).
+#[tauri::command]
+pub async fn oauth_loopback_cancel(state: State<'_, OAuthLoopbackState>) -> Result<(), String> {
+    if let Some(handle) = state.accept_task.lock().unwrap().take() {
+        handle.abort();
+    }
+    // Drop any not-yet-awaited receiver too, so a fresh start is clean.
+    state.pending.lock().unwrap().take();
+    Ok(())
 }
 
 async fn accept_one(listener: TcpListener) -> Result<String, String> {
@@ -212,5 +236,25 @@ mod tests {
             parse_callback_target("/callback"),
             Err("oauth_no_code".to_string())
         );
+    }
+
+    // The cancel path relies on this invariant: aborting the accept() task drops
+    // its sender, so the awaiting receiver resolves to a recv error which
+    // `oauth_loopback_await` maps to `oauth_cancelled`.
+    #[tokio::test]
+    async fn aborting_accept_task_resolves_receiver_as_cancelled() {
+        let (tx, rx) = oneshot::channel::<Result<String, String>>();
+        let handle = tokio::spawn(async move {
+            // Park forever, like a real accept() waiting for a callback.
+            std::future::pending::<()>().await;
+            let _ = tx.send(Ok("never".to_string()));
+        });
+        handle.abort();
+        let mapped = match tokio::time::timeout(Duration::from_secs(5), rx).await {
+            Err(_) => "oauth_timeout",
+            Ok(Err(_)) => "oauth_cancelled",
+            Ok(Ok(_)) => "resolved",
+        };
+        assert_eq!(mapped, "oauth_cancelled");
     }
 }

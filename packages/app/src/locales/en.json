@@ -123,6 +123,8 @@
     "orContinueWith": "or continue with",
     "signInWithGoogle": "Sign in with Google",
     "signInWithWechat": "Sign in with WeChat",
+    "oauthWaiting": "Finish signing in in your browser, then come back.",
+    "oauthCancel": "Cancel and try another way",
     "upgrade": {
       "title": "Upgrade account",
       "desc": "Verify your email to upgrade your anonymous session.",
