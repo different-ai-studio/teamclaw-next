@@ -14,12 +14,20 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Runtime};
 
 const DEFAULT_REPO_OWNER: &str = "different-ai-studio";
-const DEFAULT_REPO_NAME: &str = "teamclaw";
+const DEFAULT_REPO_NAME: &str = "teamclaw-next";
 const DEFAULT_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFEMDg3REY5MEI2RDAyMzMKUldRekFtMEwrWDBJSFhTdHYvbStkclEvTEVRNFlpZExxSHNTSTA2V2ZHS0xPUEZ4WnF5d2RxQ0gK";
 const APP_USER_AGENT: &str = concat!("teamclaw-updater/", env!("CARGO_PKG_VERSION"));
 
-fn get_updater_endpoint() -> Option<&'static str> {
-    option_env!("UPDATER_ENDPOINT")
+fn has_custom_endpoints() -> bool {
+    custom_endpoint_list().next().is_some()
+}
+
+fn custom_endpoint_list() -> impl Iterator<Item = &'static str> {
+    option_env!("UPDATER_ENDPOINTS")
+        .into_iter()
+        .flat_map(|raw| raw.split(','))
+        .map(str::trim)
+        .filter(|endpoint| !endpoint.is_empty())
 }
 
 fn get_updater_pubkey() -> &'static str {
@@ -112,6 +120,55 @@ fn current_target() -> &'static str {
         #[cfg(target_arch = "aarch64")]
         return "windows-aarch64";
     }
+}
+
+/// Fetch manifests from every configured endpoint and return the newest version.
+async fn fetch_newest_manifest_from_endpoints(
+    client: &reqwest::Client,
+    endpoints: impl IntoIterator<Item = &'static str>,
+) -> Result<UpdateManifest, String> {
+    let mut best: Option<UpdateManifest> = None;
+    let mut last_err = String::new();
+
+    for endpoint in endpoints {
+        match fetch_manifest_from_endpoint(client, endpoint).await {
+            Ok(manifest) => {
+                let remote_version = match Version::parse(&manifest.version) {
+                    Ok(version) => version,
+                    Err(e) => {
+                        last_err = format!(
+                            "Invalid remote version '{}' from {}: {}",
+                            manifest.version, endpoint, e
+                        );
+                        continue;
+                    }
+                };
+
+                let replace = match &best {
+                    None => true,
+                    Some(current) => Version::parse(&current.version)
+                        .map(|current_version| remote_version > current_version)
+                        .unwrap_or(true),
+                };
+
+                if replace {
+                    best = Some(manifest);
+                }
+            }
+            Err(e) => {
+                log::warn!("Updater endpoint {} failed: {}", endpoint, e);
+                last_err = e;
+            }
+        }
+    }
+
+    best.ok_or_else(|| {
+        if last_err.is_empty() {
+            "No updater endpoints configured".to_string()
+        } else {
+            format!("All updater endpoints failed; last error: {}", last_err)
+        }
+    })
 }
 
 /// Fetch update manifest directly from configured endpoint
@@ -526,10 +583,10 @@ pub async fn check_update<R: Runtime>(app: AppHandle<R>) -> Result<Option<Update
     let current_version = app.package_info().version.clone();
     let target = current_target();
 
-    // Check if custom endpoint is configured (from build.config.json)
-    let manifest = if let Some(endpoint) = get_updater_endpoint() {
-        // Mode 1: Fetch from custom endpoint directly
-        fetch_manifest_from_endpoint(&client, endpoint).await?
+    // Check if custom endpoints are configured (from build.config.json)
+    let manifest = if has_custom_endpoints() {
+        // Mode 1: Fetch from configured endpoints; pick the newest manifest.
+        fetch_newest_manifest_from_endpoints(&client, custom_endpoint_list()).await?
     } else {
         // Mode 2: Fetch from GitHub API (fallback)
         let token = match get_token() {
@@ -570,7 +627,7 @@ pub async fn check_update<R: Runtime>(app: AppHandle<R>) -> Result<Option<Update
 
     // For custom endpoint mode, use the URL directly from manifest
     // For GitHub mode, we need to map to API asset URL
-    let download_url = if get_updater_endpoint().is_some() {
+    let download_url = if has_custom_endpoints() {
         // Custom endpoint: use URL as-is (should be direct download URL)
         platform.url.clone()
     } else {
@@ -618,7 +675,7 @@ pub async fn download_and_install_update<R: Runtime>(
         .map_err(|e| format!("Cannot create HTTP client: {}", e))?;
 
     // 1. Download the binary with progress reporting
-    let bytes = if get_updater_endpoint().is_some() {
+    let bytes = if has_custom_endpoints() {
         // Custom endpoint mode: direct HTTP download
         download_file_with_progress(&app, &client, &download_url).await?
     } else {

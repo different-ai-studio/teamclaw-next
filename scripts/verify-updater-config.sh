@@ -16,13 +16,27 @@ if [ ! -f "build.config.json" ]; then
 fi
 echo "✓ build.config.json found"
 
-# Check updater endpoint configuration
-ENDPOINT=$(jq -r '.app.updater.endpoint // empty' build.config.json)
-if [ -z "$ENDPOINT" ]; then
-    echo "❌ Updater endpoint not configured in build.config.json"
+# Collect updater endpoints (singular legacy field or endpoints array)
+ENDPOINTS=()
+while IFS= read -r endpoint; do
+    if [ -n "$endpoint" ]; then
+        ENDPOINTS+=("$endpoint")
+    fi
+done < <(
+    jq -r '
+        (.app.updater.endpoint // empty),
+        (.app.updater.endpoints[]? // empty)
+    ' build.config.json | awk '!seen[$0]++'
+)
+
+if [ "${#ENDPOINTS[@]}" -eq 0 ]; then
+    echo "❌ Updater endpoints not configured in build.config.json"
     exit 1
 fi
-echo "✓ Updater endpoint configured: $ENDPOINT"
+echo "✓ Updater endpoints configured (${#ENDPOINTS[@]}):"
+for endpoint in "${ENDPOINTS[@]}"; do
+    echo "  - $endpoint"
+done
 
 # Check updater pubkey configuration
 PUBKEY=$(jq -r '.app.updater.pubkey // empty' build.config.json)
@@ -32,28 +46,35 @@ if [ -z "$PUBKEY" ]; then
 fi
 echo "✓ Updater pubkey configured"
 
-# Check endpoint is reachable
+# Check endpoint reachability and pick the newest manifest version
 echo
 echo "Testing endpoint connectivity..."
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$ENDPOINT" || echo "000")
-if [ "$HTTP_CODE" = "200" ]; then
-    echo "✓ Endpoint is reachable (HTTP $HTTP_CODE)"
-elif [ "$HTTP_CODE" = "000" ]; then
-    echo "⚠ Could not connect to endpoint (network error)"
-else
-    echo "⚠ Endpoint returned HTTP $HTTP_CODE"
-fi
+BEST_VERSION=""
+BEST_ENDPOINT=""
+for endpoint in "${ENDPOINTS[@]}"; do
+    HTTP_CODE=$(curl -s -o /tmp/updater-manifest.json -w "%{http_code}" "$endpoint" || echo "000")
+    if [ "$HTTP_CODE" = "200" ]; then
+        echo "✓ Endpoint reachable (HTTP $HTTP_CODE): $endpoint"
+        VERSION=$(jq -r '.version // empty' /tmp/updater-manifest.json)
+        if [ -n "$VERSION" ]; then
+            echo "  Latest version: $VERSION"
+            if [ -z "$BEST_VERSION" ] || [ "$(printf '%s\n' "$BEST_VERSION" "$VERSION" | sort -V | tail -1)" = "$VERSION" ]; then
+                BEST_VERSION="$VERSION"
+                BEST_ENDPOINT="$endpoint"
+            fi
+        else
+            echo "  ⚠ Could not parse manifest version"
+        fi
+    elif [ "$HTTP_CODE" = "000" ]; then
+        echo "⚠ Could not connect to endpoint: $endpoint"
+    else
+        echo "⚠ Endpoint returned HTTP $HTTP_CODE: $endpoint"
+    fi
+done
 
-# Validate manifest format
-echo
-echo "Validating manifest format..."
-MANIFEST=$(curl -s "$ENDPOINT" 2>/dev/null || echo "{}")
-VERSION=$(echo "$MANIFEST" | jq -r '.version // empty')
-if [ -n "$VERSION" ]; then
-    echo "✓ Manifest is valid JSON"
-    echo "  Latest version: $VERSION"
-else
-    echo "⚠ Could not parse manifest or version not found"
+if [ -n "$BEST_VERSION" ]; then
+    echo
+    echo "Newest manifest across endpoints: v$BEST_VERSION ($BEST_ENDPOINT)"
 fi
 
 echo
