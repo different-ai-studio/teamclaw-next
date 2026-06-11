@@ -256,6 +256,13 @@ export function createPgAuthRepository(
     },
 
     // --- Plan 5 ---
+    // switchActiveTeam: cross-org active-team switching depends on the org model
+    // (public.orgs + public.users.org_id + the GoTrue access-token hook), which
+    // only exists on the supabase backend.
+    async switchActiveTeam() {
+      throw new ApiError(501, "not_implemented", "switch active team requires the supabase backend");
+    },
+
     // claimInvite(token, { userId? }):
     //   member branch: requires a userId (existing Better-Auth user); inserts
     //     actor(member) + member(active) + team_member; refreshToken = null.

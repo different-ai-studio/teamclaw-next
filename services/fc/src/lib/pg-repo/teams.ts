@@ -38,6 +38,11 @@ export function makeTeamsRepo(
       const rows = await db.select().from(teams).orderBy(asc(teams.createdAt)).limit(limit);
       return rows.map(mapTeam);
     },
+    // Cross-org team listing depends on the org model (public.orgs + the
+    // teams_org_guard bypass), which only exists on the supabase backend.
+    async listAllMyTeams() {
+      throw new ApiError(501, "not_implemented", "cross-org team listing requires the supabase backend");
+    },
     async getTeam(teamId: string) {
       const [r] = await db.select().from(teams).where(eq(teams.id, teamId)).limit(1);
       return r ? mapTeam(r) : null;
