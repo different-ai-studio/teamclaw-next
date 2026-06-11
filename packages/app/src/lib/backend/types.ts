@@ -44,6 +44,9 @@ export interface AuthBackend {
   sendUpgradeEmailOtp(email: string): Promise<void>;
   /** Confirm the OTP and finalize the upgrade. */
   verifyUpgradeEmailOtp(email: string, code: string): Promise<AuthSession | null>;
+  /** Install a session minted server-side (e.g. by activateTeam) from its
+   *  refresh token, so the client adopts a fresh JWT (new org_id). */
+  adoptSession(refreshToken: string): Promise<AuthSession | null>;
 }
 
 export interface SessionListEntry {
@@ -290,6 +293,14 @@ export interface TeamSummary {
   created_at?: string | null;
 }
 
+export interface MembershipTeam {
+  id: string;
+  name: string;
+  slug?: string | null;
+  orgId?: string | null;
+  orgName?: string | null;
+}
+
 export interface TeamInviteResult {
   token: string;
   inviteUrl?: string | null;
@@ -338,6 +349,8 @@ export interface TeamsBackend {
   renameTeam(teamId: string, name: string): Promise<TeamSummary>;
   createTeamInvite(input: TeamInviteInput): Promise<TeamInviteResult>;
   removeTeamActor(teamId: string, actorId: string): Promise<void>;
+  listAllMyTeams(): Promise<MembershipTeam[]>;
+  activateTeam(teamId: string): Promise<{ actorId: string | null; teamId: string; refreshToken: string }>;
 }
 
 export interface IdeaRow {
