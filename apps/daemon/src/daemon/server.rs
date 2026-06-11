@@ -1310,19 +1310,44 @@ impl DaemonServer {
         }
 
         // Advertise supported agent backend types on the cloud `agents` row
-        // once (background). Routing identity is the actor_id; no separate
-        // device-id upsert.
+        // (background, with retries). Routing identity is the actor_id; no
+        // separate device-id upsert.
         {
             let sb = self.backend.clone();
             let supported_agent_types = supported_agent_type_names(&self.config);
             let default_agent_type =
                 default_advertised_agent_type(&supported_agent_types);
             tokio::spawn(async move {
-                if let Err(e) = sb
-                    .ensure_agent_types(&supported_agent_types, &default_agent_type)
-                    .await
-                {
-                    warn!("cloud agents.agent_types advertise failed: {e}");
+                let mut delay = Duration::from_secs(2);
+                for attempt in 1..=12 {
+                    match sb
+                        .ensure_agent_types(&supported_agent_types, &default_agent_type)
+                        .await
+                    {
+                        Ok(()) => {
+                            info!(
+                                types = ?supported_agent_types,
+                                default = %default_agent_type,
+                                "advertised agent backend types to cloud"
+                            );
+                            break;
+                        }
+                        Err(e) if attempt < 12 => {
+                            warn!(
+                                attempt,
+                                error = %e,
+                                "cloud agents.agent_types advertise failed; retrying"
+                            );
+                            tokio::time::sleep(delay).await;
+                            delay = (delay * 2).min(Duration::from_secs(60));
+                        }
+                        Err(e) => {
+                            warn!(
+                                error = %e,
+                                "cloud agents.agent_types advertise failed; giving up after retries"
+                            );
+                        }
+                    }
                 }
             });
         }
