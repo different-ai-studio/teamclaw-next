@@ -139,40 +139,42 @@ export default defineConfig({
     target: process.env.TAURI_PLATFORM === 'windows' ? 'chrome105' : 'safari13',
     // Produce sourcemaps for error reporting
     sourcemap: !!process.env.TAURI_DEBUG,
-    // Chunk splitting strategy
+    // Chunk splitting strategy (Vite 8 / Rolldown requires manualChunks as a function)
     rollupOptions: {
       // tauri-plugin-mcp is dev-only (linked from .tauri-plugin-mcp/, gitignored)
       external: ['tauri-plugin-mcp'],
       output: {
-        manualChunks: {
-          // React runtime - stable, long-cache
-          'react-vendor': ['react', 'react-dom'],
-          // Radix UI primitives
-          'radix': [
-            '@radix-ui/react-dialog',
-            '@radix-ui/react-dropdown-menu',
-            '@radix-ui/react-popover',
-            '@radix-ui/react-scroll-area',
-            '@radix-ui/react-select',
-            '@radix-ui/react-tooltip',
-            '@radix-ui/react-collapsible',
-            '@radix-ui/react-avatar',
-            '@radix-ui/react-separator',
-            '@radix-ui/react-slot',
-          ],
-          // Markdown rendering
-          'markdown': ['react-markdown', 'remark-gfm'],
-          // Tauri APIs — loaded async, not needed for skeleton
-          'tauri': [
-            '@tauri-apps/api',
-            '@tauri-apps/plugin-fs',
-            '@tauri-apps/plugin-shell',
-            '@tauri-apps/plugin-dialog',
-            '@tauri-apps/plugin-notification',
-            '@tauri-apps/plugin-process',
-          ],
-          // i18n runtime
-          'i18n': ['i18next', 'react-i18next'],
+        manualChunks(id) {
+          const groups: Record<string, string[]> = {
+            'react-vendor': ['react', 'react-dom'],
+            radix: [
+              '@radix-ui/react-dialog',
+              '@radix-ui/react-dropdown-menu',
+              '@radix-ui/react-popover',
+              '@radix-ui/react-scroll-area',
+              '@radix-ui/react-select',
+              '@radix-ui/react-tooltip',
+              '@radix-ui/react-collapsible',
+              '@radix-ui/react-avatar',
+              '@radix-ui/react-separator',
+              '@radix-ui/react-slot',
+            ],
+            markdown: ['react-markdown', 'remark-gfm'],
+            tauri: [
+              '@tauri-apps/api',
+              '@tauri-apps/plugin-fs',
+              '@tauri-apps/plugin-shell',
+              '@tauri-apps/plugin-dialog',
+              '@tauri-apps/plugin-notification',
+              '@tauri-apps/plugin-process',
+            ],
+            i18n: ['i18next', 'react-i18next'],
+          }
+          for (const [chunk, pkgs] of Object.entries(groups)) {
+            for (const pkg of pkgs) {
+              if (id.includes(`/node_modules/${pkg}/`)) return chunk
+            }
+          }
         },
       },
     },

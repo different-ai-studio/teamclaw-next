@@ -145,8 +145,6 @@ export function TeamSection() {
   // for older teams that never migrated to the share-mode flow.
   const isOss =
     shareMode === 'oss' || (shareMode === null && teamModeType === 'webdav')
-  const isGitShare =
-    shareMode === 'managed_git' || shareMode === 'custom_git'
   const isConfigured =
     isShareModeLocked(shareMode) ||
     (shareMode === null && teamModeType === 'webdav')
