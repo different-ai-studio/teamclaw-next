@@ -99,6 +99,13 @@
   },
   "auth": {
     "tagline": "AI Ally · AI 搭档",
+    "teamBootstrapError": {
+      "title": "工作区初始化未完成",
+      "subtitle": "你已登录，但我们无法创建或加载团队，应用暂时无法继续。这通常是临时的服务器问题。",
+      "retry": "重试",
+      "retrying": "正在重试…",
+      "signOut": "退出登录，换个账号"
+    },
     "signIn": "登录",
     "willEmailCode": "我们将向你的邮箱发送 6 位验证码。",
     "email": "邮箱",

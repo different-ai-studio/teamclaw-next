@@ -99,6 +99,13 @@
   },
   "auth": {
     "tagline": "AI Ally · AI Teammate",
+    "teamBootstrapError": {
+      "title": "Couldn't finish setting up your workspace",
+      "subtitle": "You're signed in, but we couldn't create or load a team, so the app can't continue. This is usually a temporary server issue.",
+      "retry": "Retry",
+      "retrying": "Retrying…",
+      "signOut": "Sign out and use another account"
+    },
     "signIn": "Sign in",
     "willEmailCode": "We'll email you a 6-digit code.",
     "email": "Email",
