@@ -11,18 +11,23 @@ import { LoginScreen } from "./LoginScreen";
 import { SetupWizard } from "@/components/auth/SetupWizard";
 import { useSetupStore, setupPreviouslySatisfied } from "@/stores/setup";
 import { DaemonOnboardingWizard } from "@/components/auth/DaemonOnboardingWizard";
+import { TeamBootstrapErrorScreen } from "@/components/auth/TeamBootstrapErrorScreen";
 import { useDaemonOnboardingStore } from "@/stores/daemon-onboarding";
+import { humanizeFcError } from "@/lib/fc-error";
 import { markStartup } from "@/lib/startup-perf";
 
 interface AuthGateProps {
   children: React.ReactNode;
 }
 
-type BootstrapState = "idle" | "checking" | "ready";
+type BootstrapState = "idle" | "checking" | "ready" | "error";
 
 export function AuthGate({ children }: AuthGateProps) {
-  const { session, loading, authFlow, hydrate } = useAuthStore();
+  const { session, loading, authFlow, hydrate, signOut } = useAuthStore();
   const [bootstrap, setBootstrap] = useState<BootstrapState>("idle");
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [bootstrapNonce, setBootstrapNonce] = useState(0);
+  const [retrying, setRetrying] = useState(false);
   const [authHydrated, setAuthHydrated] = useState(false);
   const bootstrappedUserId = useRef<string | null>(null);
 
@@ -76,6 +81,8 @@ export function AuthGate({ children }: AuthGateProps) {
     if (!session) {
       bootstrappedUserId.current = null;
       setBootstrap("idle");
+      setBootstrapError(null);
+      setRetrying(false);
       return;
     }
     if (!isTauri()) {
@@ -108,6 +115,8 @@ export function AuthGate({ children }: AuthGateProps) {
     setBootstrap("checking");
 
     void (async () => {
+      let teamSet = false;
+      let bootErr: unknown = null;
       try {
         const teams = await getBackend().teams.listCurrentUserTeams({ limit: 1 });
         markStartup("team-list:end");
@@ -121,14 +130,12 @@ export function AuthGate({ children }: AuthGateProps) {
             name: existing.name,
             slug: existing.slug ?? "",
           });
-          return;
-        }
-
-        const name = generateRandomTeamName();
-        try {
+          teamSet = true;
+        } else {
           // Seed the owner's display name from their real identity (OS full
           // name / email prefix) so they don't land as "You". Omitting it lets
           // the server synthesize a stable handle.
+          const name = generateRandomTeamName();
           const displayName = await resolveDefaultDisplayName(session?.user?.email);
           const created = await getBackend().teams.createTeam({ name, displayName });
           if (created?.id) {
@@ -137,19 +144,40 @@ export function AuthGate({ children }: AuthGateProps) {
               name: created.name,
               slug: created.slug ?? "",
             });
+            teamSet = true;
+            console.log("[AuthGate] auto-created team", name);
+          } else {
+            bootErr = new Error("create_team returned no team id");
           }
-          console.log("[AuthGate] auto-created team", name);
-        } catch (createErr) {
-          console.warn("[AuthGate] auto create_team failed", createErr);
         }
       } catch (err) {
-        console.warn("[AuthGate] team bootstrap threw", err);
-      } finally {
+        bootErr = err;
+        console.warn("[AuthGate] team bootstrap failed", err);
+      }
+      markStartup("team-bootstrap:end");
+      setRetrying(false);
+      if (teamSet) {
+        setBootstrapError(null);
         setBootstrap("ready");
-        markStartup("team-bootstrap:end");
+      } else {
+        // No current team means the app can't continue — daemon onboarding,
+        // sessions and the actor directory are all team-scoped. Surface the
+        // failure with a retry instead of silently dropping into an empty,
+        // half-broken shell (the previous behavior swallowed this error).
+        setBootstrapError(humanizeFcError(bootErr));
+        setBootstrap("error");
       }
     })();
-  }, [loading, session]);
+  }, [loading, session, bootstrapNonce]);
+
+  const retryBootstrap = () => {
+    // Re-arm the per-user ref guard and bump the nonce so the bootstrap effect
+    // runs again. `retrying` keeps the error screen up (with a spinner) instead
+    // of flashing back to the skeleton while the retry is in flight.
+    bootstrappedUserId.current = null;
+    setRetrying(true);
+    setBootstrapNonce((n) => n + 1);
+  };
 
   // Each gate below either (a) is a pure-loading state — return null so the
   // static #skeleton (z-9999, mirrors the real shell) keeps showing through an
@@ -186,6 +214,20 @@ export function AuthGate({ children }: AuthGateProps) {
 
   if (loading) {
     return null;
+  }
+
+  // Team bootstrap failed (e.g. createTeam rejected by a drifted backend).
+  // Surface it with a retry; `retrying` keeps this up while a retry re-resolves.
+  if (isTauri() && (bootstrap === "error" || retrying)) {
+    removeStartupSkeleton();
+    return (
+      <TeamBootstrapErrorScreen
+        error={bootstrapError}
+        busy={retrying}
+        onRetry={retryBootstrap}
+        onSignOut={() => void signOut()}
+      />
+    );
   }
 
   if (isTauri() && bootstrap !== "ready") {
