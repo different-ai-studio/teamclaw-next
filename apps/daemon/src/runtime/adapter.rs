@@ -1160,7 +1160,7 @@ fn should_use_claude_agent_acp_wrapper(binary: &str) -> bool {
 /// appended as fallbacks, and duplicates are removed preserving first
 /// occurrence. The extra directories are harmless on platforms where they don't
 /// exist — a non-existent PATH entry is simply skipped during lookup.
-fn enriched_spawn_path(existing: Option<&str>, home: Option<&Path>) -> String {
+pub(crate) fn enriched_spawn_path(existing: Option<&str>, home: Option<&Path>) -> String {
     let mut candidates: Vec<String> = Vec::new();
 
     // Inherited PATH first — preserves whatever the launcher configured.

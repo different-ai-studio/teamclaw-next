@@ -65,6 +65,14 @@ pub mod client_danger {
 }
 
 impl MqttClient {
+    /// Placeholder client when no broker URL is known yet. `run()` rebuilds the
+    /// real client after token/bootstrap succeed.
+    pub fn new_placeholder(config: &DaemonConfig) -> crate::error::Result<Self> {
+        let mut pending = config.clone();
+        pending.mqtt.broker_url = "mqtt://127.0.0.1:1883".to_string();
+        Self::new(&pending, &config.actor.id, "")
+    }
+
     pub fn new(config: &DaemonConfig, actor_id: &str, token: &str) -> crate::error::Result<Self> {
         let client_id = format!(
             "amuxd-{}",

@@ -77,6 +77,20 @@ pub(crate) fn agent_type_from_name(name: &str) -> Option<amux::AgentType> {
     }
 }
 
+/// Cloud-facing default backend. Option 3: always prefer opencode when it is
+/// among the supported backends, regardless of section order in daemon.toml.
+pub(crate) fn default_advertised_agent_type(supported_types: &[String]) -> String {
+    if supported_types.iter().any(|s| s == "opencode") {
+        "opencode".to_string()
+    } else if supported_types.iter().any(|s| s == "claude") {
+        "claude".to_string()
+    } else if supported_types.iter().any(|s| s == "codex") {
+        "codex".to_string()
+    } else {
+        "claude".to_string()
+    }
+}
+
 pub(crate) fn supported_agent_type_names(config: &DaemonConfig) -> Vec<String> {
     let mut names = Vec::new();
     if config.agents.claude_code.is_some() {
@@ -312,6 +326,19 @@ mod tests {
         };
 
         assert_eq!(session_message_model_override(&message), None);
+    }
+
+    #[test]
+    fn default_advertised_agent_type_prefers_opencode() {
+        assert_eq!(
+            default_advertised_agent_type(&["claude".into(), "opencode".into()]),
+            "opencode"
+        );
+        assert_eq!(
+            default_advertised_agent_type(&["claude".into(), "codex".into()]),
+            "claude"
+        );
+        assert_eq!(default_advertised_agent_type(&[]), "claude");
     }
 
     #[test]

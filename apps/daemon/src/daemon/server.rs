@@ -25,8 +25,9 @@ use crate::daemon::runtime_cursor::{
     messages_strictly_after_cursor, slice_has_actionable_inbound,
 };
 use crate::daemon::runtime_resolution::{
-    agent_type_from_name, resolve_requested_agent_type, runtime_start_initial_model_override,
-    session_message_model_override, supported_agent_type_names,
+    agent_type_from_name, default_advertised_agent_type, resolve_requested_agent_type,
+    runtime_start_initial_model_override, session_message_model_override,
+    supported_agent_type_names,
 };
 use crate::daemon::session_events::{
     format_idea_prompt, message_attachment_urls, parse_mention_actor_ids, resolve_mention_actor_ids,
@@ -335,13 +336,51 @@ async fn apply_bootstrap_overrides(
     }
 
     if config.mqtt.broker_url.trim().is_empty() {
-        return Err(crate::error::AmuxError::Config(
-            "Cloud API did not provision an MQTT broker (/v1/config/bootstrap returned no mqtt) \
-             and no invite `?broker=` override was supplied; cannot start"
-                .to_string(),
-        ));
+        warn!(
+            "no MQTT broker configured (bootstrap fetch failed or invite had no `?broker=`); \
+             HTTP/local control plane will start and MQTT/collab will retry once a broker is known"
+        );
     }
     Ok(())
+}
+
+/// Warn when `daemon.toml` and `backend.toml` disagree on routing identity.
+/// Auth always uses `backend.toml`; MQTT topics and session routing use
+/// `daemon.toml` `[actor].id` — a mismatch breaks collab even if tokens work.
+fn warn_config_identity_mismatch(config: &DaemonConfig, backend: &Arc<dyn Backend>) {
+    if let Some(team_id) = config.team_id.as_deref() {
+        if team_id != backend.team_id() {
+            warn!(
+                daemon_team_id = %team_id,
+                backend_team_id = %backend.team_id(),
+                "daemon.toml team_id does not match backend.toml; run `amuxd init` to re-onboard"
+            );
+        }
+    }
+    if config.actor.id != backend.actor_id() {
+        warn!(
+            daemon_actor_id = %config.actor.id,
+            backend_actor_id = %backend.actor_id(),
+            "daemon.toml [actor].id does not match backend.toml actor_id; run `amuxd init` to re-onboard"
+        );
+    }
+}
+
+/// Best-effort first access token. Failure must not block startup — `run()`
+/// retries indefinitely before each MQTT connect.
+async fn initial_access_token(backend: &Arc<dyn Backend>) -> String {
+    match backend.auth_token().await {
+        Ok(token) => token,
+        Err(e) => {
+            warn!(
+                error = %e,
+                "initial Cloud API token fetch failed; HTTP/local control plane will start \
+                 and MQTT/collab will retry in the main loop (re-run `amuxd init` if the refresh \
+                 token is invalid)"
+            );
+            String::new()
+        }
+    }
 }
 
 impl DaemonServer {
@@ -362,19 +401,22 @@ impl DaemonServer {
 
         let actor_id = backend.actor_id().to_string();
 
-        // Fetch first token — fails fast if CloudApi is unreachable at startup.
-        // Idea 5's outer loop handles retries on every subsequent reconnect.
-        let token = backend.auth_token().await.map_err(|e| {
-            crate::error::AmuxError::Config(format!("initial token fetch failed: {e}"))
-        })?;
+        warn_config_identity_mismatch(&config, &backend);
+
+        // Best-effort token — `run()`'s outer loop retries before MQTT connect.
+        let token = initial_access_token(&backend).await;
 
         // Authoritative: resolve the MQTT broker from /v1/config/bootstrap.
-        // There is no hardcoded fallback — if the Cloud API delivers no broker
-        // and the invite carried no `?broker=` override, this fails fast with a
-        // clear error rather than connecting to a stale/empty broker.
+        // When bootstrap is unreachable, keep any invite `?broker=` override in
+        // daemon.toml and continue in degraded mode (HTTP/local APIs stay up).
         apply_bootstrap_overrides(&backend, &mut config).await?;
 
-        let mqtt = MqttClient::new(&config, &actor_id, &token)?;
+        let mqtt = if config.mqtt.broker_url.trim().is_empty() {
+            warn!("deferring MQTT client until broker URL is configured");
+            MqttClient::new_placeholder(&config)?
+        } else {
+            MqttClient::new(&config, &actor_id, &token)?
+        };
 
         let mut launch_configs = RuntimeManager::default_launch_configs();
         if let Some(claude) = config.agents.claude_code.as_ref() {
@@ -1254,10 +1296,8 @@ impl DaemonServer {
         {
             let sb = self.backend.clone();
             let supported_agent_types = supported_agent_type_names(&self.config);
-            let default_agent_type = supported_agent_types
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "claude".to_string());
+            let default_agent_type =
+                default_advertised_agent_type(&supported_agent_types);
             tokio::spawn(async move {
                 if let Err(e) = sb
                     .ensure_agent_types(&supported_agent_types, &default_agent_type)

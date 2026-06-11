@@ -1,3 +1,4 @@
+mod agent_discover;
 mod backend;
 mod channels;
 mod cli;
@@ -61,7 +62,10 @@ fn main() -> anyhow::Result<()> {
                 .init();
 
             let config_path = config.unwrap_or_else(config::DaemonConfig::default_path);
-            let daemon_config = config::DaemonConfig::load(&config_path)?;
+            let mut daemon_config = config::DaemonConfig::load(&config_path)?;
+            if let Err(e) = agent_discover::discover_and_persist(&mut daemon_config, &config_path) {
+                tracing::warn!("agent auto-discovery failed: {e}");
+            }
 
             let _daemon_lock = cli::process::acquire_daemon_lock()?;
             cli::process::write_pidfile()?;
@@ -201,7 +205,10 @@ fn main() -> anyhow::Result<()> {
                 .init();
 
             let config_path = config.unwrap_or_else(config::DaemonConfig::default_path);
-            let daemon_config = config::DaemonConfig::load(&config_path)?;
+            let mut daemon_config = config::DaemonConfig::load(&config_path)?;
+            if let Err(e) = agent_discover::discover_and_persist(&mut daemon_config, &config_path) {
+                tracing::warn!("agent auto-discovery failed: {e}");
+            }
 
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
