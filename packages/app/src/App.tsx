@@ -87,7 +87,7 @@ import {
   streamActorIdFromLiveEvent,
 } from "@/lib/teamclaw-events";
 import { handleAcpPermissionRequest } from "@/lib/teamclaw/handle-acp-permission-request";
-import { handleInboxEnvelope } from "@/lib/inbox-handler";
+import { handleInboxEnvelope, scheduleSessionListRefresh } from "@/lib/inbox-handler";
 import {
   bumpSessionListLastMessage,
   messageKindUpdatesSessionPreview,
@@ -1196,12 +1196,19 @@ function AppContent() {
               !parkedAgentReply &&
               messageKindUpdatesSessionPreview(decoded.message.kind)
             ) {
-              const createdAtSec = Number(decoded.message.createdAt);
-              bumpSessionListLastMessage(sid, decoded.message.content, {
-                at: Number.isFinite(createdAtSec) && createdAtSec > 0
-                  ? new Date(createdAtSec * 1000).toISOString()
-                  : undefined,
-              });
+              const listStore = useSessionListStore.getState();
+              const sessionInList = listStore.rows.some((r) => r.id === sid);
+              if (sessionInList) {
+                const createdAtSec = Number(decoded.message.createdAt);
+                bumpSessionListLastMessage(sid, decoded.message.content, {
+                  at: Number.isFinite(createdAtSec) && createdAtSec > 0
+                    ? new Date(createdAtSec * 1000).toISOString()
+                    : undefined,
+                });
+              } else {
+                // Invited to a new session: bump is a no-op until the row exists.
+                scheduleSessionListRefresh(() => listStore.loadFirstPage());
+              }
             }
 
             // Write ALL incoming messages into the unified `message` table
@@ -1299,11 +1306,18 @@ function AppContent() {
                 description: tu.description,
                 params: tu.params,
                 toolKind: tu.toolKind,
+                content: tu.content,
+                locations: tu.locations,
+                acpStatus: tu.acpStatus,
+                rawInput: tu.rawInput,
               });
               // Capture skill invocations for local stats + cloud leaderboard.
               // tu.toolName is "skill" for Skill tool calls; tu.params.name is
               // the skill slug (e.g. "sentry-fix").
-              if (tu.toolName === "skill" && tu.params?.name) {
+              if (
+                (tu.toolName === "skill" || tu.params?.description === "skill") &&
+                tu.params?.name
+              ) {
                 const wp = useWorkspaceStore.getState().workspacePath;
                 if (wp) {
                   void useLocalStatsStore.getState().incrementSkillUsage(wp, tu.params.name);
@@ -1327,6 +1341,8 @@ function AppContent() {
                 toolId: tr.toolId,
                 success: tr.success,
                 summary: tr.summary,
+                content: tr.content,
+                rawOutput: tr.rawOutput,
               });
               syncPlanFromTodoToolResult(sid, actorId, {
                 toolId: tr.toolId,

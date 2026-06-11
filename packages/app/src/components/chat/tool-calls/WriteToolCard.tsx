@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Loader2,
@@ -43,13 +43,6 @@ export function WriteToolCard({ toolCall }: { toolCall: ToolCall }) {
 
   const args = toolCall.arguments as Record<string, unknown>;
   const filePath = extractFilePath(args);
-
-  // Debug: log arguments to find the actual structure
-  useEffect(() => {
-    if (!filePath && args && Object.keys(args).length > 0) {
-      console.log("[WriteToolCard] args keys:", Object.keys(args), "full:", args);
-    }
-  }, [filePath, args]);
 
   // Content can come from arguments (when complete) or from result (during streaming)
   const argsContent = String(args?.contents || args?.content || "");

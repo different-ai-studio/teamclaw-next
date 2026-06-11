@@ -20,6 +20,64 @@
 use crate::proto::amux;
 use crate::proto::teamclaw::MessageKind;
 
+fn tool_use_metadata(tu: &amux::AcpToolUse) -> String {
+    serde_json::json!({
+        "tool_id": tu.tool_id,
+        "tool_name": tu.tool_name,
+        "tool_kind": tu.tool_kind,
+        "description": tu.description,
+        "params": tu.params,
+        "raw_input_json": tu.raw_input_json,
+        "status": tu.status,
+        "locations": tu
+            .locations
+            .iter()
+            .map(|loc| {
+                serde_json::json!({
+                    "path": loc.path,
+                    "line": loc.line,
+                })
+            })
+            .collect::<Vec<_>>(),
+        "content": proto_tool_content_json(&tu.content),
+    })
+    .to_string()
+}
+
+fn tool_result_metadata(tr: &amux::AcpToolResult) -> String {
+    serde_json::json!({
+        "tool_id": tr.tool_id,
+        "success": tr.success,
+        "raw_output_json": tr.raw_output_json,
+        "content": proto_tool_content_json(&tr.content),
+    })
+    .to_string()
+}
+
+fn proto_tool_content_json(content: &[amux::AcpToolCallContent]) -> Vec<serde_json::Value> {
+    content
+        .iter()
+        .filter_map(|item| {
+            Some(match item.payload.as_ref()? {
+                amux::acp_tool_call_content::Payload::Text(text) => serde_json::json!({
+                    "type": "text",
+                    "text": text.text,
+                }),
+                amux::acp_tool_call_content::Payload::Diff(diff) => serde_json::json!({
+                    "type": "diff",
+                    "path": diff.path,
+                    "old_text": diff.old_text,
+                    "new_text": diff.new_text,
+                }),
+                amux::acp_tool_call_content::Payload::Terminal(terminal) => serde_json::json!({
+                    "type": "terminal",
+                    "terminal_id": terminal.terminal_id,
+                }),
+            })
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmittedMessage {
     pub kind: MessageKind,
@@ -75,17 +133,10 @@ impl TurnAggregator {
                 self.turn_had_activity = true;
                 self.flush_thinking_into(&mut out);
                 self.flush_reply_into(&mut out);
-                let metadata = serde_json::json!({
-                    "tool_id": tu.tool_id,
-                    "tool_name": tu.tool_name,
-                    "tool_kind": tu.tool_kind,
-                    "description": tu.description,
-                    "params": tu.params,
-                })
-                .to_string();
+                let metadata = tool_use_metadata(tu);
                 out.push(EmittedMessage {
                     kind: MessageKind::AgentToolCall,
-                    content: format!("{}: {}", tu.tool_name, tu.description),
+                    content: tu.tool_name.clone(),
                     metadata_json: metadata,
                     turn_id: self.current_turn_id.clone().unwrap_or_default(),
                 });
@@ -93,11 +144,7 @@ impl TurnAggregator {
             Some(amux::acp_event::Event::ToolResult(tr)) => {
                 self.ensure_turn_started();
                 self.turn_had_activity = true;
-                let metadata = serde_json::json!({
-                    "tool_id": tr.tool_id,
-                    "success": tr.success,
-                })
-                .to_string();
+                let metadata = tool_result_metadata(tr);
                 out.push(EmittedMessage {
                     kind: MessageKind::AgentToolResult,
                     content: tr.summary.clone(),
@@ -226,6 +273,10 @@ mod tests {
                 description: desc.into(),
                 params: Default::default(),
                 tool_kind: String::new(),
+                raw_input_json: String::new(),
+                content: vec![],
+                locations: vec![],
+                status: String::new(),
             })),
             model: String::new(),
         }
@@ -247,6 +298,10 @@ mod tests {
                     .map(|(key, value)| (key.to_string(), value.to_string()))
                     .collect(),
                 tool_kind: String::new(),
+                raw_input_json: String::new(),
+                content: vec![],
+                locations: vec![],
+                status: String::new(),
             })),
             model: String::new(),
         }
@@ -258,6 +313,8 @@ mod tests {
                 tool_id: id.into(),
                 success,
                 summary: summary.into(),
+                raw_output_json: String::new(),
+                content: vec![],
             })),
             model: String::new(),
         }

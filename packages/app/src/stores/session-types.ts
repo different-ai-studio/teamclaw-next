@@ -55,11 +55,19 @@ export interface ToolCall {
   name: string;
   /** ACP ToolKind as snake_case: "read"|"edit"|"delete"|"move"|"search"|"execute"|"think"|"fetch"|"switch_mode"|"other" */
   toolKind?: string;
+  /** ACP tool call status on the wire (pending|in_progress|completed|failed). */
+  acpStatus?: string;
   status: "calling" | "completed" | "failed" | "waiting";
   arguments: Record<string, unknown>;
   result?: unknown;
   duration?: number;
   startTime: Date;
+  /** ACP ToolCallContent blocks (text / diff / terminal). */
+  content?: import("@/components/chat/tool-calls/tool-call-content").ToolCallContentBlock[];
+  /** ACP ToolCallLocation follow-along paths. */
+  locations?: Array<{ path: string; line?: number }>;
+  rawInput?: unknown;
+  rawOutput?: unknown;
   permission?: ToolCallPermission;
   // For question tool
   questions?: Question[];

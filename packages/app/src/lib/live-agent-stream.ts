@@ -3,6 +3,8 @@ import { AgentStatus } from "@/lib/proto/amux_pb";
 import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
 import { MessageKind, MessageSchema } from "@/lib/proto/teamclaw_pb";
 import type { AgentStreamEntry } from "@/stores/v2-streaming-store";
+import type { ToolCallContentBlock } from "@/components/chat/tool-calls/tool-call-content";
+import { parseToolContentBlocks } from "@/components/chat/tool-calls/tool-call-content";
 import { deriveAgentReplyContent } from "@/lib/agent-reply-transcript";
 import { agentReplyTextsEquivalent } from "@/lib/agent-reply-text";
 
@@ -10,7 +12,6 @@ export {
   deriveAgentReplyContent,
   joinTextPartsFromParts,
 } from "@/lib/agent-reply-transcript";
-import { resolveWireToolName } from "@/components/chat/tool-calls/tool-call-utils";
 
 export function agentStreamKey(sessionId: string, actorId: string): string {
   return `${sessionId}::${actorId}`;
@@ -214,32 +215,62 @@ function recordFromValue(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function parseJsonValue(value: string): unknown {
+  if (!value.trim()) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function parseWireLocations(raw: Record<string, unknown>): Array<{ path: string; line?: number }> | undefined {
+  const items = Array.isArray(raw.locations) ? raw.locations : [];
+  const out: Array<{ path: string; line?: number }> = [];
+  for (const item of items) {
+    const loc = recordFromValue(item);
+    const path = String(loc.path ?? "");
+    if (!path) continue;
+    const line = typeof loc.line === "number" ? loc.line : undefined;
+    out.push(line !== undefined ? { path, line } : { path });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 export function normalizeToolUseEvent(value: unknown): {
   toolId: string;
   toolName: string;
   description: string;
   params: Record<string, string>;
   toolKind?: string;
+  content?: ToolCallContentBlock[];
+  locations?: Array<{ path: string; line?: number }>;
+  acpStatus?: string;
+  rawInput?: unknown;
 } {
   const raw = recordFromValue(value);
   const description = stringField(raw, "description");
-  const params = {
-    ...parseJsonObject(description),
-    ...paramsField(raw.params),
-  };
+  const wireParams = paramsField(raw.params);
+  const params =
+    Object.keys(wireParams).length > 0
+      ? wireParams
+      : { ...parseJsonObject(description), ...wireParams };
   const toolKind = stringField(raw, "toolKind", "tool_kind");
   const explicitToolName = stringField(raw, "toolName", "tool_name");
-  const resolveParams = { ...params };
-  if (description && !resolveParams.description) {
-    resolveParams.description = description;
-  }
+  const rawInputJson = stringField(raw, "rawInputJson", "raw_input_json");
+  const acpStatus = stringField(raw, "status", "acpStatus");
+  const content = Array.isArray(raw.content) ? parseToolContentBlocks(raw) : undefined;
+  const locations = parseWireLocations(raw);
   return {
     toolId: stringField(raw, "toolId", "tool_id"),
-    toolName:
-      resolveWireToolName(toolKind, explicitToolName || "unknown", resolveParams),
+    toolName: explicitToolName || "unknown",
     description,
     params,
     toolKind: toolKind || undefined,
+    content,
+    locations,
+    acpStatus: acpStatus || undefined,
+    rawInput: parseJsonValue(rawInputJson),
   };
 }
 
@@ -247,13 +278,19 @@ export function normalizeToolResultEvent(value: unknown): {
   toolId: string;
   success: boolean;
   summary: string;
+  content?: ToolCallContentBlock[];
+  rawOutput?: unknown;
 } {
   const raw = recordFromValue(value);
   const success = raw.success === true || raw.success === "true";
+  const rawOutputJson = stringField(raw, "rawOutputJson", "raw_output_json");
+  const content = Array.isArray(raw.content) ? parseToolContentBlocks(raw) : undefined;
   return {
     toolId: stringField(raw, "toolId", "tool_id"),
     success,
     summary: stringField(raw, "summary"),
+    content,
+    rawOutput: parseJsonValue(rawOutputJson),
   };
 }
 

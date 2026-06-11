@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file amux.proto.
  */
 export const file_amux: GenFile = /*@__PURE__*/
-  fileDesc("CgphbXV4LnByb3RvEgRhbXV4ItsBCghFbnZlbG9wZRISCgpydW50aW1lX2lkGAEgASgJEhAKCGFjdG9yX2lkGAIgASgJEhYKDnNvdXJjZV9wZWVyX2lkGAMgASgJEhEKCXRpbWVzdGFtcBgEIAEoAxIQCghzZXF1ZW5jZRgFIAEoBBIPCgd0dXJuX2lkGAYgASgJEiMKCWFjcF9ldmVudBgKIAEoCzIOLmFtdXguQWNwRXZlbnRIABIrCg1zZXNzaW9uX2V2ZW50GAsgASgLMhIuYW11eC5TZXNzaW9uRXZlbnRIAEIJCgdwYXlsb2FkItEBChZSdW50aW1lQ29tbWFuZEVudmVsb3BlEhIKCnJ1bnRpbWVfaWQYASABKAkSEAoIYWN0b3JfaWQYAiABKAkSDwoHcGVlcl9pZBgDIAEoCRISCgpjb21tYW5kX2lkGAQgASgJEhEKCXRpbWVzdGFtcBgFIAEoAxIXCg9zZW5kZXJfYWN0b3JfaWQYBiABKAkSGQoRcmVwbHlfdG9fYWN0b3JfaWQYByABKAkSJQoLYWNwX2NvbW1hbmQYCiABKAsyEC5hbXV4LkFjcENvbW1hbmQi0AMKCEFjcEV2ZW50EiUKCHRoaW5raW5nGAEgASgLMhEuYW11eC5BY3BUaGlua2luZ0gAEiEKBm91dHB1dBgCIAEoCzIPLmFtdXguQWNwT3V0cHV0SAASJAoIdG9vbF91c2UYAyABKAsyEC5hbXV4LkFjcFRvb2xVc2VIABIqCgt0b29sX3Jlc3VsdBgEIAEoCzITLmFtdXguQWNwVG9vbFJlc3VsdEgAEh8KBWVycm9yGAUgASgLMg4uYW11eC5BY3BFcnJvckgAEjgKEnBlcm1pc3Npb25fcmVxdWVzdBgGIAEoCzIaLmFtdXguQWNwUGVybWlzc2lvblJlcXVlc3RIABIuCg1zdGF0dXNfY2hhbmdlGAcgASgLMhUuYW11eC5BY3BTdGF0dXNDaGFuZ2VIABI4ChJhdmFpbGFibGVfY29tbWFuZHMYCSABKAsyGi5hbXV4LkFjcEF2YWlsYWJsZUNvbW1hbmRzSAASKgoLcGxhbl91cGRhdGUYCiABKAsyEy5hbXV4LkFjcFBsYW5VcGRhdGVIABIfCgNyYXcYDyABKAsyEC5hbXV4LkFjcFJhd0pzb25IABINCgVtb2RlbBgQIAEoCUIHCgVldmVudCIbCgtBY3BUaGlua2luZxIMCgR0ZXh0GAEgASgJIi4KCUFjcE91dHB1dBIMCgR0ZXh0GAEgASgJEhMKC2lzX2NvbXBsZXRlGAIgASgIIrUBCgpBY3BUb29sVXNlEg8KB3Rvb2xfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEiwKBnBhcmFtcxgEIAMoCzIcLmFtdXguQWNwVG9vbFVzZS5QYXJhbXNFbnRyeRIRCgl0b29sX2tpbmQYBSABKAkaLQoLUGFyYW1zRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJCCg1BY3BUb29sUmVzdWx0Eg8KB3Rvb2xfaWQYASABKAkSDwoHc3VjY2VzcxgCIAEoCBIPCgdzdW1tYXJ5GAMgASgJIiwKCEFjcEVycm9yEg8KB21lc3NhZ2UYASABKAkSDwoHZGV0YWlscxgCIAEoCSJEChNBY3BQZXJtaXNzaW9uT3B0aW9uEhEKCW9wdGlvbl9pZBgBIAEoCRIMCgRraW5kGAIgASgJEgwKBG5hbWUYAyABKAki5QEKFEFjcFBlcm1pc3Npb25SZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEjYKBnBhcmFtcxgEIAMoCzImLmFtdXguQWNwUGVybWlzc2lvblJlcXVlc3QuUGFyYW1zRW50cnkSKgoHb3B0aW9ucxgFIAMoCzIZLmFtdXguQWNwUGVybWlzc2lvbk9wdGlvbhotCgtQYXJhbXNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIl8KD0FjcFN0YXR1c0NoYW5nZRIlCgpvbGRfc3RhdHVzGAEgASgOMhEuYW11eC5BZ2VudFN0YXR1cxIlCgpuZXdfc3RhdHVzGAIgASgOMhEuYW11eC5BZ2VudFN0YXR1cyJMChNBY3BBdmFpbGFibGVDb21tYW5kEgwKBG5hbWUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSEgoKaW5wdXRfaGludBgDIAEoCSJDChRBY3BBdmFpbGFibGVDb21tYW5kcxIrCghjb21tYW5kcxgBIAMoCzIZLmFtdXguQWNwQXZhaWxhYmxlQ29tbWFuZCIyCgpBY3BSYXdKc29uEg4KBm1ldGhvZBgBIAEoCRIUCgxqc29uX3BheWxvYWQYAiABKAwiNAoNQWNwUGxhblVwZGF0ZRIjCgdlbnRyaWVzGAEgAygLMhIuYW11eC5BY3BQbGFuRW50cnkiQQoMQWNwUGxhbkVudHJ5Eg8KB2NvbnRlbnQYASABKAkSEAoIcHJpb3JpdHkYAiABKAkSDgoGc3RhdHVzGAMgASgJIpcDCgpBY3BDb21tYW5kEioKC3NlbmRfcHJvbXB0GAEgASgLMhMuYW11eC5BY3BTZW5kUHJvbXB0SAASIQoGY2FuY2VsGAIgASgLMg8uYW11eC5BY3BDYW5jZWxIABI0ChBncmFudF9wZXJtaXNzaW9uGAMgASgLMhguYW11eC5BY3BHcmFudFBlcm1pc3Npb25IABIyCg9kZW55X3Blcm1pc3Npb24YBCABKAsyFy5hbXV4LkFjcERlbnlQZXJtaXNzaW9uSAASKgoLc3RhcnRfYWdlbnQYBSABKAsyEy5hbXV4LkFjcFN0YXJ0QWdlbnRIABIoCgpzdG9wX2FnZW50GAYgASgLMhIuYW11eC5BY3BTdG9wQWdlbnRIABIyCg9yZXF1ZXN0X2hpc3RvcnkYByABKAsyFy5hbXV4LkFjcFJlcXVlc3RIaXN0b3J5SAASOwoUcmVxdWVzdF90dXJuX2hpc3RvcnkYCCABKAsyGy5hbXV4LkFjcFJlcXVlc3RUdXJuSGlzdG9yeUgAQgkKB2NvbW1hbmQiUgoRQWNwUmVxdWVzdEhpc3RvcnkSFgoOYWZ0ZXJfc2VxdWVuY2UYASABKAQSEQoJcGFnZV9zaXplGAIgASgNEhIKCnJlcXVlc3RfaWQYAyABKAkiPAoVQWNwUmVxdWVzdFR1cm5IaXN0b3J5Eg8KB3R1cm5faWQYASABKAkSEgoKcmVxdWVzdF9pZBgCIAEoCSJICg1BY3BTZW5kUHJvbXB0EgwKBHRleHQYASABKAkSEAoIbW9kZWxfaWQYAiABKAkSFwoPYXR0YWNobWVudF91cmxzGAMgAygJIgsKCUFjcENhbmNlbCI7ChJBY3BHcmFudFBlcm1pc3Npb24SEgoKcmVxdWVzdF9pZBgBIAEoCRIRCglvcHRpb25faWQYAiABKAkiJwoRQWNwRGVueVBlcm1pc3Npb24SEgoKcmVxdWVzdF9pZBgBIAEoCSKIAQoNQWNwU3RhcnRBZ2VudBIjCgphZ2VudF90eXBlGAEgASgOMg8uYW11eC5BZ2VudFR5cGUSEAoId29ya3RyZWUYAiABKAkSFgoOaW5pdGlhbF9wcm9tcHQYAyABKAkSFAoMd29ya3NwYWNlX2lkGAQgASgJEhIKCnNlc3Npb25faWQYBSABKAkiDgoMQWNwU3RvcEFnZW50It8BCgxTZXNzaW9uRXZlbnQSLwoPcHJvbXB0X2FjY2VwdGVkGAEgASgLMhQuYW11eC5Qcm9tcHRBY2NlcHRlZEgAEi8KD3Byb21wdF9yZWplY3RlZBgCIAEoCzIULmFtdXguUHJvbXB0UmVqZWN0ZWRIABI3ChNwZXJtaXNzaW9uX3Jlc29sdmVkGAMgASgLMhguYW11eC5QZXJtaXNzaW9uUmVzb2x2ZWRIABIrCg1oaXN0b3J5X2JhdGNoGAQgASgLMhIuYW11eC5IaXN0b3J5QmF0Y2hIAEIHCgVldmVudCJxCgxIaXN0b3J5QmF0Y2gSEgoKcmVxdWVzdF9pZBgBIAEoCRIeCgZldmVudHMYAiADKAsyDi5hbXV4LkVudmVsb3BlEhAKCGhhc19tb3JlGAMgASgIEhsKE25leHRfYWZ0ZXJfc2VxdWVuY2UYBCABKAQiJAoOUHJvbXB0QWNjZXB0ZWQSEgoKY29tbWFuZF9pZBgBIAEoCSI0Cg5Qcm9tcHRSZWplY3RlZBISCgpjb21tYW5kX2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSJWChJQZXJtaXNzaW9uUmVzb2x2ZWQSEgoKcmVxdWVzdF9pZBgBIAEoCRIbChNyZXNvbHZlZF9ieV9wZWVyX2lkGAIgASgJEg8KB2dyYW50ZWQYAyABKAgiHAoMQWRkV29ya3NwYWNlEgwKBHBhdGgYASABKAkiJwoPUmVtb3ZlV29ya3NwYWNlEhQKDHdvcmtzcGFjZV9pZBgBIAEoCSJACgxQZWVyQW5ub3VuY2USHAoEcGVlchgBIAEoCzIOLmFtdXguUGVlckluZm8SEgoKYXV0aF90b2tlbhgCIAEoCSIhCgxSZW1vdmVNZW1iZXISEQoJbWVtYmVyX2lkGAEgASgJIkgKDUFjdG9yUHJlc2VuY2USDgoGb25saW5lGAEgASgIEhQKDGRpc3BsYXlfbmFtZRgCIAEoCRIRCgl0aW1lc3RhbXAYAyABKAMiSQoNV29ya3NwYWNlSW5mbxIUCgx3b3Jrc3BhY2VfaWQYASABKAkSDAoEcGF0aBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkiOAoNV29ya3NwYWNlTGlzdBInCgp3b3Jrc3BhY2VzGAEgAygLMhMuYW11eC5Xb3Jrc3BhY2VJbmZvIokECgtSdW50aW1lSW5mbxISCgpydW50aW1lX2lkGAEgASgJEiMKCmFnZW50X3R5cGUYAiABKA4yDy5hbXV4LkFnZW50VHlwZRIQCgh3b3JrdHJlZRgDIAEoCRIOCgZicmFuY2gYBCABKAkSIQoGc3RhdHVzGAUgASgOMhEuYW11eC5BZ2VudFN0YXR1cxISCgpzdGFydGVkX2F0GAYgASgDEhYKDmN1cnJlbnRfcHJvbXB0GAcgASgJEhQKDHdvcmtzcGFjZV9pZBgIIAEoCRIVCg1zZXNzaW9uX3RpdGxlGAkgASgJEhsKE2xhc3Rfb3V0cHV0X3N1bW1hcnkYCiABKAkSFgoOdG9vbF91c2VfY291bnQYCyABKAUSKQoQYXZhaWxhYmxlX21vZGVscxgMIAMoCzIPLmFtdXguTW9kZWxJbmZvEhUKDWN1cnJlbnRfbW9kZWwYDSABKAkSJQoFc3RhdGUYDiABKA4yFi5hbXV4LlJ1bnRpbWVMaWZlY3ljbGUSDQoFc3RhZ2UYDyABKAkSEgoKZXJyb3JfY29kZRgQIAEoCRIVCg1lcnJvcl9tZXNzYWdlGBEgASgJEhQKDGZhaWxlZF9zdGFnZRgSIAEoCRI1ChJhdmFpbGFibGVfY29tbWFuZHMYEyADKAsyGS5hbXV4LkFjcEF2YWlsYWJsZUNvbW1hbmQiLQoJTW9kZWxJbmZvEgoKAmlkGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCSIwCglBZ2VudExpc3QSIwoIcnVudGltZXMYASADKAsyES5hbXV4LlJ1bnRpbWVJbmZvInwKCk1lbWJlckluZm8SEQoJbWVtYmVyX2lkGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCRIeCgRyb2xlGAMgASgOMhAuYW11eC5NZW1iZXJSb2xlEhEKCWpvaW5lZF9hdBgEIAEoAxISCgpkZXBhcnRtZW50GAUgASgJIi8KCk1lbWJlckxpc3QSIQoHbWVtYmVycxgBIAMoCzIQLmFtdXguTWVtYmVySW5mbyKPAQoIUGVlckluZm8SDwoHcGVlcl9pZBgBIAEoCRIRCgltZW1iZXJfaWQYAiABKAkSFAoMZGlzcGxheV9uYW1lGAMgASgJEhMKC2RldmljZV90eXBlGAQgASgJEh4KBHJvbGUYBSABKA4yEC5hbXV4Lk1lbWJlclJvbGUSFAoMY29ubmVjdGVkX2F0GAYgASgDIikKCFBlZXJMaXN0Eh0KBXBlZXJzGAEgAygLMg4uYW11eC5QZWVySW5mbypuCglBZ2VudFR5cGUSFgoSQUdFTlRfVFlQRV9VTktOT1dOEAASGgoWQUdFTlRfVFlQRV9DTEFVREVfQ09ERRABEhcKE0FHRU5UX1RZUEVfT1BFTkNPREUQAhIUChBBR0VOVF9UWVBFX0NPREVYEAMqpAEKC0FnZW50U3RhdHVzEhgKFEFHRU5UX1NUQVRVU19VTktOT1dOEAASGQoVQUdFTlRfU1RBVFVTX1NUQVJUSU5HEAESFwoTQUdFTlRfU1RBVFVTX0FDVElWRRACEhUKEUFHRU5UX1NUQVRVU19JRExFEAMSFgoSQUdFTlRfU1RBVFVTX0VSUk9SEAQSGAoUQUdFTlRfU1RBVFVTX1NUT1BQRUQQBSqsAQoQUnVudGltZUxpZmVjeWNsZRIdChlSVU5USU1FX0xJRkVDWUNMRV9VTktOT1dOEAASHgoaUlVOVElNRV9MSUZFQ1lDTEVfU1RBUlRJTkcQARIcChhSVU5USU1FX0xJRkVDWUNMRV9BQ1RJVkUQAhIcChhSVU5USU1FX0xJRkVDWUNMRV9GQUlMRUQQAxIdChlSVU5USU1FX0xJRkVDWUNMRV9TVE9QUEVEEAQqOwoKTWVtYmVyUm9sZRIVChFNRU1CRVJfUk9MRV9PV05FUhAAEhYKEk1FTUJFUl9ST0xFX01FTUJFUhABYgZwcm90bzM");
+  fileDesc("CgphbXV4LnByb3RvEgRhbXV4ItsBCghFbnZlbG9wZRISCgpydW50aW1lX2lkGAEgASgJEhAKCGFjdG9yX2lkGAIgASgJEhYKDnNvdXJjZV9wZWVyX2lkGAMgASgJEhEKCXRpbWVzdGFtcBgEIAEoAxIQCghzZXF1ZW5jZRgFIAEoBBIPCgd0dXJuX2lkGAYgASgJEiMKCWFjcF9ldmVudBgKIAEoCzIOLmFtdXguQWNwRXZlbnRIABIrCg1zZXNzaW9uX2V2ZW50GAsgASgLMhIuYW11eC5TZXNzaW9uRXZlbnRIAEIJCgdwYXlsb2FkItEBChZSdW50aW1lQ29tbWFuZEVudmVsb3BlEhIKCnJ1bnRpbWVfaWQYASABKAkSEAoIYWN0b3JfaWQYAiABKAkSDwoHcGVlcl9pZBgDIAEoCRISCgpjb21tYW5kX2lkGAQgASgJEhEKCXRpbWVzdGFtcBgFIAEoAxIXCg9zZW5kZXJfYWN0b3JfaWQYBiABKAkSGQoRcmVwbHlfdG9fYWN0b3JfaWQYByABKAkSJQoLYWNwX2NvbW1hbmQYCiABKAsyEC5hbXV4LkFjcENvbW1hbmQi0AMKCEFjcEV2ZW50EiUKCHRoaW5raW5nGAEgASgLMhEuYW11eC5BY3BUaGlua2luZ0gAEiEKBm91dHB1dBgCIAEoCzIPLmFtdXguQWNwT3V0cHV0SAASJAoIdG9vbF91c2UYAyABKAsyEC5hbXV4LkFjcFRvb2xVc2VIABIqCgt0b29sX3Jlc3VsdBgEIAEoCzITLmFtdXguQWNwVG9vbFJlc3VsdEgAEh8KBWVycm9yGAUgASgLMg4uYW11eC5BY3BFcnJvckgAEjgKEnBlcm1pc3Npb25fcmVxdWVzdBgGIAEoCzIaLmFtdXguQWNwUGVybWlzc2lvblJlcXVlc3RIABIuCg1zdGF0dXNfY2hhbmdlGAcgASgLMhUuYW11eC5BY3BTdGF0dXNDaGFuZ2VIABI4ChJhdmFpbGFibGVfY29tbWFuZHMYCSABKAsyGi5hbXV4LkFjcEF2YWlsYWJsZUNvbW1hbmRzSAASKgoLcGxhbl91cGRhdGUYCiABKAsyEy5hbXV4LkFjcFBsYW5VcGRhdGVIABIfCgNyYXcYDyABKAsyEC5hbXV4LkFjcFJhd0pzb25IABINCgVtb2RlbBgQIAEoCUIHCgVldmVudCIbCgtBY3BUaGlua2luZxIMCgR0ZXh0GAEgASgJIi4KCUFjcE91dHB1dBIMCgR0ZXh0GAEgASgJEhMKC2lzX2NvbXBsZXRlGAIgASgIIj8KE0FjcFRvb2xDYWxsTG9jYXRpb24SDAoEcGF0aBgBIAEoCRIRCgRsaW5lGAIgASgNSACIAQFCBwoFX2xpbmUiJgoWQWNwVG9vbENhbGxUZXh0Q29udGVudBIMCgR0ZXh0GAEgASgJIlUKD0FjcFRvb2xDYWxsRGlmZhIMCgRwYXRoGAEgASgJEhUKCG9sZF90ZXh0GAIgASgJSACIAQESEAoIbmV3X3RleHQYAyABKAlCCwoJX29sZF90ZXh0IioKE0FjcFRvb2xDYWxsVGVybWluYWwSEwoLdGVybWluYWxfaWQYASABKAkiowEKEkFjcFRvb2xDYWxsQ29udGVudBIsCgR0ZXh0GAEgASgLMhwuYW11eC5BY3BUb29sQ2FsbFRleHRDb250ZW50SAASJQoEZGlmZhgCIAEoCzIVLmFtdXguQWNwVG9vbENhbGxEaWZmSAASLQoIdGVybWluYWwYAyABKAsyGS5hbXV4LkFjcFRvb2xDYWxsVGVybWluYWxIAEIJCgdwYXlsb2FkIrYCCgpBY3BUb29sVXNlEg8KB3Rvb2xfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEiwKBnBhcmFtcxgEIAMoCzIcLmFtdXguQWNwVG9vbFVzZS5QYXJhbXNFbnRyeRIRCgl0b29sX2tpbmQYBSABKAkSFgoOcmF3X2lucHV0X2pzb24YBiABKAkSKQoHY29udGVudBgHIAMoCzIYLmFtdXguQWNwVG9vbENhbGxDb250ZW50EiwKCWxvY2F0aW9ucxgIIAMoCzIZLmFtdXguQWNwVG9vbENhbGxMb2NhdGlvbhIOCgZzdGF0dXMYCSABKAkaLQoLUGFyYW1zRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASKGAQoNQWNwVG9vbFJlc3VsdBIPCgd0b29sX2lkGAEgASgJEg8KB3N1Y2Nlc3MYAiABKAgSDwoHc3VtbWFyeRgDIAEoCRIXCg9yYXdfb3V0cHV0X2pzb24YBCABKAkSKQoHY29udGVudBgFIAMoCzIYLmFtdXguQWNwVG9vbENhbGxDb250ZW50IiwKCEFjcEVycm9yEg8KB21lc3NhZ2UYASABKAkSDwoHZGV0YWlscxgCIAEoCSJEChNBY3BQZXJtaXNzaW9uT3B0aW9uEhEKCW9wdGlvbl9pZBgBIAEoCRIMCgRraW5kGAIgASgJEgwKBG5hbWUYAyABKAki5QEKFEFjcFBlcm1pc3Npb25SZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEjYKBnBhcmFtcxgEIAMoCzImLmFtdXguQWNwUGVybWlzc2lvblJlcXVlc3QuUGFyYW1zRW50cnkSKgoHb3B0aW9ucxgFIAMoCzIZLmFtdXguQWNwUGVybWlzc2lvbk9wdGlvbhotCgtQYXJhbXNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIl8KD0FjcFN0YXR1c0NoYW5nZRIlCgpvbGRfc3RhdHVzGAEgASgOMhEuYW11eC5BZ2VudFN0YXR1cxIlCgpuZXdfc3RhdHVzGAIgASgOMhEuYW11eC5BZ2VudFN0YXR1cyJMChNBY3BBdmFpbGFibGVDb21tYW5kEgwKBG5hbWUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSEgoKaW5wdXRfaGludBgDIAEoCSJDChRBY3BBdmFpbGFibGVDb21tYW5kcxIrCghjb21tYW5kcxgBIAMoCzIZLmFtdXguQWNwQXZhaWxhYmxlQ29tbWFuZCIyCgpBY3BSYXdKc29uEg4KBm1ldGhvZBgBIAEoCRIUCgxqc29uX3BheWxvYWQYAiABKAwiNAoNQWNwUGxhblVwZGF0ZRIjCgdlbnRyaWVzGAEgAygLMhIuYW11eC5BY3BQbGFuRW50cnkiQQoMQWNwUGxhbkVudHJ5Eg8KB2NvbnRlbnQYASABKAkSEAoIcHJpb3JpdHkYAiABKAkSDgoGc3RhdHVzGAMgASgJIpcDCgpBY3BDb21tYW5kEioKC3NlbmRfcHJvbXB0GAEgASgLMhMuYW11eC5BY3BTZW5kUHJvbXB0SAASIQoGY2FuY2VsGAIgASgLMg8uYW11eC5BY3BDYW5jZWxIABI0ChBncmFudF9wZXJtaXNzaW9uGAMgASgLMhguYW11eC5BY3BHcmFudFBlcm1pc3Npb25IABIyCg9kZW55X3Blcm1pc3Npb24YBCABKAsyFy5hbXV4LkFjcERlbnlQZXJtaXNzaW9uSAASKgoLc3RhcnRfYWdlbnQYBSABKAsyEy5hbXV4LkFjcFN0YXJ0QWdlbnRIABIoCgpzdG9wX2FnZW50GAYgASgLMhIuYW11eC5BY3BTdG9wQWdlbnRIABIyCg9yZXF1ZXN0X2hpc3RvcnkYByABKAsyFy5hbXV4LkFjcFJlcXVlc3RIaXN0b3J5SAASOwoUcmVxdWVzdF90dXJuX2hpc3RvcnkYCCABKAsyGy5hbXV4LkFjcFJlcXVlc3RUdXJuSGlzdG9yeUgAQgkKB2NvbW1hbmQiUgoRQWNwUmVxdWVzdEhpc3RvcnkSFgoOYWZ0ZXJfc2VxdWVuY2UYASABKAQSEQoJcGFnZV9zaXplGAIgASgNEhIKCnJlcXVlc3RfaWQYAyABKAkiPAoVQWNwUmVxdWVzdFR1cm5IaXN0b3J5Eg8KB3R1cm5faWQYASABKAkSEgoKcmVxdWVzdF9pZBgCIAEoCSJICg1BY3BTZW5kUHJvbXB0EgwKBHRleHQYASABKAkSEAoIbW9kZWxfaWQYAiABKAkSFwoPYXR0YWNobWVudF91cmxzGAMgAygJIgsKCUFjcENhbmNlbCI7ChJBY3BHcmFudFBlcm1pc3Npb24SEgoKcmVxdWVzdF9pZBgBIAEoCRIRCglvcHRpb25faWQYAiABKAkiJwoRQWNwRGVueVBlcm1pc3Npb24SEgoKcmVxdWVzdF9pZBgBIAEoCSKIAQoNQWNwU3RhcnRBZ2VudBIjCgphZ2VudF90eXBlGAEgASgOMg8uYW11eC5BZ2VudFR5cGUSEAoId29ya3RyZWUYAiABKAkSFgoOaW5pdGlhbF9wcm9tcHQYAyABKAkSFAoMd29ya3NwYWNlX2lkGAQgASgJEhIKCnNlc3Npb25faWQYBSABKAkiDgoMQWNwU3RvcEFnZW50It8BCgxTZXNzaW9uRXZlbnQSLwoPcHJvbXB0X2FjY2VwdGVkGAEgASgLMhQuYW11eC5Qcm9tcHRBY2NlcHRlZEgAEi8KD3Byb21wdF9yZWplY3RlZBgCIAEoCzIULmFtdXguUHJvbXB0UmVqZWN0ZWRIABI3ChNwZXJtaXNzaW9uX3Jlc29sdmVkGAMgASgLMhguYW11eC5QZXJtaXNzaW9uUmVzb2x2ZWRIABIrCg1oaXN0b3J5X2JhdGNoGAQgASgLMhIuYW11eC5IaXN0b3J5QmF0Y2hIAEIHCgVldmVudCJxCgxIaXN0b3J5QmF0Y2gSEgoKcmVxdWVzdF9pZBgBIAEoCRIeCgZldmVudHMYAiADKAsyDi5hbXV4LkVudmVsb3BlEhAKCGhhc19tb3JlGAMgASgIEhsKE25leHRfYWZ0ZXJfc2VxdWVuY2UYBCABKAQiJAoOUHJvbXB0QWNjZXB0ZWQSEgoKY29tbWFuZF9pZBgBIAEoCSI0Cg5Qcm9tcHRSZWplY3RlZBISCgpjb21tYW5kX2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSJWChJQZXJtaXNzaW9uUmVzb2x2ZWQSEgoKcmVxdWVzdF9pZBgBIAEoCRIbChNyZXNvbHZlZF9ieV9wZWVyX2lkGAIgASgJEg8KB2dyYW50ZWQYAyABKAgiHAoMQWRkV29ya3NwYWNlEgwKBHBhdGgYASABKAkiJwoPUmVtb3ZlV29ya3NwYWNlEhQKDHdvcmtzcGFjZV9pZBgBIAEoCSJACgxQZWVyQW5ub3VuY2USHAoEcGVlchgBIAEoCzIOLmFtdXguUGVlckluZm8SEgoKYXV0aF90b2tlbhgCIAEoCSIhCgxSZW1vdmVNZW1iZXISEQoJbWVtYmVyX2lkGAEgASgJIkgKDUFjdG9yUHJlc2VuY2USDgoGb25saW5lGAEgASgIEhQKDGRpc3BsYXlfbmFtZRgCIAEoCRIRCgl0aW1lc3RhbXAYAyABKAMiSQoNV29ya3NwYWNlSW5mbxIUCgx3b3Jrc3BhY2VfaWQYASABKAkSDAoEcGF0aBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkiOAoNV29ya3NwYWNlTGlzdBInCgp3b3Jrc3BhY2VzGAEgAygLMhMuYW11eC5Xb3Jrc3BhY2VJbmZvIokECgtSdW50aW1lSW5mbxISCgpydW50aW1lX2lkGAEgASgJEiMKCmFnZW50X3R5cGUYAiABKA4yDy5hbXV4LkFnZW50VHlwZRIQCgh3b3JrdHJlZRgDIAEoCRIOCgZicmFuY2gYBCABKAkSIQoGc3RhdHVzGAUgASgOMhEuYW11eC5BZ2VudFN0YXR1cxISCgpzdGFydGVkX2F0GAYgASgDEhYKDmN1cnJlbnRfcHJvbXB0GAcgASgJEhQKDHdvcmtzcGFjZV9pZBgIIAEoCRIVCg1zZXNzaW9uX3RpdGxlGAkgASgJEhsKE2xhc3Rfb3V0cHV0X3N1bW1hcnkYCiABKAkSFgoOdG9vbF91c2VfY291bnQYCyABKAUSKQoQYXZhaWxhYmxlX21vZGVscxgMIAMoCzIPLmFtdXguTW9kZWxJbmZvEhUKDWN1cnJlbnRfbW9kZWwYDSABKAkSJQoFc3RhdGUYDiABKA4yFi5hbXV4LlJ1bnRpbWVMaWZlY3ljbGUSDQoFc3RhZ2UYDyABKAkSEgoKZXJyb3JfY29kZRgQIAEoCRIVCg1lcnJvcl9tZXNzYWdlGBEgASgJEhQKDGZhaWxlZF9zdGFnZRgSIAEoCRI1ChJhdmFpbGFibGVfY29tbWFuZHMYEyADKAsyGS5hbXV4LkFjcEF2YWlsYWJsZUNvbW1hbmQiLQoJTW9kZWxJbmZvEgoKAmlkGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCSIwCglBZ2VudExpc3QSIwoIcnVudGltZXMYASADKAsyES5hbXV4LlJ1bnRpbWVJbmZvInwKCk1lbWJlckluZm8SEQoJbWVtYmVyX2lkGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCRIeCgRyb2xlGAMgASgOMhAuYW11eC5NZW1iZXJSb2xlEhEKCWpvaW5lZF9hdBgEIAEoAxISCgpkZXBhcnRtZW50GAUgASgJIi8KCk1lbWJlckxpc3QSIQoHbWVtYmVycxgBIAMoCzIQLmFtdXguTWVtYmVySW5mbyKPAQoIUGVlckluZm8SDwoHcGVlcl9pZBgBIAEoCRIRCgltZW1iZXJfaWQYAiABKAkSFAoMZGlzcGxheV9uYW1lGAMgASgJEhMKC2RldmljZV90eXBlGAQgASgJEh4KBHJvbGUYBSABKA4yEC5hbXV4Lk1lbWJlclJvbGUSFAoMY29ubmVjdGVkX2F0GAYgASgDIikKCFBlZXJMaXN0Eh0KBXBlZXJzGAEgAygLMg4uYW11eC5QZWVySW5mbypuCglBZ2VudFR5cGUSFgoSQUdFTlRfVFlQRV9VTktOT1dOEAASGgoWQUdFTlRfVFlQRV9DTEFVREVfQ09ERRABEhcKE0FHRU5UX1RZUEVfT1BFTkNPREUQAhIUChBBR0VOVF9UWVBFX0NPREVYEAMqpAEKC0FnZW50U3RhdHVzEhgKFEFHRU5UX1NUQVRVU19VTktOT1dOEAASGQoVQUdFTlRfU1RBVFVTX1NUQVJUSU5HEAESFwoTQUdFTlRfU1RBVFVTX0FDVElWRRACEhUKEUFHRU5UX1NUQVRVU19JRExFEAMSFgoSQUdFTlRfU1RBVFVTX0VSUk9SEAQSGAoUQUdFTlRfU1RBVFVTX1NUT1BQRUQQBSqsAQoQUnVudGltZUxpZmVjeWNsZRIdChlSVU5USU1FX0xJRkVDWUNMRV9VTktOT1dOEAASHgoaUlVOVElNRV9MSUZFQ1lDTEVfU1RBUlRJTkcQARIcChhSVU5USU1FX0xJRkVDWUNMRV9BQ1RJVkUQAhIcChhSVU5USU1FX0xJRkVDWUNMRV9GQUlMRUQQAxIdChlSVU5USU1FX0xJRkVDWUNMRV9TVE9QUEVEEAQqOwoKTWVtYmVyUm9sZRIVChFNRU1CRVJfUk9MRV9PV05FUhAAEhYKEk1FTUJFUl9ST0xFX01FTUJFUhABYgZwcm90bzM");
 
 /**
  * Downstream: daemon → clients
@@ -285,6 +285,124 @@ export const AcpOutputSchema: GenMessage<AcpOutput> = /*@__PURE__*/
   messageDesc(file_amux, 4);
 
 /**
+ * @generated from message amux.AcpToolCallLocation
+ */
+export type AcpToolCallLocation = Message<"amux.AcpToolCallLocation"> & {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * @generated from field: optional uint32 line = 2;
+   */
+  line?: number | undefined;
+};
+
+/**
+ * Describes the message amux.AcpToolCallLocation.
+ * Use `create(AcpToolCallLocationSchema)` to create a new message.
+ */
+export const AcpToolCallLocationSchema: GenMessage<AcpToolCallLocation> = /*@__PURE__*/
+  messageDesc(file_amux, 5);
+
+/**
+ * @generated from message amux.AcpToolCallTextContent
+ */
+export type AcpToolCallTextContent = Message<"amux.AcpToolCallTextContent"> & {
+  /**
+   * @generated from field: string text = 1;
+   */
+  text: string;
+};
+
+/**
+ * Describes the message amux.AcpToolCallTextContent.
+ * Use `create(AcpToolCallTextContentSchema)` to create a new message.
+ */
+export const AcpToolCallTextContentSchema: GenMessage<AcpToolCallTextContent> = /*@__PURE__*/
+  messageDesc(file_amux, 6);
+
+/**
+ * @generated from message amux.AcpToolCallDiff
+ */
+export type AcpToolCallDiff = Message<"amux.AcpToolCallDiff"> & {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * @generated from field: optional string old_text = 2;
+   */
+  oldText?: string | undefined;
+
+  /**
+   * @generated from field: string new_text = 3;
+   */
+  newText: string;
+};
+
+/**
+ * Describes the message amux.AcpToolCallDiff.
+ * Use `create(AcpToolCallDiffSchema)` to create a new message.
+ */
+export const AcpToolCallDiffSchema: GenMessage<AcpToolCallDiff> = /*@__PURE__*/
+  messageDesc(file_amux, 7);
+
+/**
+ * @generated from message amux.AcpToolCallTerminal
+ */
+export type AcpToolCallTerminal = Message<"amux.AcpToolCallTerminal"> & {
+  /**
+   * @generated from field: string terminal_id = 1;
+   */
+  terminalId: string;
+};
+
+/**
+ * Describes the message amux.AcpToolCallTerminal.
+ * Use `create(AcpToolCallTerminalSchema)` to create a new message.
+ */
+export const AcpToolCallTerminalSchema: GenMessage<AcpToolCallTerminal> = /*@__PURE__*/
+  messageDesc(file_amux, 8);
+
+/**
+ * @generated from message amux.AcpToolCallContent
+ */
+export type AcpToolCallContent = Message<"amux.AcpToolCallContent"> & {
+  /**
+   * @generated from oneof amux.AcpToolCallContent.payload
+   */
+  payload: {
+    /**
+     * @generated from field: amux.AcpToolCallTextContent text = 1;
+     */
+    value: AcpToolCallTextContent;
+    case: "text";
+  } | {
+    /**
+     * @generated from field: amux.AcpToolCallDiff diff = 2;
+     */
+    value: AcpToolCallDiff;
+    case: "diff";
+  } | {
+    /**
+     * @generated from field: amux.AcpToolCallTerminal terminal = 3;
+     */
+    value: AcpToolCallTerminal;
+    case: "terminal";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message amux.AcpToolCallContent.
+ * Use `create(AcpToolCallContentSchema)` to create a new message.
+ */
+export const AcpToolCallContentSchema: GenMessage<AcpToolCallContent> = /*@__PURE__*/
+  messageDesc(file_amux, 9);
+
+/**
  * @generated from message amux.AcpToolUse
  */
 export type AcpToolUse = Message<"amux.AcpToolUse"> & {
@@ -294,13 +412,15 @@ export type AcpToolUse = Message<"amux.AcpToolUse"> & {
   toolId: string;
 
   /**
-   * "Read", "Edit", "Bash", "Write", etc.
+   * ACP session/update title (human or tool id)
    *
    * @generated from field: string tool_name = 2;
    */
   toolName: string;
 
   /**
+   * Deprecated: legacy misuse; clients should ignore
+   *
    * @generated from field: string description = 3;
    */
   description: string;
@@ -319,6 +439,32 @@ export type AcpToolUse = Message<"amux.AcpToolUse"> & {
    * @generated from field: string tool_kind = 5;
    */
   toolKind: string;
+
+  /**
+   * Phase 2 — ACP fidelity fields (additive; empty on older daemons)
+   *
+   * JSON-serialized ACP rawInput
+   *
+   * @generated from field: string raw_input_json = 6;
+   */
+  rawInputJson: string;
+
+  /**
+   * @generated from field: repeated amux.AcpToolCallContent content = 7;
+   */
+  content: AcpToolCallContent[];
+
+  /**
+   * @generated from field: repeated amux.AcpToolCallLocation locations = 8;
+   */
+  locations: AcpToolCallLocation[];
+
+  /**
+   * pending|in_progress|completed|failed
+   *
+   * @generated from field: string status = 9;
+   */
+  status: string;
 };
 
 /**
@@ -326,7 +472,7 @@ export type AcpToolUse = Message<"amux.AcpToolUse"> & {
  * Use `create(AcpToolUseSchema)` to create a new message.
  */
 export const AcpToolUseSchema: GenMessage<AcpToolUse> = /*@__PURE__*/
-  messageDesc(file_amux, 5);
+  messageDesc(file_amux, 10);
 
 /**
  * @generated from message amux.AcpToolResult
@@ -346,6 +492,18 @@ export type AcpToolResult = Message<"amux.AcpToolResult"> & {
    * @generated from field: string summary = 3;
    */
   summary: string;
+
+  /**
+   * JSON-serialized ACP rawOutput
+   *
+   * @generated from field: string raw_output_json = 4;
+   */
+  rawOutputJson: string;
+
+  /**
+   * @generated from field: repeated amux.AcpToolCallContent content = 5;
+   */
+  content: AcpToolCallContent[];
 };
 
 /**
@@ -353,7 +511,7 @@ export type AcpToolResult = Message<"amux.AcpToolResult"> & {
  * Use `create(AcpToolResultSchema)` to create a new message.
  */
 export const AcpToolResultSchema: GenMessage<AcpToolResult> = /*@__PURE__*/
-  messageDesc(file_amux, 6);
+  messageDesc(file_amux, 11);
 
 /**
  * @generated from message amux.AcpError
@@ -375,7 +533,7 @@ export type AcpError = Message<"amux.AcpError"> & {
  * Use `create(AcpErrorSchema)` to create a new message.
  */
 export const AcpErrorSchema: GenMessage<AcpError> = /*@__PURE__*/
-  messageDesc(file_amux, 7);
+  messageDesc(file_amux, 12);
 
 /**
  * Mirrors ACP PermissionOption (session/request_permission).
@@ -406,7 +564,7 @@ export type AcpPermissionOption = Message<"amux.AcpPermissionOption"> & {
  * Use `create(AcpPermissionOptionSchema)` to create a new message.
  */
 export const AcpPermissionOptionSchema: GenMessage<AcpPermissionOption> = /*@__PURE__*/
-  messageDesc(file_amux, 8);
+  messageDesc(file_amux, 13);
 
 /**
  * @generated from message amux.AcpPermissionRequest
@@ -443,7 +601,7 @@ export type AcpPermissionRequest = Message<"amux.AcpPermissionRequest"> & {
  * Use `create(AcpPermissionRequestSchema)` to create a new message.
  */
 export const AcpPermissionRequestSchema: GenMessage<AcpPermissionRequest> = /*@__PURE__*/
-  messageDesc(file_amux, 9);
+  messageDesc(file_amux, 14);
 
 /**
  * @generated from message amux.AcpStatusChange
@@ -465,7 +623,7 @@ export type AcpStatusChange = Message<"amux.AcpStatusChange"> & {
  * Use `create(AcpStatusChangeSchema)` to create a new message.
  */
 export const AcpStatusChangeSchema: GenMessage<AcpStatusChange> = /*@__PURE__*/
-  messageDesc(file_amux, 10);
+  messageDesc(file_amux, 15);
 
 /**
  * @generated from message amux.AcpAvailableCommand
@@ -498,7 +656,7 @@ export type AcpAvailableCommand = Message<"amux.AcpAvailableCommand"> & {
  * Use `create(AcpAvailableCommandSchema)` to create a new message.
  */
 export const AcpAvailableCommandSchema: GenMessage<AcpAvailableCommand> = /*@__PURE__*/
-  messageDesc(file_amux, 11);
+  messageDesc(file_amux, 16);
 
 /**
  * @generated from message amux.AcpAvailableCommands
@@ -515,7 +673,7 @@ export type AcpAvailableCommands = Message<"amux.AcpAvailableCommands"> & {
  * Use `create(AcpAvailableCommandsSchema)` to create a new message.
  */
 export const AcpAvailableCommandsSchema: GenMessage<AcpAvailableCommands> = /*@__PURE__*/
-  messageDesc(file_amux, 12);
+  messageDesc(file_amux, 17);
 
 /**
  * @generated from message amux.AcpRawJson
@@ -541,7 +699,7 @@ export type AcpRawJson = Message<"amux.AcpRawJson"> & {
  * Use `create(AcpRawJsonSchema)` to create a new message.
  */
 export const AcpRawJsonSchema: GenMessage<AcpRawJson> = /*@__PURE__*/
-  messageDesc(file_amux, 13);
+  messageDesc(file_amux, 18);
 
 /**
  * ACP Plan notification — full replacement on every update (ACP spec).
@@ -562,7 +720,7 @@ export type AcpPlanUpdate = Message<"amux.AcpPlanUpdate"> & {
  * Use `create(AcpPlanUpdateSchema)` to create a new message.
  */
 export const AcpPlanUpdateSchema: GenMessage<AcpPlanUpdate> = /*@__PURE__*/
-  messageDesc(file_amux, 14);
+  messageDesc(file_amux, 19);
 
 /**
  * @generated from message amux.AcpPlanEntry
@@ -589,7 +747,7 @@ export type AcpPlanEntry = Message<"amux.AcpPlanEntry"> & {
  * Use `create(AcpPlanEntrySchema)` to create a new message.
  */
 export const AcpPlanEntrySchema: GenMessage<AcpPlanEntry> = /*@__PURE__*/
-  messageDesc(file_amux, 15);
+  messageDesc(file_amux, 20);
 
 /**
  * ACP commands from client
@@ -656,7 +814,7 @@ export type AcpCommand = Message<"amux.AcpCommand"> & {
  * Use `create(AcpCommandSchema)` to create a new message.
  */
 export const AcpCommandSchema: GenMessage<AcpCommand> = /*@__PURE__*/
-  messageDesc(file_amux, 16);
+  messageDesc(file_amux, 21);
 
 /**
  * Request historical events for an agent session (incremental sync)
@@ -691,7 +849,7 @@ export type AcpRequestHistory = Message<"amux.AcpRequestHistory"> & {
  * Use `create(AcpRequestHistorySchema)` to create a new message.
  */
 export const AcpRequestHistorySchema: GenMessage<AcpRequestHistory> = /*@__PURE__*/
-  messageDesc(file_amux, 17);
+  messageDesc(file_amux, 22);
 
 /**
  * Request all envelopes for a specific turn from a specific runtime's
@@ -719,7 +877,7 @@ export type AcpRequestTurnHistory = Message<"amux.AcpRequestTurnHistory"> & {
  * Use `create(AcpRequestTurnHistorySchema)` to create a new message.
  */
 export const AcpRequestTurnHistorySchema: GenMessage<AcpRequestTurnHistory> = /*@__PURE__*/
-  messageDesc(file_amux, 18);
+  messageDesc(file_amux, 23);
 
 /**
  * @generated from message amux.AcpSendPrompt
@@ -749,7 +907,7 @@ export type AcpSendPrompt = Message<"amux.AcpSendPrompt"> & {
  * Use `create(AcpSendPromptSchema)` to create a new message.
  */
 export const AcpSendPromptSchema: GenMessage<AcpSendPrompt> = /*@__PURE__*/
-  messageDesc(file_amux, 19);
+  messageDesc(file_amux, 24);
 
 /**
  * @generated from message amux.AcpCancel
@@ -762,7 +920,7 @@ export type AcpCancel = Message<"amux.AcpCancel"> & {
  * Use `create(AcpCancelSchema)` to create a new message.
  */
 export const AcpCancelSchema: GenMessage<AcpCancel> = /*@__PURE__*/
-  messageDesc(file_amux, 20);
+  messageDesc(file_amux, 25);
 
 /**
  * @generated from message amux.AcpGrantPermission
@@ -786,7 +944,7 @@ export type AcpGrantPermission = Message<"amux.AcpGrantPermission"> & {
  * Use `create(AcpGrantPermissionSchema)` to create a new message.
  */
 export const AcpGrantPermissionSchema: GenMessage<AcpGrantPermission> = /*@__PURE__*/
-  messageDesc(file_amux, 21);
+  messageDesc(file_amux, 26);
 
 /**
  * @generated from message amux.AcpDenyPermission
@@ -803,7 +961,7 @@ export type AcpDenyPermission = Message<"amux.AcpDenyPermission"> & {
  * Use `create(AcpDenyPermissionSchema)` to create a new message.
  */
 export const AcpDenyPermissionSchema: GenMessage<AcpDenyPermission> = /*@__PURE__*/
-  messageDesc(file_amux, 22);
+  messageDesc(file_amux, 27);
 
 /**
  * @generated from message amux.AcpStartAgent
@@ -845,7 +1003,7 @@ export type AcpStartAgent = Message<"amux.AcpStartAgent"> & {
  * Use `create(AcpStartAgentSchema)` to create a new message.
  */
 export const AcpStartAgentSchema: GenMessage<AcpStartAgent> = /*@__PURE__*/
-  messageDesc(file_amux, 23);
+  messageDesc(file_amux, 28);
 
 /**
  * @generated from message amux.AcpStopAgent
@@ -858,7 +1016,7 @@ export type AcpStopAgent = Message<"amux.AcpStopAgent"> & {
  * Use `create(AcpStopAgentSchema)` to create a new message.
  */
 export const AcpStopAgentSchema: GenMessage<AcpStopAgent> = /*@__PURE__*/
-  messageDesc(file_amux, 24);
+  messageDesc(file_amux, 29);
 
 /**
  * Agent-level session events (flow through agent's events topic in Envelope).
@@ -904,7 +1062,7 @@ export type SessionEvent = Message<"amux.SessionEvent"> & {
  * Use `create(SessionEventSchema)` to create a new message.
  */
 export const SessionEventSchema: GenMessage<SessionEvent> = /*@__PURE__*/
-  messageDesc(file_amux, 25);
+  messageDesc(file_amux, 30);
 
 /**
  * Response to AcpRequestHistory — a page of historical events
@@ -944,7 +1102,7 @@ export type HistoryBatch = Message<"amux.HistoryBatch"> & {
  * Use `create(HistoryBatchSchema)` to create a new message.
  */
 export const HistoryBatchSchema: GenMessage<HistoryBatch> = /*@__PURE__*/
-  messageDesc(file_amux, 26);
+  messageDesc(file_amux, 31);
 
 /**
  * @generated from message amux.PromptAccepted
@@ -961,7 +1119,7 @@ export type PromptAccepted = Message<"amux.PromptAccepted"> & {
  * Use `create(PromptAcceptedSchema)` to create a new message.
  */
 export const PromptAcceptedSchema: GenMessage<PromptAccepted> = /*@__PURE__*/
-  messageDesc(file_amux, 27);
+  messageDesc(file_amux, 32);
 
 /**
  * @generated from message amux.PromptRejected
@@ -983,7 +1141,7 @@ export type PromptRejected = Message<"amux.PromptRejected"> & {
  * Use `create(PromptRejectedSchema)` to create a new message.
  */
 export const PromptRejectedSchema: GenMessage<PromptRejected> = /*@__PURE__*/
-  messageDesc(file_amux, 28);
+  messageDesc(file_amux, 33);
 
 /**
  * @generated from message amux.PermissionResolved
@@ -1010,7 +1168,7 @@ export type PermissionResolved = Message<"amux.PermissionResolved"> & {
  * Use `create(PermissionResolvedSchema)` to create a new message.
  */
 export const PermissionResolvedSchema: GenMessage<PermissionResolved> = /*@__PURE__*/
-  messageDesc(file_amux, 29);
+  messageDesc(file_amux, 34);
 
 /**
  * @generated from message amux.AddWorkspace
@@ -1027,7 +1185,7 @@ export type AddWorkspace = Message<"amux.AddWorkspace"> & {
  * Use `create(AddWorkspaceSchema)` to create a new message.
  */
 export const AddWorkspaceSchema: GenMessage<AddWorkspace> = /*@__PURE__*/
-  messageDesc(file_amux, 30);
+  messageDesc(file_amux, 35);
 
 /**
  * @generated from message amux.RemoveWorkspace
@@ -1044,7 +1202,7 @@ export type RemoveWorkspace = Message<"amux.RemoveWorkspace"> & {
  * Use `create(RemoveWorkspaceSchema)` to create a new message.
  */
 export const RemoveWorkspaceSchema: GenMessage<RemoveWorkspace> = /*@__PURE__*/
-  messageDesc(file_amux, 31);
+  messageDesc(file_amux, 36);
 
 /**
  * @generated from message amux.PeerAnnounce
@@ -1066,7 +1224,7 @@ export type PeerAnnounce = Message<"amux.PeerAnnounce"> & {
  * Use `create(PeerAnnounceSchema)` to create a new message.
  */
 export const PeerAnnounceSchema: GenMessage<PeerAnnounce> = /*@__PURE__*/
-  messageDesc(file_amux, 32);
+  messageDesc(file_amux, 37);
 
 /**
  * @generated from message amux.RemoveMember
@@ -1083,7 +1241,7 @@ export type RemoveMember = Message<"amux.RemoveMember"> & {
  * Use `create(RemoveMemberSchema)` to create a new message.
  */
 export const RemoveMemberSchema: GenMessage<RemoveMember> = /*@__PURE__*/
-  messageDesc(file_amux, 33);
+  messageDesc(file_amux, 38);
 
 /**
  * Payload of {team}/{actor}/state (retained, LWT-backed from Phase 3 onward).
@@ -1113,7 +1271,7 @@ export type ActorPresence = Message<"amux.ActorPresence"> & {
  * Use `create(ActorPresenceSchema)` to create a new message.
  */
 export const ActorPresenceSchema: GenMessage<ActorPresence> = /*@__PURE__*/
-  messageDesc(file_amux, 34);
+  messageDesc(file_amux, 39);
 
 /**
  * @generated from message amux.WorkspaceInfo
@@ -1140,7 +1298,7 @@ export type WorkspaceInfo = Message<"amux.WorkspaceInfo"> & {
  * Use `create(WorkspaceInfoSchema)` to create a new message.
  */
 export const WorkspaceInfoSchema: GenMessage<WorkspaceInfo> = /*@__PURE__*/
-  messageDesc(file_amux, 35);
+  messageDesc(file_amux, 40);
 
 /**
  * @generated from message amux.WorkspaceList
@@ -1157,7 +1315,7 @@ export type WorkspaceList = Message<"amux.WorkspaceList"> & {
  * Use `create(WorkspaceListSchema)` to create a new message.
  */
 export const WorkspaceListSchema: GenMessage<WorkspaceList> = /*@__PURE__*/
-  messageDesc(file_amux, 36);
+  messageDesc(file_amux, 41);
 
 /**
  * Payload of {team}/{actor}/runtime/{rid}/state (retained).
@@ -1286,7 +1444,7 @@ export type RuntimeInfo = Message<"amux.RuntimeInfo"> & {
  * Use `create(RuntimeInfoSchema)` to create a new message.
  */
 export const RuntimeInfoSchema: GenMessage<RuntimeInfo> = /*@__PURE__*/
-  messageDesc(file_amux, 37);
+  messageDesc(file_amux, 42);
 
 /**
  * @generated from message amux.ModelInfo
@@ -1308,7 +1466,7 @@ export type ModelInfo = Message<"amux.ModelInfo"> & {
  * Use `create(ModelInfoSchema)` to create a new message.
  */
 export const ModelInfoSchema: GenMessage<ModelInfo> = /*@__PURE__*/
-  messageDesc(file_amux, 38);
+  messageDesc(file_amux, 43);
 
 /**
  * @generated from message amux.AgentList
@@ -1325,7 +1483,7 @@ export type AgentList = Message<"amux.AgentList"> & {
  * Use `create(AgentListSchema)` to create a new message.
  */
 export const AgentListSchema: GenMessage<AgentList> = /*@__PURE__*/
-  messageDesc(file_amux, 39);
+  messageDesc(file_amux, 44);
 
 /**
  * @generated from message amux.MemberInfo
@@ -1362,7 +1520,7 @@ export type MemberInfo = Message<"amux.MemberInfo"> & {
  * Use `create(MemberInfoSchema)` to create a new message.
  */
 export const MemberInfoSchema: GenMessage<MemberInfo> = /*@__PURE__*/
-  messageDesc(file_amux, 40);
+  messageDesc(file_amux, 45);
 
 /**
  * @generated from message amux.MemberList
@@ -1379,7 +1537,7 @@ export type MemberList = Message<"amux.MemberList"> & {
  * Use `create(MemberListSchema)` to create a new message.
  */
 export const MemberListSchema: GenMessage<MemberList> = /*@__PURE__*/
-  messageDesc(file_amux, 41);
+  messageDesc(file_amux, 46);
 
 /**
  * @generated from message amux.PeerInfo
@@ -1421,7 +1579,7 @@ export type PeerInfo = Message<"amux.PeerInfo"> & {
  * Use `create(PeerInfoSchema)` to create a new message.
  */
 export const PeerInfoSchema: GenMessage<PeerInfo> = /*@__PURE__*/
-  messageDesc(file_amux, 42);
+  messageDesc(file_amux, 47);
 
 /**
  * @generated from message amux.PeerList
@@ -1438,7 +1596,7 @@ export type PeerList = Message<"amux.PeerList"> & {
  * Use `create(PeerListSchema)` to create a new message.
  */
 export const PeerListSchema: GenMessage<PeerList> = /*@__PURE__*/
-  messageDesc(file_amux, 43);
+  messageDesc(file_amux, 48);
 
 /**
  * @generated from enum amux.AgentType

@@ -10,15 +10,12 @@
 
 import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
 import { MessageKind } from "@/lib/proto/teamclaw_pb";
-import {
-  paramsFromToolArguments,
-  resolveWireToolName,
-} from "@/components/chat/tool-calls/tool-call-utils";
 import type {
   Message as SdkMessage,
   MessagePart,
   ToolCall,
 } from "@/stores/session-types";
+import { parseToolContentBlocks } from "@/components/chat/tool-calls/tool-call-content";
 
 function kindToRole(kind: MessageKind): SdkMessage["role"] {
   switch (kind) {
@@ -173,6 +170,34 @@ function mergeTurnPartsFromReplies(replies: TeamclawMessage[]): MessagePart[] {
   return out;
 }
 
+function parseJsonValue(value: unknown): unknown {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function parseMetadataLocations(value: unknown): Array<{ path: string; line?: number }> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: Array<{ path: string; line?: number }> = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const loc = item as Record<string, unknown>;
+    const path = String(loc.path ?? "");
+    if (!path) continue;
+    const line = typeof loc.line === "number" ? loc.line : undefined;
+    out.push({ path, line });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function parseMetadataContent(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  return parseToolContentBlocks(value);
+}
+
 function paramsFromDescription(description: string): Record<string, unknown> {
   if (!description) return {};
   if (!description.trim().startsWith("{")) {
@@ -250,7 +275,15 @@ function buildTurnSdkMessage(group: TeamclawMessage[]): SdkMessage {
   const toolResultProtos = group.filter((m) => m.kind === MessageKind.AGENT_TOOL_RESULT);
   const replies = group.filter((m) => m.kind === MessageKind.AGENT_REPLY);
 
-  const resultByToolId = new Map<string, { success: boolean; summary: string }>();
+  const resultByToolId = new Map<
+    string,
+    {
+      success: boolean;
+      summary: string;
+      content?: ReturnType<typeof parseToolContentBlocks>;
+      rawOutput?: unknown;
+    }
+  >();
   for (const r of toolResultProtos) {
     const md = parseMetadata(r);
     const toolId = String(md.tool_id ?? "");
@@ -258,6 +291,8 @@ function buildTurnSdkMessage(group: TeamclawMessage[]): SdkMessage {
       resultByToolId.set(toolId, {
         success: Boolean(md.success),
         summary: r.content,
+        content: parseMetadataContent(md.content),
+        rawOutput: parseJsonValue(md.raw_output_json),
       });
     }
   }
@@ -278,18 +313,22 @@ function buildTurnSdkMessage(group: TeamclawMessage[]): SdkMessage {
       ...paramsFromMetadataParams(md.params),
     };
     const match = toolId ? resultByToolId.get(toolId) : undefined;
-    const resolveParams = {
-      ...paramsFromToolArguments(args),
-      ...(description && !args.description ? { description } : {}),
-    };
+    const acpStatus =
+      typeof md.status === "string" && md.status.trim() ? md.status : undefined;
+    const toolUseContent = parseMetadataContent(md.content);
     return {
       id: toolId || tc.messageId,
-      name: resolveWireToolName(toolKind, toolNameRaw, resolveParams),
+      name: toolNameRaw,
       toolKind,
+      acpStatus,
+      content: match?.content ?? toolUseContent,
+      locations: parseMetadataLocations(md.locations),
+      rawInput: parseJsonValue(md.raw_input_json),
       status: match ? (match.success ? "completed" : "failed") : "calling",
       arguments: args,
       startTime: new Date(Number(tc.createdAt) * 1000),
       result: match ? match.summary : undefined,
+      ...(match?.rawOutput !== undefined ? { rawOutput: match.rawOutput } : {}),
     };
   });
   const toolCallByMessageId = new Map<string, ToolCall>();

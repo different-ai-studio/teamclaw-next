@@ -17,8 +17,7 @@ import {
   summarizeToolCallsForDiag,
 } from "@/lib/stream-tool-diag";
 import type { MessagePart, ToolCall } from "@/stores/session-types";
-import { resolveWireToolName } from "@/components/chat/tool-calls/tool-call-utils";
-
+import type { ToolCallContentBlock } from "@/components/chat/tool-calls/tool-call-content";
 export interface StreamingPlanEntry {
   content: string;
   priority: "high" | "medium" | "low";
@@ -82,12 +81,28 @@ interface State {
   pushToolUse: (
     sessionId: string,
     actorId: string,
-    args: { toolId: string; toolName: string; description: string; params: Record<string, string>; toolKind?: string },
+    args: {
+      toolId: string;
+      toolName: string;
+      description: string;
+      params: Record<string, string>;
+      toolKind?: string;
+      content?: ToolCallContentBlock[];
+      locations?: Array<{ path: string; line?: number }>;
+      acpStatus?: string;
+      rawInput?: unknown;
+    },
   ) => void;
   completeToolUse: (
     sessionId: string,
     actorId: string,
-    args: { toolId: string; success: boolean; summary: string },
+    args: {
+      toolId: string;
+      success: boolean;
+      summary: string;
+      content?: ToolCallContentBlock[];
+      rawOutput?: unknown;
+    },
   ) => void;
   setPlan: (sessionId: string, actorId: string, entries: StreamingPlanEntry[]) => void;
   setError: (sessionId: string, actorId: string, message: string, details: string) => void;
@@ -365,6 +380,8 @@ function withCompletedTool(
   toolId: string,
   success: boolean,
   summary: string,
+  content?: ToolCallContentBlock[],
+  rawOutput?: unknown,
 ): ToolCall[] {
   return toolCalls.map((tc) =>
     tc.id === toolId
@@ -373,6 +390,8 @@ function withCompletedTool(
           status: success ? ("completed" as const) : ("failed" as const),
           result: summary,
           duration: Date.now() - tc.startTime.getTime(),
+          ...(content !== undefined ? { content } : {}),
+          ...(rawOutput !== undefined ? { rawOutput } : {}),
         }
       : tc,
   );
@@ -482,18 +501,26 @@ function mergeToolUse(
     description: string;
     params: Record<string, string>;
     toolKind?: string;
+    content?: ToolCallContentBlock[];
+    locations?: Array<{ path: string; line?: number }>;
+    acpStatus?: string;
+    rawInput?: unknown;
   },
 ): ToolCall {
   const nextArgs = toolUseArguments(args.params, args.description);
-  const name = resolveWireToolName(
-    args.toolKind ?? existing.toolKind,
-    args.toolName || existing.name || "unknown",
-    args.params,
-  );
+  const incomingName = args.toolName?.trim();
+  const name =
+    incomingName && incomingName !== "unknown"
+      ? incomingName
+      : existing.name || "unknown";
   return {
     ...existing,
     name,
     toolKind: args.toolKind || existing.toolKind,
+    acpStatus: args.acpStatus || existing.acpStatus,
+    ...(args.content !== undefined ? { content: args.content } : {}),
+    ...(args.locations !== undefined ? { locations: args.locations } : {}),
+    ...(args.rawInput !== undefined ? { rawInput: args.rawInput } : {}),
     arguments: {
       ...(existing.arguments ?? {}),
       ...nextArgs,
@@ -666,14 +693,23 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     });
   },
 
-  pushToolUse: (sessionId, actorId, { toolId, toolName, description, params, toolKind }) => {
+  pushToolUse: (sessionId, actorId, { toolId, toolName, description, params, toolKind, content, locations, acpStatus, rawInput }) => {
     if (!toolId) return;
     const state = get();
     const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
     if (entry.toolCalls.some((tc) => tc.id === toolId)) {
       const toolCalls = entry.toolCalls.map((tc) =>
         tc.id === toolId
-          ? mergeToolUse(tc, { toolName, description, params, toolKind })
+          ? mergeToolUse(tc, {
+              toolName,
+              description,
+              params,
+              toolKind,
+              content,
+              locations,
+              acpStatus,
+              rawInput,
+            })
           : tc,
       );
       set({
@@ -693,8 +729,12 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     }
     const newToolCall: ToolCall = {
       id: toolId,
-      name: resolveWireToolName(toolKind, toolName || "unknown", params),
+      name: toolName || "unknown",
       toolKind: toolKind || undefined,
+      acpStatus,
+      content,
+      locations,
+      rawInput,
       status: "calling",
       arguments: toolUseArguments(params, description),
       startTime: new Date(),
@@ -722,7 +762,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     });
   },
 
-  completeToolUse: (sessionId, actorId, { toolId, success, summary }) => {
+  completeToolUse: (sessionId, actorId, { toolId, success, summary, content, rawOutput }) => {
     if (!toolId) return;
     const key = k(sessionId, actorId);
     const state = get();
@@ -735,7 +775,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
       hasToolCall: boolean,
     ): { toolCalls: ToolCall[]; parts: MessagePart[] } => {
       const updated = hasToolCall
-        ? withCompletedTool(entry.toolCalls, toolId, success, summary)
+        ? withCompletedTool(entry.toolCalls, toolId, success, summary, content, rawOutput)
         : [...entry.toolCalls, fallbackToolCall];
       const parts = hasToolCall
         ? syncToolParts(entryParts(entry), updated)

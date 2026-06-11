@@ -42,6 +42,102 @@ export function paramsFromToolArguments(
  * Skill/role_load use ToolKind::Other on the wire (`tool_name: "other"`); the
  * human ACP title is copied into params.description (e.g. "skill").
  */
+/** UI 路由 id：基于 kind + ACP title（存于 name）+ params 形状；不 mutate 存储的 name。 */
+export function routeToolPresentation(toolCall: ToolCallLike): string {
+  const title = (toolCall.name || "").trim();
+  const titleLower = title.toLowerCase();
+  const kind = toolCall.toolKind;
+  const args = toolCall.arguments as Record<string, unknown> | undefined;
+  const descHint = stringParam(args?.description)?.toLowerCase() ?? "";
+
+  if (
+    kind === "execute" ||
+    titleLower === "bash" ||
+    titleLower.includes("shell") ||
+    titleLower.includes("terminal")
+  ) {
+    return "bash";
+  }
+
+  if (titleLower === "glob" || titleLower.startsWith("glob ")) return "glob";
+  if (titleLower === "grep" || titleLower.startsWith("grep ")) return "grep";
+  if (titleLower === "find" || titleLower.startsWith("find ")) return "find";
+
+  if (
+    kind === "fetch" ||
+    titleLower === "webfetch" ||
+    titleLower === "websearch" ||
+    titleLower === "web_search"
+  ) {
+    return "web_search";
+  }
+
+  if (titleLower === "write" || titleLower === "write_file" || isContentOnlyWrite(args)) {
+    return "write";
+  }
+  if (
+    titleLower === "apply_patch" ||
+    titleLower === "applypatch" ||
+    extractPatchTextFromToolArgs(args ?? {})
+  ) {
+    return "apply_patch";
+  }
+  if (kind === "edit" || titleLower === "edit" || titleLower === "edit_file") {
+    return "edit";
+  }
+
+  if (
+    hasArgument(args, "subagent_type") ||
+    hasArgument(args, "task_id") ||
+    titleLower === "task"
+  ) {
+    return "task";
+  }
+  if (hasArgument(args, "todos") || titleLower.includes("todo")) return "todo_write";
+  if (hasArgument(args, "questions") || titleLower === "question") return "question";
+
+  if (descHint === "skill" || titleLower === "skill") return "skill";
+  if (descHint === "role_skill" || titleLower === "role_skill") return "role_skill";
+  if (descHint.includes("role_load") || titleLower.includes("role_load")) return "role_load";
+
+  if (
+    args?.name &&
+    !args?.command &&
+    !args?.path &&
+    !args?.pattern &&
+    !args?.query &&
+    !args?.url
+  ) {
+    return "skill";
+  }
+
+  if (kind === "read" || titleLower === "read" || titleLower === "read_file") return "read";
+  if (kind === "delete") return "delete";
+  if (kind === "move") return "move";
+  if (kind === "think") return "think";
+
+  return titleLower || "unknown";
+}
+
+function isContentOnlyWrite(args: Record<string, unknown> | undefined): boolean {
+  if (!args) return false;
+  if (extractPatchTextFromToolArgs(args)) return false;
+  if (
+    "oldString" in args ||
+    "old_string" in args ||
+    "newString" in args ||
+    "new_string" in args
+  ) {
+    return false;
+  }
+  const content = args.content ?? args.contents;
+  return typeof content === "string" && content.trim().length > 0;
+}
+
+/**
+ * @deprecated Prefer storing ACP title in `ToolCall.name` and routing via `routeToolPresentation`.
+ * Kept for legacy metadata where tool_name was canonicalized (grep/bash) on the wire.
+ */
 export function resolveWireToolName(
   toolKind: string | undefined,
   wireName: string,
@@ -88,11 +184,19 @@ export function resolveWireToolName(
 }
 
 export function resolvedToolName(toolCall: ToolCallLike): string {
-  return resolveWireToolName(
-    toolCall.toolKind,
-    toolCall.name,
-    paramsFromToolArguments(toolCall.arguments as Record<string, unknown> | undefined),
-  );
+  return routeToolPresentation(toolCall);
+}
+
+export function matchesWriteTool(toolCall: ToolCallLike): boolean {
+  return routeToolPresentation(toolCall) === "write";
+}
+
+export function matchesEditTool(toolCall: ToolCallLike): boolean {
+  const route = routeToolPresentation(toolCall);
+  if (route === "write") return false;
+  if (route === "edit" || route === "apply_patch") return true;
+  if (toolCall.toolKind === "edit") return true;
+  return isEditTool(toolCall.name);
 }
 
 export function skillNameFromToolCall(toolCall: ToolCallLike): string | undefined {
@@ -100,7 +204,7 @@ export function skillNameFromToolCall(toolCall: ToolCallLike): string | undefine
   return stringParam(args?.name);
 }
 
-/** ACP `tool_kind` → canonical UI route id (matches daemon `kind_to_canonical_name`). */
+/** ACP `tool_kind` → icon/category hint (legacy routing only). */
 export function toolNameFromKind(toolKind?: string): string {
   switch (toolKind) {
     case "execute":
@@ -131,59 +235,40 @@ function hasArgument(
   return Boolean(args && key in args);
 }
 
-export function matchesWriteTool(toolCall: ToolCallLike): boolean {
-  return isWriteTool(toolCall.name);
-}
-
-export function matchesEditTool(toolCall: ToolCallLike): boolean {
-  if (toolCall.toolKind === "edit") return true;
-  return isEditTool(toolCall.name);
-}
-
 export function matchesReadTool(toolCall: ToolCallLike): boolean {
-  if (toolCall.toolKind === "read") return true;
-  return isReadTool(toolCall.name);
+  return routeToolPresentation(toolCall) === "read";
 }
 
 export function matchesCommandTool(toolCall: ToolCallLike): boolean {
-  if (toolCall.toolKind === "execute") return true;
-  return isCommandTool(toolCall.name);
+  return routeToolPresentation(toolCall) === "bash";
 }
 
 export function matchesTodoTool(toolCall: ToolCallLike): boolean {
-  const args = toolCall.arguments as Record<string, unknown> | undefined;
-  if (hasArgument(args, "todos")) return true;
-  return isTodoTool(toolCall.name);
+  return routeToolPresentation(toolCall) === "todo_write";
 }
 
 export function matchesTaskTool(toolCall: ToolCallLike): boolean {
-  const args = toolCall.arguments as Record<string, unknown> | undefined;
-  if (hasArgument(args, "subagent_type") || hasArgument(args, "task_id")) {
-    return true;
-  }
-  return isTaskTool(toolCall.name);
+  return routeToolPresentation(toolCall) === "task";
 }
 
 export function matchesSkillTool(toolCall: ToolCallLike): boolean {
-  return isSkillTool(resolvedToolName(toolCall));
+  return routeToolPresentation(toolCall) === "skill";
 }
 
 export function matchesRoleSkillTool(toolCall: ToolCallLike): boolean {
-  return isRoleSkillTool(resolvedToolName(toolCall));
+  return routeToolPresentation(toolCall) === "role_skill";
 }
 
 export function matchesRoleLoadTool(toolCall: ToolCallLike): boolean {
-  return isRoleLoadTool(resolvedToolName(toolCall));
+  return routeToolPresentation(toolCall) === "role_load";
 }
 
 export function matchesQuestionTool(toolCall: ToolCallLike): boolean {
-  const args = toolCall.arguments as Record<string, unknown> | undefined;
-  if (hasArgument(args, "questions")) return true;
-  return isQuestionTool(toolCall.name);
+  return routeToolPresentation(toolCall) === "question";
 }
 
 export function displayToolName(toolCall: ToolCallLike): string {
-  return resolvedToolName(toolCall);
+  return routeToolPresentation(toolCall);
 }
 
 type TranslateFn = (

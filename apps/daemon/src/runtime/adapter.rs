@@ -684,16 +684,18 @@ fn translate_session_update(update: acp::SessionUpdate) -> Vec<amux::AcpEvent> {
                 "ACP ToolCall"
             );
             let (tool_name, params) =
-                tool_use_wire_fields(&tc.kind, &tc.title, tc.raw_input.as_ref());
-            let description = tool_call_description(tc.raw_input.as_ref(), Some(&tc.content));
+                tool_use_wire_fields(&tc.title, tc.raw_input.as_ref());
             vec![amux::AcpEvent {
-                event: Some(amux::acp_event::Event::ToolUse(amux::AcpToolUse {
-                    tool_id: tc.tool_call_id.to_string(),
+                event: Some(amux::acp_event::Event::ToolUse(make_acp_tool_use(
+                    tc.tool_call_id.to_string(),
                     tool_name,
-                    description,
                     params,
-                    tool_kind: kind_to_snake(&tc.kind),
-                })),
+                    kind_to_snake(&tc.kind),
+                    tc.raw_input.as_ref(),
+                    &tc.content,
+                    &tc.locations,
+                    Some(tc.status),
+                ))),
                 model: String::new(),
             }]
         }
@@ -737,11 +739,13 @@ fn translate_session_update(update: acp::SessionUpdate) -> Vec<amux::AcpEvent> {
                         }),
                 );
                 vec![amux::AcpEvent {
-                    event: Some(amux::acp_event::Event::ToolResult(amux::AcpToolResult {
+                    event: Some(amux::acp_event::Event::ToolResult(make_acp_tool_result(
                         tool_id,
                         success,
                         summary,
-                    })),
+                        tcu.fields.raw_output.as_ref(),
+                        tcu.fields.content.as_deref(),
+                    ))),
                     model: String::new(),
                 }]
             } else {
@@ -756,20 +760,27 @@ fn translate_session_update(update: acp::SessionUpdate) -> Vec<amux::AcpEvent> {
                     .as_deref()
                     .unwrap_or_default();
                 let (tool_name, params) =
-                    tool_use_wire_fields(kind, title, tcu.fields.raw_input.as_ref());
-                let description = tool_call_description(
-                    tcu.fields.raw_input.as_ref(),
-                    tcu.fields.content.as_deref(),
-                );
-                if !description.is_empty() || !tool_name.is_empty() {
+                    tool_use_wire_fields(title, tcu.fields.raw_input.as_ref());
+                let content_slice = tcu.fields.content.as_deref().unwrap_or_default();
+                let locations_slice = tcu.fields.locations.as_deref().unwrap_or_default();
+                let has_payload = !tool_name.is_empty()
+                    || !params.is_empty()
+                    || tcu.fields.raw_input.is_some()
+                    || !content_slice.is_empty()
+                    || !locations_slice.is_empty()
+                    || tcu.fields.status.is_some();
+                if has_payload {
                     vec![amux::AcpEvent {
-                        event: Some(amux::acp_event::Event::ToolUse(amux::AcpToolUse {
+                        event: Some(amux::acp_event::Event::ToolUse(make_acp_tool_use(
                             tool_id,
                             tool_name,
-                            description,
                             params,
-                            tool_kind: kind_to_snake(kind),
-                        })),
+                            kind_to_snake(kind),
+                            tcu.fields.raw_input.as_ref(),
+                            content_slice,
+                            locations_slice,
+                            tcu.fields.status,
+                        ))),
                         model: String::new(),
                     }]
                 } else {
@@ -867,37 +878,111 @@ fn clean_tool_title(title: &str) -> String {
     }
 }
 
-/// Canonical wire id for UI routing — from ACP `ToolKind`, never from `title`.
-fn kind_to_canonical_name(kind: &acp::ToolKind) -> String {
-    match kind {
-        acp::ToolKind::Search => "grep".into(),
-        acp::ToolKind::Read => "read".into(),
-        acp::ToolKind::Edit => "edit".into(),
-        acp::ToolKind::Fetch => "web_search".into(),
-        acp::ToolKind::Execute => "bash".into(),
-        acp::ToolKind::Delete => "delete".into(),
-        acp::ToolKind::Move => "move".into(),
-        acp::ToolKind::Think => "think".into(),
-        _ => "other".into(),
-    }
-}
-
-/// Map ACP tool call to wire fields. Human `title` → params.description only.
+/// Map ACP tool call to amux wire fields (Phase 1 fidelity):
+/// - `tool_name` = ACP `title` verbatim (after clean_tool_title)
+/// - `params` = rawInput key/values only
 fn tool_use_wire_fields(
-    kind: &acp::ToolKind,
     title: &str,
     raw_input: Option<&serde_json::Value>,
 ) -> (String, HashMap<String, String>) {
-    let mut params = tool_call_params(raw_input);
-    let human_title = clean_tool_title(title);
-    if !human_title.is_empty() && !params.contains_key("description") {
-        params.insert("description".to_string(), human_title);
-    }
-    (kind_to_canonical_name(kind), params)
+    let params = tool_call_params(raw_input);
+    let tool_name = clean_tool_title(title);
+    (tool_name, params)
 }
 
-fn kind_to_name(kind: &acp::ToolKind) -> String {
-    kind_to_canonical_name(kind)
+fn acp_status_to_snake(status: acp::ToolCallStatus) -> String {
+    match status {
+        acp::ToolCallStatus::Pending => "pending",
+        acp::ToolCallStatus::InProgress => "in_progress",
+        acp::ToolCallStatus::Completed => "completed",
+        acp::ToolCallStatus::Failed => "failed",
+        _ => "pending",
+    }
+    .to_string()
+}
+
+fn acp_locations_to_proto(locations: &[acp::ToolCallLocation]) -> Vec<amux::AcpToolCallLocation> {
+    locations
+        .iter()
+        .map(|loc| amux::AcpToolCallLocation {
+            path: loc.path.display().to_string(),
+            line: loc.line,
+        })
+        .collect()
+}
+
+fn acp_content_to_proto(content: &[acp::ToolCallContent]) -> Vec<amux::AcpToolCallContent> {
+    content
+        .iter()
+        .filter_map(|item| {
+            let payload = match item {
+                acp::ToolCallContent::Content(c) => {
+                    let text = extract_text(&c.content);
+                    if text.trim().is_empty() {
+                        return None;
+                    }
+                    amux::acp_tool_call_content::Payload::Text(amux::AcpToolCallTextContent {
+                        text,
+                    })
+                }
+                acp::ToolCallContent::Diff(d) => {
+                    amux::acp_tool_call_content::Payload::Diff(amux::AcpToolCallDiff {
+                        path: d.path.display().to_string(),
+                        old_text: d.old_text.clone(),
+                        new_text: d.new_text.clone(),
+                    })
+                }
+                acp::ToolCallContent::Terminal(t) => {
+                    amux::acp_tool_call_content::Payload::Terminal(amux::AcpToolCallTerminal {
+                        terminal_id: t.terminal_id.to_string(),
+                    })
+                }
+                _ => return None,
+            };
+            Some(amux::AcpToolCallContent {
+                payload: Some(payload),
+            })
+        })
+        .collect()
+}
+
+fn make_acp_tool_use(
+    tool_id: String,
+    tool_name: String,
+    params: HashMap<String, String>,
+    tool_kind: String,
+    raw_input: Option<&serde_json::Value>,
+    content: &[acp::ToolCallContent],
+    locations: &[acp::ToolCallLocation],
+    status: Option<acp::ToolCallStatus>,
+) -> amux::AcpToolUse {
+    amux::AcpToolUse {
+        tool_id,
+        tool_name,
+        description: String::new(),
+        params,
+        tool_kind,
+        raw_input_json: raw_input.map(|v| v.to_string()).unwrap_or_default(),
+        content: acp_content_to_proto(content),
+        locations: acp_locations_to_proto(locations),
+        status: status.map(acp_status_to_snake).unwrap_or_default(),
+    }
+}
+
+fn make_acp_tool_result(
+    tool_id: String,
+    success: bool,
+    summary: String,
+    raw_output: Option<&serde_json::Value>,
+    content: Option<&[acp::ToolCallContent]>,
+) -> amux::AcpToolResult {
+    amux::AcpToolResult {
+        tool_id,
+        success,
+        summary,
+        raw_output_json: raw_output.map(|v| v.to_string()).unwrap_or_default(),
+        content: acp_content_to_proto(content.unwrap_or_default()),
+    }
 }
 
 // ACP ToolKind → snake_case wire string for `AcpToolUse.tool_kind`.
@@ -928,16 +1013,6 @@ fn extract_text(content: &acp::ContentBlock) -> String {
         acp::ContentBlock::Resource(_) => "<resource>".into(),
         _ => String::new(),
     }
-}
-
-fn tool_call_description(
-    raw_input: Option<&serde_json::Value>,
-    content: Option<&[acp::ToolCallContent]>,
-) -> String {
-    raw_input
-        .map(|v| v.to_string())
-        .or_else(|| content.and_then(|items| items.first().map(|item| format!("{:?}", item))))
-        .unwrap_or_default()
 }
 
 fn json_value_to_string(value: &serde_json::Value) -> String {
@@ -1952,18 +2027,25 @@ mod tests {
     }
 
     #[test]
-    fn tool_use_wire_fields_maps_execute_kind_not_title() {
+    fn tool_use_wire_fields_preserves_glob_title_not_grep_canonical() {
         let (tool_name, params) = tool_use_wire_fields(
-            &acp::ToolKind::Execute,
+            "glob",
+            Some(&serde_json::json!({ "pattern": "**/*.ts", "path": "." })),
+        );
+        assert_eq!(tool_name, "glob");
+        assert_eq!(params.get("pattern"), Some(&"**/*.ts".to_string()));
+        assert!(!params.contains_key("description"));
+    }
+
+    #[test]
+    fn tool_use_wire_fields_preserves_acp_title_for_execute() {
+        let (tool_name, params) = tool_use_wire_fields(
             "Execute ps command",
             Some(&serde_json::json!({ "command": "ps aux" })),
         );
-        assert_eq!(tool_name, "bash");
+        assert_eq!(tool_name, "Execute ps command");
         assert_eq!(params.get("command"), Some(&"ps aux".to_string()));
-        assert_eq!(
-            params.get("description"),
-            Some(&"Execute ps command".to_string())
-        );
+        assert!(!params.contains_key("description"));
     }
 
     #[test]
@@ -1985,17 +2067,88 @@ mod tests {
             amux::acp_event::Event::ToolUse(tool) => {
                 assert_eq!(tool.tool_id, "tool-1");
                 assert_eq!(tool.tool_name, "grep");
-                assert_eq!(
-                    tool.params.get("description"),
-                    Some(&"grep".to_string())
-                );
                 assert_eq!(tool.params.get("pattern"), Some(&"MQTT".to_string()));
                 assert_eq!(
                     tool.params.get("path"),
                     Some(&"apps/daemon/src".to_string())
                 );
-                assert!(tool.description.contains("\"pattern\":\"MQTT\""));
-                assert!(tool.description.contains("\"path\":\"apps/daemon/src\""));
+                assert!(tool.description.is_empty());
+                assert!(!tool.params.contains_key("description"));
+            }
+            other => panic!("unexpected variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn forwards_diff_content_in_tool_use_update() {
+        let update = acp::ToolCallUpdate::new(
+            "tool-1",
+            acp::ToolCallUpdateFields::new()
+                .kind(acp::ToolKind::Edit)
+                .status(acp::ToolCallStatus::InProgress)
+                .content(vec![acp::Diff::new("src/a.ts", "new\n").old_text("old\n").into()]),
+        );
+        let events = translate_session_update(acp::SessionUpdate::ToolCallUpdate(update));
+
+        assert_eq!(events.len(), 1);
+        match events[0].event.as_ref().expect("event") {
+            amux::acp_event::Event::ToolUse(tool) => {
+                assert_eq!(tool.tool_id, "tool-1");
+                assert_eq!(tool.content.len(), 1);
+                match tool.content[0].payload.as_ref().expect("payload") {
+                    amux::acp_tool_call_content::Payload::Diff(diff) => {
+                        assert_eq!(diff.path, "src/a.ts");
+                        assert_eq!(diff.old_text.as_deref(), Some("old\n"));
+                        assert_eq!(diff.new_text, "new\n");
+                    }
+                    other => panic!("unexpected payload: {:?}", other),
+                }
+            }
+            other => panic!("unexpected variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn completed_tool_result_forwards_diff_content() {
+        let update = acp::ToolCallUpdate::new(
+            "tool-1",
+            acp::ToolCallUpdateFields::new()
+                .status(acp::ToolCallStatus::Completed)
+                .title("Edit src/a.ts")
+                .content(vec![acp::Diff::new("src/a.ts", "new\n").old_text("old\n").into()]),
+        );
+        let events = translate_session_update(acp::SessionUpdate::ToolCallUpdate(update));
+
+        assert_eq!(events.len(), 1);
+        match events[0].event.as_ref().expect("event") {
+            amux::acp_event::Event::ToolResult(result) => {
+                assert_eq!(result.tool_id, "tool-1");
+                assert!(result.success);
+                assert_eq!(result.content.len(), 1);
+            }
+            other => panic!("unexpected variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tool_call_update_with_content_only_emits_tool_use_without_title() {
+        let update = acp::ToolCallUpdate::new(
+            "tool-1",
+            acp::ToolCallUpdateFields::new()
+                .kind(acp::ToolKind::Edit)
+                .status(acp::ToolCallStatus::InProgress)
+                .content(vec![acp::Diff::new("src/a.ts", "new\n").old_text("old\n").into()]),
+        );
+        let events = translate_session_update(acp::SessionUpdate::ToolCallUpdate(update));
+
+        assert_eq!(events.len(), 1);
+        match events[0].event.as_ref().expect("event") {
+            amux::acp_event::Event::ToolUse(tool) => {
+                assert_eq!(tool.tool_id, "tool-1");
+                assert!(tool.tool_name.is_empty());
+                assert!(tool.description.is_empty());
+                assert!(tool.params.is_empty());
+                assert_eq!(tool.tool_kind, "edit");
             }
             other => panic!("unexpected variant: {:?}", other),
         }
