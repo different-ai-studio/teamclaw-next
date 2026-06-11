@@ -1,13 +1,15 @@
-import { createCatalog, generateCatalogPrompt } from "@json-render/core"
 import { z } from "zod"
-import { appShortName } from "@/lib/build-config"
+import { schema } from "@json-render/react"
 
 /**
  * 定义可供 AI 使用的组件目录
  * 这些组件基于项目中现有的 shadcn/ui 组件
+ *
+ * 0.19 起 catalog 通过 `schema.createCatalog(...)` 创建：
+ * - `hasChildren: true` → `slots: ["default"]`
+ * - 提示词由 `catalog.prompt()` 生成（取代旧的 `generateCatalogPrompt`）
  */
-export const uiCatalog = createCatalog({
-  name: `${appShortName}-ui`,
+export const uiCatalog = schema.createCatalog({
   components: {
     // 布局组件
     Card: {
@@ -15,29 +17,29 @@ export const uiCatalog = createCatalog({
         title: z.string().optional().describe("卡片标题"),
         description: z.string().optional().describe("卡片描述"),
       }),
-      hasChildren: true,
+      slots: ["default"],
       description: "卡片容器，用于分组相关内容",
     },
-    
+
     // 表单组件
     Form: {
       props: z.object({
         id: z.string().describe("表单ID，用于提交"),
       }),
-      hasChildren: true,
+      slots: ["default"],
       description: "表单容器，包含表单字段",
     },
-    
+
     FormField: {
       props: z.object({
         label: z.string().describe("字段标签"),
         name: z.string().describe("字段名称，用于数据绑定"),
         required: z.boolean().optional().describe("是否必填"),
       }),
-      hasChildren: true,
+      slots: ["default"],
       description: "表单字段容器，包含标签和输入控件",
     },
-    
+
     Input: {
       props: z.object({
         placeholder: z.string().optional().describe("占位符文本"),
@@ -47,7 +49,7 @@ export const uiCatalog = createCatalog({
       }),
       description: "文本输入框",
     },
-    
+
     Textarea: {
       props: z.object({
         placeholder: z.string().optional().describe("占位符文本"),
@@ -57,7 +59,7 @@ export const uiCatalog = createCatalog({
       }),
       description: "多行文本输入框",
     },
-    
+
     Select: {
       props: z.object({
         placeholder: z.string().optional().describe("占位符文本"),
@@ -70,7 +72,7 @@ export const uiCatalog = createCatalog({
       }),
       description: "下拉选择框",
     },
-    
+
     // 按钮组件
     Button: {
       props: z.object({
@@ -81,7 +83,7 @@ export const uiCatalog = createCatalog({
       }),
       description: "按钮，用于触发操作",
     },
-    
+
     // 显示组件
     Text: {
       props: z.object({
@@ -90,7 +92,7 @@ export const uiCatalog = createCatalog({
       }),
       description: "文本显示",
     },
-    
+
     Badge: {
       props: z.object({
         label: z.string().describe("徽章文本"),
@@ -98,14 +100,14 @@ export const uiCatalog = createCatalog({
       }),
       description: "徽章，用于显示状态或标签",
     },
-    
+
     Divider: {
       props: z.object({
         orientation: z.enum(["horizontal", "vertical"]).optional().describe("分隔线方向"),
       }),
       description: "分隔线",
     },
-    
+
     // 布局辅助
     Stack: {
       props: z.object({
@@ -114,10 +116,10 @@ export const uiCatalog = createCatalog({
         align: z.enum(["start", "center", "end", "stretch"]).optional().describe("对齐方式"),
         justify: z.enum(["start", "center", "end", "between", "around"]).optional().describe("主轴对齐"),
       }),
-      hasChildren: true,
+      slots: ["default"],
       description: "弹性布局容器",
     },
-    
+
     // 数据展示
     Metric: {
       props: z.object({
@@ -129,7 +131,7 @@ export const uiCatalog = createCatalog({
       description: "指标展示，用于显示数值数据",
     },
   },
-  
+
   actions: {
     submit: {
       params: z.object({
@@ -151,16 +153,14 @@ export const uiCatalog = createCatalog({
       description: "设置数据模型中的值",
     },
   },
-  
-  validation: "warn",
 })
 
 /**
  * 生成用于 AI 的组件目录提示词
  */
-export const catalogPrompt = generateCatalogPrompt(uiCatalog)
+export const catalogPrompt = uiCatalog.prompt()
 
 /**
  * 组件类型
  */
-export type CatalogComponentTypes = keyof typeof uiCatalog.components
+export type CatalogComponentTypes = keyof typeof uiCatalog.data.components

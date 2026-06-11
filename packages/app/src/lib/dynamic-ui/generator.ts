@@ -1,5 +1,16 @@
-import type { UITree } from "@json-render/core"
+import type { FlatElement, Spec } from "@json-render/core"
 import { catalogPrompt } from "./catalog"
+
+/**
+ * AI 生成的扁平 UI 树。
+ *
+ * 0.19 的 `Spec.elements` 用 `UIElement`（无 key/parentKey），而历史模板与 AI
+ * 输出沿用带 `key`/`parentKey` 的 `FlatElement` 形状。两者均为合法 `Spec`
+ * （`FlatElement extends UIElement`），故本地保留 `UITree` 别名以减少改动面。
+ */
+export type UITree = Pick<Spec, "root"> & {
+  elements: Record<string, FlatElement>
+}
 
 /**
  * 生成发送给 AI 的 UI 生成提示词

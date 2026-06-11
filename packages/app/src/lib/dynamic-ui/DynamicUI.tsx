@@ -1,12 +1,12 @@
 import * as React from "react"
 import { useTranslation } from "react-i18next"
-import type { UITree } from "@json-render/core"
+import type { Spec } from "@json-render/core"
 import { JSONUIProvider, Renderer } from "@json-render/react"
 import { componentRegistry, fallbackComponent } from "./registry"
 
 interface DynamicUIProps {
-  /** UI 树结构 */
-  tree: UITree | null
+  /** UI 树结构（0.19 的 Spec） */
+  tree: Spec | null
   /** 是否正在加载/流式传输 */
   loading?: boolean
   /** 初始数据模型 */
@@ -35,13 +35,17 @@ export function DynamicUI({
   return (
     <JSONUIProvider
       registry={componentRegistry}
-      initialData={initialData}
-      actionHandlers={actionHandlers}
-      onDataChange={onDataChange}
+      initialState={initialData}
+      handlers={actionHandlers}
+      onStateChange={
+        onDataChange
+          ? (changes) => changes.forEach((c) => onDataChange(c.path, c.value))
+          : undefined
+      }
     >
       <div className="w-full">
         <Renderer
-          tree={tree}
+          spec={tree}
           registry={componentRegistry}
           loading={loading}
           fallback={fallbackComponent}
@@ -56,7 +60,7 @@ export function DynamicUI({
  * 在对话中直接显示生成的 UI，不添加额外包装
  */
 interface DynamicUIMessageProps {
-  tree: UITree | null
+  tree: Spec | null
   loading?: boolean
   title?: string // 保留但不使用，保持 API 兼容
 }

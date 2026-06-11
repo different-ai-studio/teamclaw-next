@@ -1,6 +1,6 @@
 import * as React from "react"
 import type { ComponentRegistry, ComponentRenderProps } from "@json-render/react"
-import { useDataBinding } from "@json-render/react"
+import { useStateBinding } from "@json-render/react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -88,7 +88,7 @@ function InputRenderer({ element }: ComponentRenderProps<{
   disabled?: boolean
 }>) {
   const { props } = element
-  const [value, setValue] = useDataBinding<string>(props.valuePath || "")
+  const [value, setValue] = useStateBinding<string>(props.valuePath || "")
   
   return (
     <Input
@@ -109,7 +109,7 @@ function TextareaRenderer({ element }: ComponentRenderProps<{
   disabled?: boolean
 }>) {
   const { props } = element
-  const [value, setValue] = useDataBinding<string>(props.valuePath || "")
+  const [value, setValue] = useStateBinding<string>(props.valuePath || "")
   
   return (
     <Textarea
@@ -130,7 +130,7 @@ function SelectRenderer({ element }: ComponentRenderProps<{
   disabled?: boolean
 }>) {
   const { props } = element
-  const [value, setValue] = useDataBinding<string>(props.valuePath || "")
+  const [value, setValue] = useStateBinding<string>(props.valuePath || "")
   
   // 过滤掉无效的选项（流式解析时可能有不完整的数据）
   const validOptions = (props.options || []).filter(
@@ -281,7 +281,7 @@ function MetricRenderer({ element }: ComponentRenderProps<{
   format?: "number" | "currency" | "percent"
 }>) {
   const { props } = element
-  const [boundValue] = useDataBinding<string | number>(props.valuePath || "")
+  const [boundValue] = useStateBinding<string | number>(props.valuePath || "")
   const displayValue = props.value ?? boundValue ?? "-"
   
   const formatValue = (val: string | number) => {

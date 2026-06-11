@@ -190,8 +190,8 @@ importers:
         specifier: ^0.19.0
         version: 0.19.0(zod@3.25.76)
       '@json-render/react':
-        specifier: ^0.2.0
-        version: 0.2.0(react@19.2.7)(zod@3.25.76)
+        specifier: ^0.19.0
+        version: 0.19.0(react@19.2.7)(zod@3.25.76)
       '@radix-ui/react-avatar':
         specifier: ^1.1.11
         version: 1.1.11(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -1816,15 +1816,10 @@ packages:
     peerDependencies:
       zod: ^4.0.0
 
-  '@json-render/core@0.2.0':
-    resolution: {integrity: sha512-LBKv4M5skz7JRpTn53g6qF/zj5u/xUhuCp6WtJn/ZTIxGEAogH8sn3Ql/Nk/O0sgbQHtriRmoJuI23/5fGCXPw==}
+  '@json-render/react@0.19.0':
+    resolution: {integrity: sha512-kTW6b6cSNRrlEfCUf/69SLoLn+CufC968ruge9tnQlp9pDTGG/SK8pgM541FdgwMFA4zm3s5mpM3G8rdODKc/A==}
     peerDependencies:
-      zod: ^4.0.0
-
-  '@json-render/react@0.2.0':
-    resolution: {integrity: sha512-4tdoMfc3t0Je+DMNsyJguz7aJkqfLhEY8/mvBchL9kweRfJHAZocT7doyqRCGAnCBtIXCKQ8YAbm0sb0Qr9OFw==}
-    peerDependencies:
-      react: ^19.0.0
+      react: ^19.2.3
 
   '@lezer/common@1.5.2':
     resolution: {integrity: sha512-sxQE460fPZyU3sdc8lafxiPwJHBzZRy/udNFynGQky1SePYBdhkBl1kOagA9uT3pxR8K09bOrmTUqA9wb/PjSQ==}
@@ -10488,13 +10483,9 @@ snapshots:
     dependencies:
       zod: 3.25.76
 
-  '@json-render/core@0.2.0(zod@3.25.76)':
+  '@json-render/react@0.19.0(react@19.2.7)(zod@3.25.76)':
     dependencies:
-      zod: 3.25.76
-
-  '@json-render/react@0.2.0(react@19.2.7)(zod@3.25.76)':
-    dependencies:
-      '@json-render/core': 0.2.0(zod@3.25.76)
+      '@json-render/core': 0.19.0(zod@3.25.76)
       react: 19.2.7
     transitivePeerDependencies:
       - zod
