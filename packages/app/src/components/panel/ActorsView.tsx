@@ -173,12 +173,25 @@ export function ActorsView() {
   const { t } = useTranslation()
   const { state: sidebarState } = useSidebar()
   const sidebarCollapsed = sidebarState === 'collapsed'
-  const { actors, loading, error, teamId } = useActorsForTeam()
+  const { actors, loading, error, teamId, refetch } = useActorsForTeam()
   const ensureDefaultAgentLoaded = useMemberPreferencesStore((s) => s.ensureLoaded)
 
   React.useEffect(() => {
     if (teamId) void ensureDefaultAgentLoaded(teamId)
   }, [teamId, ensureDefaultAgentLoaded])
+
+  // Opening the "All actors" panel kicks one background reconcile so a teammate's
+  // recent change (e.g. an agent flipped team→personal, which the server already
+  // filters out for other viewers) shows up immediately instead of lingering until
+  // the next 60s periodic poll. The panel only mounts while the sidebar filter is
+  // `actors` (SidebarSecondColumn), so this fires each time it's shown. refetch()
+  // keeps the current list visible — no spinner — and swaps in the fresh result
+  // when it lands. The very first mount is already covered by the store's initial
+  // load (this extra call coalesces via the in-flight guard); reopens are where it
+  // does real work.
+  React.useEffect(() => {
+    if (teamId) refetch()
+  }, [teamId, refetch])
   const [query, setQuery] = React.useState('')
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [filter, setFilter] = React.useState<ActorTypeFilter>('all')
