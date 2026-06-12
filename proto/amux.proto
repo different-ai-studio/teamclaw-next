@@ -79,22 +79,56 @@ message AcpOutput {
   bool is_complete = 2;
 }
 
+message AcpToolCallLocation {
+  string path = 1;
+  optional uint32 line = 2;
+}
+
+message AcpToolCallTextContent {
+  string text = 1;
+}
+
+message AcpToolCallDiff {
+  string path = 1;
+  optional string old_text = 2;
+  string new_text = 3;
+}
+
+message AcpToolCallTerminal {
+  string terminal_id = 1;
+}
+
+message AcpToolCallContent {
+  oneof payload {
+    AcpToolCallTextContent text = 1;
+    AcpToolCallDiff diff = 2;
+    AcpToolCallTerminal terminal = 3;
+  }
+}
+
 message AcpToolUse {
   string tool_id = 1;
-  string tool_name = 2;           // "Read", "Edit", "Bash", "Write", etc.
-  string description = 3;
+  string tool_name = 2;           // ACP session/update title (human or tool id)
+  string description = 3;         // Deprecated: legacy misuse; clients should ignore
   map<string, string> params = 4;
   // ACP ToolKind enum as snake_case string: "read" | "edit" | "delete" |
   // "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" |
   // "other". Free-form text so future ACP enum additions don't require
   // a proto bump; renderers must tolerate unknown values (treat as "other").
   string tool_kind = 5;
+  // Phase 2 — ACP fidelity fields (additive; empty on older daemons)
+  string raw_input_json = 6;              // JSON-serialized ACP rawInput
+  repeated AcpToolCallContent content = 7;
+  repeated AcpToolCallLocation locations = 8;
+  string status = 9;                      // pending|in_progress|completed|failed
 }
 
 message AcpToolResult {
   string tool_id = 1;
   bool success = 2;
   string summary = 3;
+  string raw_output_json = 4;             // JSON-serialized ACP rawOutput
+  repeated AcpToolCallContent content = 5;
 }
 
 message AcpError {

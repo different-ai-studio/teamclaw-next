@@ -611,6 +611,34 @@ describe("adaptTeamclawMessages", () => {
     expect(result[1].content).toBe("from B");
   });
 
+  it("replays ACP content from tool metadata on reload", () => {
+    const toolId = "t-diff-replay";
+    const msgs = [
+      tmsg({
+        kind: MessageKind.AGENT_TOOL_CALL,
+        metadataJson: JSON.stringify({
+          tool_id: toolId,
+          tool_name: "write",
+          description: "",
+          content: [
+            { type: "diff", path: "src/a.ts", old_text: "a", new_text: "ab" },
+          ],
+        }),
+        turnId: "t-diff",
+        t: 1,
+      }),
+      tmsg({
+        kind: MessageKind.AGENT_TOOL_RESULT,
+        content: "done",
+        metadataJson: JSON.stringify({ tool_id: toolId, success: true }),
+        turnId: "t-diff",
+        t: 2,
+      }),
+    ];
+    const result = adaptTeamclawMessages(msgs)!;
+    expect(result[0].toolCalls![0].content?.[0]?.type).toBe("diff");
+  });
+
   it("no replies but has tool calls → SdkMessage with empty content and toolCalls[]", () => {
     const toolId = "t-call-only";
     const msgs = [

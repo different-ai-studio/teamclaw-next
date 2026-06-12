@@ -11,7 +11,7 @@ import {
   getFileName,
 } from "./tool-call-utils";
 import { parseSingleFileDiff, type DiffLine } from "@/components/diff/diff-ast";
-import { tryParseToolPatchForUI } from "@/components/diff/parse-tool-patch";
+import { resolveToolCallDiff } from "./tool-call-content";
 import { ToolCallDiffBody } from "./ToolCallDiffBody";
 import {
   resolveWorkspaceRelativePath,
@@ -19,17 +19,17 @@ import {
 } from "@/hooks/useToolCallFileOnDisk";
 import { ToolCallStatusGlyph } from "./ToolCallStatusGlyph";
 
-function generateUnifiedDiff(before: string, after: string, filePath: string): string {
-  const oldLines = before.split("\n");
-  const newLines = after.split("\n");
+function generateNewFileDiff(content: string, filePath: string): string {
   const lines: string[] = [];
   lines.push(`diff --git a/${filePath} b/${filePath}`);
-  lines.push(`--- a/${filePath}`);
+  lines.push("new file mode 100644");
+  lines.push("--- /dev/null");
   lines.push(`+++ b/${filePath}`);
-  lines.push(`@@ -1,${oldLines.length} +1,${newLines.length} @@`);
-
-  oldLines.forEach((line) => lines.push(`-${line}`));
-  newLines.forEach((line) => lines.push(`+${line}`));
+  const contentLines = content.split("\n");
+  lines.push(`@@ -0,0 +1,${contentLines.length} @@`);
+  for (const line of contentLines) {
+    lines.push(`+${line}`);
+  }
   return lines.join("\n");
 }
 
@@ -41,8 +41,6 @@ export function EditToolCard({ toolCall }: { toolCall: ToolCall }) {
   const args = toolCall.arguments as Record<string, unknown>;
   const filePath = extractFilePath(args);
   const patchText = extractPatchTextFromToolArgs(args);
-  const oldStr = String(args?.old_string || args?.oldString || "");
-  const newStr = String(args?.new_string || args?.newString || "");
 
   const deletedFiles = useMemo(
     () => (patchText ? parseDeleteOnlyPatch(patchText) : null),
@@ -50,9 +48,13 @@ export function EditToolCard({ toolCall }: { toolCall: ToolCall }) {
   );
 
   const diffData = useMemo(() => {
+    const fromContent = resolveToolCallDiff(toolCall);
+    if (fromContent) return fromContent;
+
     try {
-      if (oldStr || newStr) {
-        const diffText = generateUnifiedDiff(oldStr, newStr, filePath || "file");
+      const wholeFile = String(args?.contents || args?.content || "");
+      if (wholeFile && !wholeFile.trim().startsWith("diff --git")) {
+        const diffText = generateNewFileDiff(wholeFile, filePath || "file");
         const parsed = parseSingleFileDiff(diffText, filePath || "file");
         if (!parsed) return null;
 
@@ -68,23 +70,11 @@ export function EditToolCard({ toolCall }: { toolCall: ToolCall }) {
           headerPath: filePath || "file",
         };
       }
-
-      if (patchText) {
-        const parsed = tryParseToolPatchForUI(patchText, filePath);
-        if (!parsed || parsed.lines.length === 0) return null;
-
-        return {
-          lines: parsed.lines,
-          additions: parsed.additions,
-          deletions: parsed.deletions,
-          headerPath: filePath || parsed.filePath || "file",
-        };
-      }
     } catch {
       return null;
     }
     return null;
-  }, [oldStr, newStr, filePath, patchText]);
+  }, [toolCall, filePath, args?.content, args?.contents]);
 
   const headerPath = diffData?.headerPath ?? filePath;
   const pathForDisk =

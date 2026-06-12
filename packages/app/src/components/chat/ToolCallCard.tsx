@@ -113,9 +113,9 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onOpenD
   const compactToolName = routeName.toLowerCase();
   const isTodo = matchesTodoTool(toolCall);
   const isCompactSearchTool =
-    compactToolName.includes("grep") ||
-    compactToolName === "glob" ||
-    compactToolName === "find";
+    routeName === "grep" ||
+    routeName === "glob" ||
+    routeName === "find";
 
   const renderExpandableHeaderSlot = (icon: React.ReactNode, testId?: string) => (
     <span className="relative h-[22px] w-[22px] shrink-0" aria-hidden="true">
@@ -138,9 +138,10 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onOpenD
   );
 
   const getCompactTitle = () => {
-    if (compactToolName.includes("grep")) return t("chat.toolCall.search.grep", "Grep");
-    if (compactToolName === "glob") return t("chat.toolCall.search.glob", "Glob");
-    if (compactToolName === "find") return t("chat.toolCall.search.find", "Find");
+    const route = routeName;
+    if (route === "grep") return t("chat.toolCall.search.grep", "Grep");
+    if (route === "glob") return t("chat.toolCall.search.glob", "Glob");
+    if (route === "find") return t("chat.toolCall.search.find", "Find");
     if (isTodo) return t("chat.toolCall.todo.title", "Todo");
     return formatToolName((key, fallback, options) => t(key, { defaultValue: fallback, ...options }), routeName);
   };

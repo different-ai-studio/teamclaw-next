@@ -18,7 +18,7 @@ import {
 import type { AgentStreamEntry } from "@/stores/v2-streaming-store";
 
 describe("live agent stream event helpers", () => {
-  it("normalizes execute tool uses into command tool calls", () => {
+  it("normalizes execute tool uses preserving wire name when absent", () => {
     expect(
       normalizeToolUseEvent({
         tool_id: "tool-1",
@@ -27,10 +27,27 @@ describe("live agent stream event helpers", () => {
       }),
     ).toEqual({
       toolId: "tool-1",
-      toolName: "bash",
+      toolName: "unknown",
       description: '{"command":"ps aux"}',
       params: { command: "ps aux" },
       toolKind: "execute",
+    });
+  });
+
+  it("preserves explicit ACP tool_name on the wire", () => {
+    expect(
+      normalizeToolUseEvent({
+        tool_id: "tool-1",
+        tool_name: "glob",
+        tool_kind: "search",
+        params: { pattern: "**/*.ts", path: "." },
+      }),
+    ).toEqual({
+      toolId: "tool-1",
+      toolName: "glob",
+      description: "",
+      params: { pattern: "**/*.ts", path: "." },
+      toolKind: "search",
     });
   });
 
@@ -45,7 +62,7 @@ describe("live agent stream event helpers", () => {
       }),
     ).toEqual({
       toolId: "tool-skill",
-      toolName: "skill",
+      toolName: "other",
       description: "skill",
       params: { name: "brainstorming", description: "skill" },
       toolKind: "other",
@@ -63,7 +80,7 @@ describe("live agent stream event helpers", () => {
       }),
     ).toEqual({
       toolId: "tool-1",
-      toolName: "bash",
+      toolName: "Execute ps command",
       description: "Execute ps command",
       params: { command: "ps aux", description: "Execute ps command" },
       toolKind: "execute",
