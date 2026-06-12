@@ -5658,10 +5658,17 @@ fn spawn_sock_listener(sock_path: PathBuf, tx: mpsc::Sender<SockCommand>) {
     info!("amuxd control pipe: listening on {pipe_name}");
     tokio::spawn(async move {
         loop {
+            // A connect() error is typically transient (client vanished mid-
+            // handshake, spurious OS error). Mirror the unix accept loop's
+            // policy: log and keep serving rather than killing the control
+            // channel for the daemon's lifetime.
             if let Err(e) = server.connect().await {
                 error!("amuxd control pipe: connect failed: {e}");
-                break;
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                continue;
             }
+            // Re-creating the next instance failing is unrecoverable (the pipe
+            // name itself is unusable), so the listener task exits here.
             let next = match ServerOptions::new().create(&pipe_name) {
                 Ok(s) => s,
                 Err(e) => {
