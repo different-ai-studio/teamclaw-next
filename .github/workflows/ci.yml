@@ -40,6 +40,9 @@ jobs:
       - name: Run unit tests
         run: pnpm test:unit
 
+      - name: Run script tests
+        run: pnpm test:scripts
+
   rust-check:
     name: Rust Format & Clippy
     runs-on: ubuntu-latest
