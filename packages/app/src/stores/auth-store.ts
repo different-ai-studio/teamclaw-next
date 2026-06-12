@@ -374,5 +374,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch (error) {
       console.warn("[auth] clearBootstrapAppliedFields on signOut failed:", error);
     }
+    try {
+      const { resetClientChatState } = await import("@/lib/reset-client-chat-state");
+      resetClientChatState();
+    } catch (error) {
+      console.warn("[auth] resetClientChatState on signOut failed:", error);
+    }
   },
 }));

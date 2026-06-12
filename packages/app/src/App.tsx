@@ -130,6 +130,7 @@ import {
   rememberLiveEventId,
   streamEntryHasVisibleContent,
 } from "@/lib/live-agent-stream";
+import { resetClientChatState } from "@/lib/reset-client-chat-state";
 import {
   mapAcpPlanEntries,
   syncPlanFromTodoTool,
@@ -714,6 +715,28 @@ function AppContent() {
   // Wait for a team id for MQTT ACL. The active team from settings is the
   // authoritative source — populated by AuthGate / loadCurrentTeam after login.
   const currentTeamId = useCurrentTeamStore((s) => s.team?.id ?? null);
+
+  // Clear in-memory chat when the signed-in user or active team changes.
+  // signOut resets before unmount; this effect owns team-switch / adoptSession.
+  const chatIdentityKey =
+    userId && currentTeamId ? `${userId}::${currentTeamId}` : null;
+  const prevChatIdentityRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!chatIdentityKey) {
+      prevChatIdentityRef.current = null;
+      return;
+    }
+    if (
+      prevChatIdentityRef.current !== null &&
+      prevChatIdentityRef.current !== chatIdentityKey
+    ) {
+      resetClientChatState();
+      if (!isV2E2EControlActive()) {
+        void useSessionListStore.getState().loadFirstPage();
+      }
+    }
+    prevChatIdentityRef.current = chatIdentityKey;
+  }, [chatIdentityKey]);
 
   // Report this desktop install's tauri client version once per team selection.
   useEffect(() => {
@@ -1751,6 +1774,9 @@ function AppContent() {
         historyRows = await getBackend().messages.listMessages(currentSessionId);
       } catch (error) {
         console.warn("[history] load failed:", error instanceof Error ? error.message : error);
+        if (!cancelled) {
+          useSessionMessageStore.getState().setMessages(currentSessionId, []);
+        }
         return;
       }
       if (cancelled) return;

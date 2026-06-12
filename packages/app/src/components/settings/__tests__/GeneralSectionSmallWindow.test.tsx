@@ -74,11 +74,6 @@ vi.mock('@/components/ui/select', () => ({
   SelectValue: () => null,
 }))
 
-vi.mock('@/lib/permission-policy', () => ({
-  getPermissionPolicy: () => 'ask',
-  setPermissionPolicy: vi.fn(),
-}))
-
 vi.mock('../shared', () => ({
   SettingCard: ({ children }: { children: React.ReactNode }) => <section>{children}</section>,
   SectionHeader: ({ title }: { title: string }) => <h2>{title}</h2>,

@@ -9,8 +9,6 @@ import {
   Monitor,
   Languages,
   Bell,
-  Shield,
-  AlertTriangle,
   Server,
   User,
   Bug,
@@ -31,7 +29,6 @@ import { useMqttReconnectStore } from '@/stores/mqtt-reconnect'
 import { useCurrentTeamStore } from '@/stores/current-team'
 import { SettingCard, SectionHeader, ToggleSwitch } from './shared'
 import { useAcpDebugStore } from '@/stores/acp-debug-store'
-import { getPermissionPolicy, setPermissionPolicy, type PermissionPolicy } from '@/lib/permission-policy'
 import { appShortName, buildConfig } from '@/lib/build-config'
 import { LANGUAGE_OPTIONS, getPreferredLanguage, normalizeSupportedLanguage, persistLanguage } from '@/lib/locale'
 import { getEffectiveServerConfig, type ServerConfig } from '@/lib/server-config'
@@ -120,12 +117,6 @@ export const GeneralSection = React.memo(function GeneralSection() {
   const setNotificationLevel = React.useCallback((level: string) => {
     setNotificationLevelState(level)
     try { localStorage.setItem(`${appShortName}-notification-level`, level) } catch { /* ignore */ }
-  }, [])
-  const [permissionPolicy, setPermissionPolicyState] = React.useState<PermissionPolicy>(getPermissionPolicy)
-  const handlePermissionPolicyChange = React.useCallback((value: string) => {
-    const policy = value as PermissionPolicy
-    setPermissionPolicyState(policy)
-    setPermissionPolicy(policy)
   }, [])
   const acpStreamDebugEnabled = useAcpDebugStore((s) => s.enabled)
   const setAcpStreamDebugEnabled = useAcpDebugStore((s) => s.setEnabled)
@@ -286,36 +277,6 @@ export const GeneralSection = React.memo(function GeneralSection() {
                 <SelectItem value="mute">{t('settings.general.notifMute', 'Mute')}</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-
-          <div className="border-t pt-4">
-            <div className="space-y-2">
-              <label className="text-[13px] font-medium flex items-center gap-2">
-                <Shield className="h-4 w-4 text-muted-foreground" />
-                {t('permission.policy', 'Permission Policy')}
-              </label>
-              <p className="text-xs text-muted-foreground">
-                {t('permission.policyDesc', 'Control how permission requests are handled')}
-              </p>
-              <Select value={permissionPolicy} onValueChange={handlePermissionPolicyChange}>
-                <SelectTrigger className="h-11" data-testid="permission-policy-select">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ask">{t('permission.policyAsk', 'Ask (prompt each time)')}</SelectItem>
-                  <SelectItem value="batch">{t('permission.policyBatch', 'Batch (request all at once)')}</SelectItem>
-                  <SelectItem value="bypass">{t('permission.policyBypass', 'Bypass (auto-authorize)')}</SelectItem>
-                </SelectContent>
-              </Select>
-              {permissionPolicy === 'bypass' && (
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                  <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
-                  <p className="text-xs text-amber-600 dark:text-amber-400">
-                    {t('permission.bypassWarning', 'All permission requests will be automatically authorized. Only recommended for trusted environments (development, testing, or managed deployments).')}
-                  </p>
-                </div>
-              )}
-            </div>
           </div>
 
           <div className="border-t pt-4">

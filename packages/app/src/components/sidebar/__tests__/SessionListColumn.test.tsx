@@ -5,7 +5,6 @@ import { SessionListColumn } from '../SessionListColumn'
 import { useUIStore } from '@/stores/ui'
 import { useSessionListStore } from '@/stores/session-list-store'
 import { useSessionStore } from '@/stores/session'
-import { useSessionListStore } from '@/stores/session-list-store'
 
 vi.mock('@/components/sidebar/session-search-dialog', () => ({
   SessionSearchDialog: () => null,
@@ -108,6 +107,26 @@ describe('SessionListColumn', () => {
   it('shows a quiet unread indicator for unread inactive sessions', () => {
     render(<SessionListColumn />)
     expect(screen.getByLabelText('未读')).toBeInTheDocument()
+  })
+
+  it('shows pinned sessions above regular sessions with a divider in "all" mode', () => {
+    useSessionListStore.setState({
+      rows: [
+        mkSessionRow({ id: 's1', title: 'Pinned old', last_message_at: '2026-05-15T08:00:00.000Z' }),
+        mkSessionRow({ id: 's2', title: 'Recent', last_message_at: '2026-05-17T08:00:00.000Z' }),
+      ],
+      pinnedSessionIds: ['s1'],
+      loading: false,
+    })
+    render(<SessionListColumn />)
+
+    expect(screen.getByTestId('v2-session-pinned-header')).toHaveTextContent(/Pinned|已置顶/)
+    expect(screen.getByTestId('v2-session-pinned-divider')).toBeInTheDocument()
+
+    const titles = screen.getAllByTestId('v2-session-row-title').map((el) => el.textContent)
+    expect(titles[0]).toBe('Pinned old')
+    expect(titles[1]).toBe('Recent')
+    expect(screen.queryByText(/Today|今天/)).not.toBeInTheDocument()
   })
 
   it('filters to pinned sessions in "pinned" mode', () => {
