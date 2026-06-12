@@ -536,12 +536,13 @@ pub async fn webview_create(
         _ => None,
     };
 
-    // Web SSO: clear any stale supabase-js session from this allowlisted Betly
-    // host at documentStart so the user must authenticate fresh (a lingering
-    // session's refresh token may already be consumed). Same host gate as the
-    // seed path — never touch a non-allowlisted page's storage.
+    // Web SSO: clear any stale supabase-js session at documentStart so the user
+    // must authenticate fresh (a lingering session's refresh token may already
+    // be consumed). The script clears only on the first load (sessionStorage
+    // one-shot), so it acts solely on the page we deliberately navigate to —
+    // the FC-delivered login URL chosen by the trusted frontend.
     let clear_inject_script = match clear_storage_key.as_deref() {
-        Some(key) if !key.is_empty() && host_allows_session_injection(&parsed_url) => {
+        Some(key) if !key.is_empty() && parsed_url.host_str().is_some() => {
             Some(build_clear_session_script(key))
         }
         _ => None,
@@ -899,24 +900,26 @@ pub async fn webview_get_title(app: tauri::AppHandle, label: String) -> Result<S
 /// `ICoreWebView2::ExecuteScript`). Returns `Ok(None)` when the key is absent /
 /// value is JS null, or on any read error. A no-op (`None`) on other platforms.
 ///
-/// Defense in depth: only ever reads from an allowlisted Betly admin host (the
-/// same allowlist as the forward session injection). This makes token-harvest
-/// safety structural rather than dependent on the caller passing a trusted
-/// label — a careless future caller can't exfil an arbitrary `wv-*` tab's
-/// localStorage.
+/// Defense in depth: the caller passes the exact host it expects the webview to
+/// be on (derived from the FC-delivered Web SSO login URL), and the read only
+/// runs when the webview's CURRENT host matches it. So a redirect to another
+/// origin — or a careless future caller — can't exfil an arbitrary page's
+/// localStorage. An absent/empty `expected_host` reads nothing.
 #[tauri::command]
 pub async fn webview_read_local_storage(
     app: tauri::AppHandle,
     label: String,
     key: String,
+    expected_host: Option<String>,
 ) -> Result<Option<String>, String> {
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "Webview not found".to_string())?;
 
-    // Only harvest from allowlisted Betly admin hosts. Any other origin → no read.
-    match webview.url() {
-        Ok(url) if host_allows_session_injection(&url) => {}
+    // Only harvest when the webview is actually on the caller-declared host.
+    let allowed = expected_host.as_deref().filter(|h| !h.is_empty());
+    match (allowed, webview.url()) {
+        (Some(host), Ok(url)) if url.host_str() == Some(host) => {}
         _ => return Ok(None),
     }
 

@@ -23,10 +23,25 @@ function buildMqttConfig() {
   return mqtt;
 }
 
+// Web SSO 快捷登录 target, delivered to clients so the Betly admin sign-in URL
+// and supabase-js storage key are not hardcoded in the app. Env-driven like the
+// MQTT block. storageKey is `sb-<supabase-ref>-auth-token` and can't be derived
+// from the admin host, so it is its own variable.
+function buildWebSsoConfig() {
+  const loginUrl = process.env.WEBSSO_LOGIN_URL?.trim();
+  if (!loginUrl) return null;
+  const webSso: any = { loginUrl };
+  const storageKey = process.env.WEBSSO_STORAGE_KEY?.trim();
+  if (storageKey) webSso.storageKey = storageKey;
+  return webSso;
+}
+
 export function buildBootstrapConfig() {
   const config: any = {};
   const mqtt = buildMqttConfig();
   if (mqtt) config.mqtt = mqtt;
+  const webSso = buildWebSsoConfig();
+  if (webSso) config.webSso = webSso;
   return config;
 }
 

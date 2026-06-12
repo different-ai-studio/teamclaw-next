@@ -30,6 +30,7 @@ test("buildBootstrapConfig returns mqtt block when env is set", () => {
       MQTT_USERNAME: "user-1",
       MQTT_PASSWORD: "secret",
       MQTT_USE_TLS: "true",
+      WEBSSO_LOGIN_URL: undefined,
     },
     () => {
       const cfg = buildBootstrapConfig();
@@ -76,6 +77,7 @@ test("GET /v1/config/bootstrap returns env-derived mqtt config to authed callers
       MQTT_USERNAME: undefined,
       MQTT_PASSWORD: undefined,
       MQTT_USE_TLS: undefined,
+      WEBSSO_LOGIN_URL: undefined,
     },
     async () => {
       const response = await handleBusinessApiRequest(
@@ -91,6 +93,37 @@ test("GET /v1/config/bootstrap returns env-derived mqtt config to authed callers
       assert.deepEqual(body, {
         mqtt: { url: "wss://mqtt.example.com:8884" },
       });
+    },
+  );
+});
+
+test("buildBootstrapConfig returns webSso block when env is set", () => {
+  withEnv(
+    {
+      MQTT_BROKER_URL: undefined,
+      WEBSSO_LOGIN_URL: "https://testadmin.ucar.cc/sign-in",
+      WEBSSO_STORAGE_KEY: "sb-test-supa-auth-token",
+    },
+    () => {
+      assert.deepEqual(buildBootstrapConfig(), {
+        webSso: {
+          loginUrl: "https://testadmin.ucar.cc/sign-in",
+          storageKey: "sb-test-supa-auth-token",
+        },
+      });
+    },
+  );
+});
+
+test("buildBootstrapConfig omits webSso when login url is missing", () => {
+  withEnv(
+    {
+      MQTT_BROKER_URL: undefined,
+      WEBSSO_LOGIN_URL: undefined,
+      WEBSSO_STORAGE_KEY: "sb-test-supa-auth-token",
+    },
+    () => {
+      assert.deepEqual(buildBootstrapConfig(), {});
     },
   );
 });

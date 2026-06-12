@@ -4,9 +4,11 @@ vi.mock("@/lib/build-config", () => ({
   buildConfig: { features: { auth: { webSSO: true } } },
 }));
 
-const cloudApiUrlMock = vi.fn<[], string | undefined>();
+// ssoConfig now reads the FC-delivered Web SSO target out of server-config
+// (cached from /v1/config/bootstrap) — nothing is hardcoded.
+const serverCfgMock = vi.fn<[], { webSsoLoginUrl?: string; webSsoStorageKey?: string }>();
 vi.mock("@/lib/server-config", () => ({
-  getEffectiveServerConfigSync: () => ({ cloudApiUrl: cloudApiUrlMock() }),
+  getEffectiveServerConfigSync: () => serverCfgMock(),
 }));
 
 const invokeMock = vi.fn();
@@ -14,11 +16,16 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invokeMock
 
 import { ssoConfig, runWebSso, cancelWebSso } from "@/lib/auth/web-sso";
 
-describe("ssoConfig", () => {
-  beforeEach(() => cloudApiUrlMock.mockReset());
+const TEST_CFG = {
+  webSsoLoginUrl: "https://testadmin.ucar.cc/sign-in",
+  webSsoStorageKey: "sb-test-supa-auth-token",
+};
 
-  it("maps a non-prod cloudApiUrl to the test admin host", () => {
-    cloudApiUrlMock.mockReturnValue("https://belayo-test-api.ucar.cc");
+describe("ssoConfig", () => {
+  beforeEach(() => serverCfgMock.mockReset());
+
+  it("returns the FC-delivered login URL + storage key, with host derived from the URL", () => {
+    serverCfgMock.mockReturnValue(TEST_CFG);
     expect(ssoConfig()).toEqual({
       loginUrl: "https://testadmin.ucar.cc/sign-in",
       host: "testadmin.ucar.cc",
@@ -26,30 +33,26 @@ describe("ssoConfig", () => {
     });
   });
 
-  it("maps the prod cloudApiUrl to the prod admin host", () => {
-    cloudApiUrlMock.mockReturnValue("https://cloud.ucar.cc");
-    expect(ssoConfig()).toEqual({
-      loginUrl: "https://admin.mx5.cn/sign-in",
-      host: "admin.mx5.cn",
-      storageKey: "sb-supa-auth-token",
-    });
+  it("returns null when the FC didn't deliver a login URL", () => {
+    serverCfgMock.mockReturnValue({ webSsoStorageKey: "sb-test-supa-auth-token" });
+    expect(ssoConfig()).toBeNull();
   });
 
-  it("returns null when cloudApiUrl is missing", () => {
-    cloudApiUrlMock.mockReturnValue(undefined);
+  it("returns null when the storage key is missing", () => {
+    serverCfgMock.mockReturnValue({ webSsoLoginUrl: "https://testadmin.ucar.cc/sign-in" });
     expect(ssoConfig()).toBeNull();
   });
 });
 
 describe("runWebSso", () => {
   beforeEach(() => {
-    cloudApiUrlMock.mockReturnValue("https://belayo-test-api.ucar.cc");
+    serverCfgMock.mockReturnValue(TEST_CFG);
     invokeMock.mockReset();
     Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
     Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
   });
 
-  it("opens the webview, polls localStorage, and returns the refresh_token", async () => {
+  it("opens the webview (clearing stale session), polls scoped to the host, returns the refresh_token", async () => {
     const session = JSON.stringify({ access_token: "AT", refresh_token: "RT", user: { id: "u1" } });
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "webview_create") return Promise.resolve();
@@ -62,6 +65,12 @@ describe("runWebSso", () => {
     expect(invokeMock).toHaveBeenCalledWith("webview_create", expect.objectContaining({
       label: "websso-login",
       url: "https://testadmin.ucar.cc/sign-in",
+      clearStorageKey: "sb-test-supa-auth-token",
+    }));
+    expect(invokeMock).toHaveBeenCalledWith("webview_read_local_storage", expect.objectContaining({
+      label: "websso-login",
+      key: "sb-test-supa-auth-token",
+      expectedHost: "testadmin.ucar.cc",
     }));
     expect(invokeMock).toHaveBeenCalledWith("webview_close", { label: "websso-login" });
   });

@@ -12,8 +12,14 @@ interface BootstrapMqttPayload {
   useTls?: boolean | null;
 }
 
+interface BootstrapWebSsoPayload {
+  loginUrl?: string;
+  storageKey?: string | null;
+}
+
 interface BootstrapPayload {
   mqtt?: BootstrapMqttPayload;
+  webSso?: BootstrapWebSsoPayload;
 }
 
 function parseBrokerUrl(raw: string): { host: string; port?: number; useTls?: boolean } | null {
@@ -55,6 +61,8 @@ export async function clearBootstrapAppliedFields(): Promise<void> {
     mqttUseTls: undefined,
     mqttUsername: undefined,
     mqttPassword: undefined,
+    webSsoLoginUrl: undefined,
+    webSsoStorageKey: undefined,
   });
 }
 
@@ -80,8 +88,14 @@ export async function fetchAndApplyBootstrap(args: {
   } catch {
     return;
   }
-  const patch = patchFromPayload(body.mqtt);
-  if (!patch) return;
+  const mqttPatch = patchFromPayload(body.mqtt);
+  const webSsoPatch = body.webSso?.loginUrl
+    ? {
+        webSsoLoginUrl: body.webSso.loginUrl,
+        webSsoStorageKey: body.webSso.storageKey ?? undefined,
+      }
+    : null;
+  if (!mqttPatch && !webSsoPatch) return;
   const saved = await getSavedServerConfig();
-  await saveServerConfig({ ...saved, ...patch });
+  await saveServerConfig({ ...saved, ...mqttPatch, ...webSsoPatch });
 }
