@@ -34,6 +34,11 @@ vi.mock('@/hooks/use-session-workspace-labels', () => ({
   useSessionWorkspaceLabels: () => new Map([['s1', 'copilot-ws-v3']]),
 }))
 
+vi.mock('@/stores/current-team', () => ({
+  useCurrentTeamStore: (selector: (s: { team: { id: string } | null }) => unknown) =>
+    selector({ team: { id: 'team-1' } }),
+}))
+
 const mkSessionRow = (over: Partial<{
   id: string
   title: string
@@ -66,7 +71,7 @@ const mkRow = (over: Partial<{ id: string; title: string; ideaId: string | null;
 
 describe('SessionListColumn', () => {
   beforeEach(() => {
-    localStorage.setItem('teamclaw-pinned-sessions', JSON.stringify({ __legacy__: ['s1'] }))
+    localStorage.setItem('teamclaw-pinned-sessions', JSON.stringify({ 'team-1': ['s1'] }))
     useUIStore.setState({ sidebarFilter: { kind: 'all' } })
     useSessionListStore.setState({
       rows: [

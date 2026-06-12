@@ -138,8 +138,8 @@ interface State {
   ) => void;
   removeRow: (sessionId: string) => void;
   markSessionViewed: (sessionId: string, lastReadMessageId?: string | null) => Promise<void>;
-  initPinnedSessionIds: (workspacePath?: string | null) => void;
-  toggleSessionPinned: (sessionId: string, workspacePath?: string | null) => void;
+  initPinnedSessionIds: (teamId?: string | null) => void;
+  toggleSessionPinned: (sessionId: string, teamId?: string | null) => void;
   addHighlightedSession: (sessionId: string, ttlMs?: number) => void;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   archiveSession: (sessionId: string) => Promise<void>;
@@ -312,15 +312,15 @@ export const useSessionListStore = create<State>((set, get) => ({
     }
     get().patchRow(sessionId, { has_unread: false });
   },
-  initPinnedSessionIds: (workspacePath = null) => {
-    set({ pinnedSessionIds: loadPinnedSessionIds(workspacePath) });
+  initPinnedSessionIds: (teamId = null) => {
+    set({ pinnedSessionIds: loadPinnedSessionIds(teamId) });
   },
-  toggleSessionPinned: (sessionId, workspacePath = null) => {
+  toggleSessionPinned: (sessionId, teamId = null) => {
     const cur = get().pinnedSessionIds;
     const next = cur.includes(sessionId)
       ? cur.filter((id) => id !== sessionId)
       : [...cur, sessionId];
-    savePinnedSessionIds(workspacePath, next);
+    savePinnedSessionIds(teamId, next);
     set({ pinnedSessionIds: next });
   },
   addHighlightedSession: (sessionId, ttlMs = 4000) => {
