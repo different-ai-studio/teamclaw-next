@@ -45,4 +45,14 @@ describe("agent reply transcript", () => {
     expect(stripPriorTranscriptTextPrefix(parts, cumulative)).toBe("这个 todo 网页？");
     expect(stripPriorTranscriptTextPrefix(parts, "这个")).toBe("这个");
   });
+
+  it("preserves leading spaces on incremental post-tool token deltas", () => {
+    const intro = "The `issue-normalizer` skill is not available in this environment.";
+    const parts = [
+      { type: "text", text: intro, content: intro },
+      { type: "tool-call", toolCall: { id: "t1" } },
+    ];
+    expect(stripPriorTranscriptTextPrefix(parts, " J")).toBe(" J");
+    expect(stripPriorTranscriptTextPrefix(parts, " page")).toBe(" page");
+  });
 });
