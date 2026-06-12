@@ -46,6 +46,9 @@ struct InterruptSemanticsTests {
         let (vm, ctx) = try makeContext()
         vm._testHandleAcp(outputDelta("partial answer"), sequence: 1,
                           runtimeID: "agent-a", modelContext: ctx)
+        // The @Observable mirror is throttled on the delta fast path;
+        // flush before asserting on the VM-facing fields.
+        vm._testFlushStreamingMirror()
         #expect(vm.streamingTextByAgent["agent-a"] == "partial answer")
 
         vm._testHandleAcp(idleEvent(), sequence: 2,
@@ -65,6 +68,7 @@ struct InterruptSemanticsTests {
                           runtimeID: "agent-a", modelContext: ctx)
         vm._testHandleAcp(outputDelta("B says"), sequence: 2,
                           runtimeID: "agent-b", modelContext: ctx)
+        vm._testFlushStreamingMirror()
         #expect(vm.streamingAgentSet == ["agent-a", "agent-b"])
 
         vm._testHandleAcp(idleEvent(), sequence: 3,
@@ -78,6 +82,7 @@ struct InterruptSemanticsTests {
         // B's stream still accepts deltas afterwards.
         vm._testHandleAcp(outputDelta(" more"), sequence: 4,
                           runtimeID: "agent-b", modelContext: ctx)
+        vm._testFlushStreamingMirror()
         #expect(vm.streamingTextByAgent["agent-b"] == "B says more")
     }
 
