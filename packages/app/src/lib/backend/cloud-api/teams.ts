@@ -8,6 +8,14 @@ type CloudTeam = {
   createdAt: string | null;
 };
 
+type CloudMembershipTeam = {
+  id: string;
+  name: string;
+  slug: string | null;
+  orgId: string | null;
+  orgName: string | null;
+};
+
 type CloudInvite = {
   token: string;
   inviteUrl?: string | null;
@@ -70,6 +78,23 @@ export function createTeamsModule(client: CloudApiClient): TeamsBackend {
       await client.delete<void>(
         `/v1/teams/${encodeURIComponent(teamId)}/actors/${encodeURIComponent(actorId)}`,
       );
+    },
+    async listAllMyTeams() {
+      const page = await client.get<Page<CloudMembershipTeam>>(`/v1/teams?scope=all`);
+      return page.items.map((r) => ({
+        id: r.id,
+        name: r.name,
+        slug: r.slug,
+        orgId: r.orgId,
+        orgName: r.orgName,
+      }));
+    },
+    async activateTeam(teamId: string) {
+      const res = await client.post<{ actorId: string | null; teamId: string; refreshToken: string }>(
+        `/v1/teams/${encodeURIComponent(teamId)}/activate`,
+        {},
+      );
+      return { actorId: res.actorId ?? null, teamId: res.teamId, refreshToken: res.refreshToken };
     },
   };
 }

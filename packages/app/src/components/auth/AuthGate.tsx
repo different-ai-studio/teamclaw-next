@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "@/stores/auth-store";
-import { useCurrentTeamStore, setLocalCacheTeamGate } from "@/stores/current-team";
+import { useCurrentTeamStore, setLocalCacheTeamGate, readCachedCurrentTeam } from "@/stores/current-team";
 import { getBackend } from "@/lib/backend";
 import { isTauri, removeStartupSkeleton } from "@/lib/utils";
 import { devSkipDaemonOnboarding, devSkipSetup } from "@/lib/dev-onboarding-flags";
@@ -15,6 +15,8 @@ import { TeamBootstrapErrorScreen } from "@/components/auth/TeamBootstrapErrorSc
 import { useDaemonOnboardingStore } from "@/stores/daemon-onboarding";
 import { humanizeFcError } from "@/lib/fc-error";
 import { markStartup } from "@/lib/startup-perf";
+import { TeamPicker } from "./TeamPicker";
+import type { MembershipTeam } from "@/lib/backend";
 
 interface AuthGateProps {
   children: React.ReactNode;
@@ -46,9 +48,55 @@ export function AuthGate({ children }: AuthGateProps) {
   const refreshDaemonOnboarding = useDaemonOnboardingStore((s) => s.refresh);
   const [daemonOnboardingAck, setDaemonOnboardingAck] = useState(() => devSkipDaemonOnboarding());
 
+  // Multi-team (cross-org) picker: shown on EVERY login when the user belongs to
+  // 2+ teams so they can choose which one to enter. `teamChosen` marks "already
+  // picked this session" so it doesn't re-open after selection; both reset on a
+  // new session (login). Applies on web and Tauri alike (multi-team is backend-
+  // driven, not platform-specific).
+  const [myTeams, setMyTeams] = useState<MembershipTeam[] | null>(null);
+  const [teamChosen, setTeamChosen] = useState(false);
+  // The team this user last entered (persisted from a prior session). Captured
+  // before team-bootstrap can overwrite the cache, so the picker can badge it
+  // "Last used". Null on a genuinely-first login (no history).
+  const [lastUsedTeamId, setLastUsedTeamId] = useState<string | null>(null);
+
   useEffect(() => {
     if (isTauri()) void listSetup();
   }, [listSetup]);
+
+  // Re-evaluate the picker on every login: clear the pick flag + cached list
+  // whenever the signed-in user changes.
+  useEffect(() => {
+    setTeamChosen(false);
+    setMyTeams(null);
+    // Capture the genuine last-used team (persisted by a prior session) NOW,
+    // before the team-bootstrap effect below adopts a team and overwrites the
+    // cache. Guard on teamUserId so one user's cache never leaks into another's.
+    const cached = readCachedCurrentTeam();
+    setLastUsedTeamId(
+      cached && cached.teamUserId === session?.user?.id ? cached.team?.id ?? null : null,
+    );
+  }, [session?.user?.id]);
+
+  // After login + team-bootstrap ready, fetch "all my teams (across orgs)" to
+  // decide whether to show the picker. A fetch failure must not block login:
+  // treat it as "no picker needed" and fall through.
+  useEffect(() => {
+    if (!session || bootstrap !== "ready" || teamChosen) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const teams = await getBackend().teams.listAllMyTeams();
+        if (!cancelled) setMyTeams(teams);
+      } catch (e) {
+        console.warn("[AuthGate] listAllMyTeams failed", e);
+        if (!cancelled) setMyTeams([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, bootstrap, teamChosen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,6 +115,17 @@ export function AuthGate({ children }: AuthGateProps) {
   useEffect(() => {
     if (isTauri() && session && bootstrap === "ready") void refreshDaemonOnboarding()
   }, [session, bootstrap, refreshDaemonOnboarding]);
+
+  // Claim a stashed invite once the user signs in with a REAL (non-anonymous)
+  // account. Member invites can't be claimed anonymously (enforced server-side
+  // in claim_team_invite), so the onboarding stashes the token and routes the
+  // user through sign-in; this completes the join afterward.
+  const pendingInviteToken = useAuthStore((s) => s.pendingInviteToken);
+  useEffect(() => {
+    if (!session || session.user?.is_anonymous) return;
+    if (!pendingInviteToken) return;
+    void useAuthStore.getState().claimPendingInvite();
+  }, [session, pendingInviteToken]);
 
   // After auth: ensure the user belongs to at least one team. If not (fresh
   // signup, no invites), auto-create a temporary team so the UI lands
@@ -232,6 +291,28 @@ export function AuthGate({ children }: AuthGateProps) {
 
   if (isTauri() && bootstrap !== "ready") {
     return null;
+  }
+
+  // Multi-team picker gate: after team-bootstrap, before the daemon gate. If the
+  // user belongs to 2+ teams (possibly across orgs) and hasn't picked this
+  // session yet, choose a team first. Selecting calls switchToTeam (activates
+  // the team server-side, adopts the org-switched JWT, switches current team,
+  // and refreshes the daemon) — so the daemon gate below then evaluates against
+  // the chosen team and triggers re-onboard on mismatch.
+  if (session && bootstrap === "ready" && !teamChosen) {
+    if (myTeams === null) {
+      return null; // Still loading the team list — keep the skeleton.
+    }
+    if (myTeams.length >= 2) {
+      removeStartupSkeleton();
+      return (
+        <TeamPicker
+          teams={myTeams}
+          lastUsedTeamId={lastUsedTeamId}
+          onDone={() => setTeamChosen(true)}
+        />
+      );
+    }
   }
 
   // Daemon readiness gate: after login + workspace bootstrap, ensure the local

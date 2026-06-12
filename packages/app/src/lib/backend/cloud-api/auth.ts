@@ -5,6 +5,7 @@ import { isTauri } from "@/lib/utils";
 import { useWorkspaceStore } from "@/stores/workspace";
 import type { CloudApiClient } from "./http";
 import {
+  adoptRefreshToken,
   createAuthClient,
   getSession as getStoreSession,
   runDesktopOAuth,
@@ -76,6 +77,10 @@ export function createAuthModule(
     },
     async verifyUpgradeEmailOtp(email: string, code: string): Promise<AuthSession | null> {
       const next = await authClient.verifyOtp(email, code, "email_change");
+      return mapSession(next);
+    },
+    async adoptSession(refreshToken: string): Promise<AuthSession | null> {
+      const next = await adoptRefreshToken(refreshToken);
       return mapSession(next);
     },
     async claimInvite(token: string): Promise<AuthClaimResult> {

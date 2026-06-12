@@ -93,6 +93,7 @@ interface State {
   error: string | null;
   load: () => Promise<void>;
   reloadAndSwitchTo: (teamId: string) => Promise<void>;
+  switchToTeam: (teamId: string) => Promise<void>;
   setActiveTeam: (team: CurrentTeam) => Promise<void>;
   rename: (newName: string) => Promise<boolean>;
   /** Rename the current user's own member actor (their display name). */
@@ -182,6 +183,32 @@ export const useCurrentTeamStore = create<State>((set, get) => ({
       teamUserId: activeTeam ? session.user.id : null,
       loading: false,
     });
+  },
+
+  switchToTeam: async (teamId: string) => {
+    set({ loading: true, error: null });
+    try {
+      // 1) 服务端换 org + 铸新 session。
+      const { refreshToken } = await getBackend().teams.activateTeam(teamId);
+      // 2) 装上带新 org_id 的 JWT（触发 onAuthStateChange → auth-store.session 更新）。
+      await getBackend().auth.adoptSession(refreshToken);
+      // 3) 设当前 team + 后端 team gate（此时 JWT 已是新 org，getTeam 可读）。
+      await get().reloadAndSwitchTo(teamId);
+    } catch (error) {
+      set({ loading: false, error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+    // 4) Tauri：daemon 重新 onboard 到新 team（绑定新 actor/凭证）。
+    try {
+      const { isTauri } = await import("@/lib/utils");
+      if (isTauri()) {
+        const { useDaemonOnboardingStore } = await import("./daemon-onboarding");
+        await useDaemonOnboardingStore.getState().refresh();
+      }
+    } catch (e) {
+      console.warn("[CurrentTeam] daemon refresh after switch failed", e);
+    }
+    set({ loading: false });
   },
 
   setActiveTeam: async (team) => {

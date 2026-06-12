@@ -156,10 +156,9 @@
       "joinTeamDesc": "粘贴邀请链接或邀请码，加入已有团队。",
       "inviteParseError": "请输入有效的邀请码或邀请链接。",
       "inviteTitle": "加入团队",
-      "inviteDesc": "粘贴邀请链接或邀请码。我们会先创建匿名会话，再领取团队邀请。",
+      "inviteDesc": "粘贴邀请链接或邀请码，然后登录以加入。登录后会自动领取邀请。",
       "inviteLabel": "邀请链接或邀请码",
-      "joining": "加入中…",
-      "continue": "继续"
+      "inviteContinueToSignIn": "继续登录"
     }
   },
   "navigation": {
@@ -2602,6 +2601,13 @@
   },
   "nativeContent": {
     "notFound": "组件未找到"
+  },
+  "teamPicker": {
+    "title": "选择团队",
+    "subtitle": "你属于多个团队，请选择要进入的一个。",
+    "switching": "切换中…",
+    "ungrouped": "其它",
+    "lastUsed": "最后使用"
   },
   "team": {
     "viewerReadOnly": "只读模式 - 你没有编辑权限",

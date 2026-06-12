@@ -70,8 +70,13 @@ beforeEach(() => {
     errorMessage: null,
     otpEmail: null,
     otpPhone: null,
+    pendingInviteToken: null,
   });
 });
+
+function anonSessionLike(userId: string) {
+  return { ...storeSessionLike(userId), user: { id: userId, email: null, is_anonymous: true } };
+}
 
 describe("auth-store", () => {
   it("hydrate populates session from backend auth", async () => {
@@ -234,27 +239,22 @@ describe("auth-store", () => {
     expect(result?.teamId).toBe("team-1");
   });
 
-  it("claimInviteAfterAnonymousSignIn signs in anonymously before claiming", async () => {
-    authMock.signInAnonymously.mockResolvedValueOnce({ user: { id: "anon-2" } });
-    authMock.claimInvite.mockResolvedValueOnce({
-      actorId: "actor-2",
-      teamId: "team-2",
-      actorType: "member",
-      displayName: "Bob",
-      refreshToken: null,
-    });
-
-    const result = await useAuthStore.getState().claimInviteAfterAnonymousSignIn("tok-2");
-
-    expect(authMock.signInAnonymously).toHaveBeenCalled();
-    expect(authMock.claimInvite).toHaveBeenCalledWith("tok-2");
-    expect(currentTeamMock.reloadAndSwitchTo).toHaveBeenCalledWith("team-2");
-    expect(result?.teamId).toBe("team-2");
+  it("setPendingInviteToken stores the token", () => {
+    useAuthStore.getState().setPendingInviteToken("tok-2");
+    expect(useAuthStore.getState().pendingInviteToken).toBe("tok-2");
   });
 
-  it("claimInviteAfterAnonymousSignIn keeps loading true until the invited team is active", async () => {
-    const switchTeam = deferred<void>();
-    authMock.signInAnonymously.mockResolvedValueOnce({ user: { id: "anon-4" } });
+  it("claimPendingInvite is a no-op for an anonymous session (keeps the token)", async () => {
+    useAuthStore.setState({ session: anonSessionLike("anon-2"), pendingInviteToken: "tok-2" });
+
+    const result = await useAuthStore.getState().claimPendingInvite();
+
+    expect(result).toBeNull();
+    expect(authMock.claimInvite).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().pendingInviteToken).toBe("tok-2");
+  });
+
+  it("claimPendingInvite claims and enters the team for a real session", async () => {
     authMock.claimInvite.mockResolvedValueOnce({
       actorId: "actor-4",
       teamId: "team-4",
@@ -262,18 +262,14 @@ describe("auth-store", () => {
       displayName: "Dana",
       refreshToken: null,
     });
-    currentTeamMock.reloadAndSwitchTo.mockReturnValueOnce(switchTeam.promise);
+    useAuthStore.setState({ session: storeSessionLike("real-4"), pendingInviteToken: "tok-4" });
 
-    const resultPromise = useAuthStore.getState().claimInviteAfterAnonymousSignIn("tok-4");
-    await vi.waitFor(() => expect(currentTeamMock.reloadAndSwitchTo).toHaveBeenCalledWith("team-4"));
+    const result = await useAuthStore.getState().claimPendingInvite();
 
-    expect(useAuthStore.getState().loading).toBe(true);
-    expect(useAuthStore.getState().authFlow).toBe("invite");
-
-    switchTeam.resolve();
-    const result = await resultPromise;
-
+    expect(authMock.claimInvite).toHaveBeenCalledWith("tok-4");
+    expect(currentTeamMock.reloadAndSwitchTo).toHaveBeenCalledWith("team-4");
     expect(result?.teamId).toBe("team-4");
+    expect(useAuthStore.getState().pendingInviteToken).toBeNull();
     expect(useAuthStore.getState().loading).toBe(false);
     expect(useAuthStore.getState().authFlow).toBe("idle");
   });
@@ -326,16 +322,14 @@ describe("auth-store", () => {
     expect(useAuthStore.getState().upgradeLoading).toBe(false);
   });
 
-  it("claimInviteAfterAnonymousSignIn signs out when the invite claim fails", async () => {
-    authMock.signInAnonymously.mockResolvedValueOnce({ user: { id: "anon-3" } });
+  it("claimPendingInvite keeps the token for retry when the claim fails", async () => {
     authMock.claimInvite.mockRejectedValueOnce(new Error("Invite expired"));
-    authMock.signOut.mockResolvedValueOnce(undefined);
+    useAuthStore.setState({ session: storeSessionLike("real-3"), pendingInviteToken: "expired" });
 
-    const result = await useAuthStore.getState().claimInviteAfterAnonymousSignIn("expired");
+    const result = await useAuthStore.getState().claimPendingInvite();
 
     expect(result).toBeNull();
-    expect(authMock.signOut).toHaveBeenCalled();
-    expect(useAuthStore.getState().session).toBeNull();
+    expect(useAuthStore.getState().pendingInviteToken).toBe("expired");
     expect(useAuthStore.getState().authFlow).toBe("idle");
     expect(useAuthStore.getState().errorMessage).toBe("Invite expired");
   });

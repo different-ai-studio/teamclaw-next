@@ -36,6 +36,8 @@ interface AuthState {
   otpEmail: string | null;
   otpPhone: string | null;
   upgradeEmail: string | null;
+  /** Invite token to claim once the user signs in with a real account. */
+  pendingInviteToken: string | null;
   hydrate: () => Promise<void>;
   sendOtp: (email: string) => Promise<boolean>;
   verifyOtp: (code: string) => Promise<void>;
@@ -46,7 +48,14 @@ interface AuthState {
   signInWithOAuth: (provider: OAuthProvider) => Promise<boolean>;
   cancelOAuth: () => void;
   claimInvite: (token: string) => Promise<AuthClaimResult | null>;
-  claimInviteAfterAnonymousSignIn: (token: string) => Promise<AuthClaimResult | null>;
+  /** Stash an invite token to claim after the user signs in (real account). */
+  setPendingInviteToken: (token: string | null) => void;
+  /**
+   * Claim the pending invite once the user holds a real (non-anonymous)
+   * session. No-op when there's no pending token or the session is anonymous —
+   * member invites require a non-anonymous account (enforced in claim_team_invite).
+   */
+  claimPendingInvite: () => Promise<AuthClaimResult | null>;
   sendUpgradeEmailOtp: (email: string) => Promise<boolean>;
   verifyUpgradeEmailOtp: (code: string) => Promise<boolean>;
   resetUpgradeOtp: () => void;
@@ -75,6 +84,44 @@ async function claimInviteToken(token: string): Promise<AuthClaimResult | { erro
   }
 }
 
+// Pending invite token — stashed when an unauthenticated/anonymous user opens an
+// invite, claimed once they sign in with a real account. Persisted so it
+// survives the OAuth loopback round-trip and reloads.
+const PENDING_INVITE_KEY = "teamclaw.pendingInviteToken";
+
+function readPendingInviteToken(): string | null {
+  try {
+    return localStorage.getItem(PENDING_INVITE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function persistPendingInviteToken(token: string | null): void {
+  try {
+    if (token) localStorage.setItem(PENDING_INVITE_KEY, token);
+    else localStorage.removeItem(PENDING_INVITE_KEY);
+  } catch {
+    // best-effort: private mode / no localStorage. In-memory state still drives
+    // the claim within this session.
+  }
+}
+
+// After a successful claim, switch into the team and re-onboard the daemon.
+async function enterClaimedTeam(teamId: string): Promise<void> {
+  const { useCurrentTeamStore } = await import("@/stores/current-team");
+  await useCurrentTeamStore.getState().reloadAndSwitchTo(teamId);
+  try {
+    const { isTauri } = await import("@/lib/utils");
+    if (isTauri()) {
+      const { useDaemonOnboardingStore } = await import("@/stores/daemon-onboarding");
+      await useDaemonOnboardingStore.getState().refresh();
+    }
+  } catch (e) {
+    console.warn("[invite] daemon refresh after claim failed", e);
+  }
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   session: null,
   loading: true,
@@ -85,6 +132,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   otpEmail: null,
   otpPhone: null,
   upgradeEmail: null,
+  pendingInviteToken: readPendingInviteToken(),
   hydrate: async () => {
     set({ loading: true, authFlow: "idle", errorMessage: null });
     markStartup("auth-hydrate:start");
@@ -229,29 +277,31 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ loading: false });
     return result;
   },
-  claimInviteAfterAnonymousSignIn: async (token) => {
+  setPendingInviteToken: (token) => {
+    persistPendingInviteToken(token);
+    set({ pendingInviteToken: token });
+  },
+  claimPendingInvite: async () => {
+    const token = get().pendingInviteToken;
+    if (!token) return null;
+    const session = get().session;
+    // Member invites require a real account. If the user isn't signed in yet,
+    // or is still anonymous, keep the token pending and wait for a real login.
+    if (!session || session.user?.is_anonymous) return null;
     if (!hasBackendConfig()) {
-      set({ loading: false, errorMessage: BACKEND_CONFIG_MISSING_MESSAGE });
+      set({ errorMessage: BACKEND_CONFIG_MISSING_MESSAGE });
       return null;
     }
     set({ loading: true, authFlow: "invite", errorMessage: null });
-    let session: AuthSession | null;
-    try {
-      session = await getBackend().auth.signInAnonymously();
-    } catch (error) {
-      set({ loading: false, authFlow: "idle", errorMessage: errorMessageFor(error) });
-      return null;
-    }
-    set({ session: storeSession(session), otpEmail: null });
     const result = await claimInviteToken(token);
     if ("errorMessage" in result) {
-      set({ errorMessage: result.errorMessage });
-      await get().signOut();
-      set({ loading: false, authFlow: "idle" });
+      set({ loading: false, authFlow: "idle", errorMessage: result.errorMessage });
       return null;
     }
-    const { useCurrentTeamStore } = await import("@/stores/current-team");
-    await useCurrentTeamStore.getState().reloadAndSwitchTo(result.teamId);
+    // Consume the token only on success so a transient failure can retry.
+    persistPendingInviteToken(null);
+    set({ pendingInviteToken: null });
+    await enterClaimedTeam(result.teamId);
     set({ loading: false, authFlow: "idle" });
     return result;
   },

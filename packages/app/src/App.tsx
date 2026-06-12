@@ -2088,9 +2088,28 @@ function App() {
       for (const raw of urls) {
         const token = parseInviteDeeplink(raw);
         if (!token) continue;
+        // Member invites require a real account. If the user isn't signed in
+        // yet (or is still anonymous), stash the token and let sign-in +
+        // AuthGate's pending-invite effect claim it once they're authenticated.
+        const authState = useAuthStore.getState();
+        if (!authState.session || authState.session.user?.is_anonymous) {
+          authState.setPendingInviteToken(token);
+          continue;
+        }
         try {
           const claim = await claimInviteToken(token);
           await useCurrentTeamStore.getState().reloadAndSwitchTo(claim.teamId);
+          // Re-onboard the local daemon to the freshly-claimed team. The
+          // daemon-onboarding store's refresh() detects the team mismatch and
+          // the DaemonOnboardingWizard handles re-onboard. Best-effort only.
+          if (isTauri()) {
+            try {
+              const { useDaemonOnboardingStore } = await import("@/stores/daemon-onboarding");
+              await useDaemonOnboardingStore.getState().refresh();
+            } catch (e) {
+              console.warn("[invite] daemon refresh after claim failed", e);
+            }
+          }
           // TODO(Task 12): surface <JoinTeamFlow teamId={claim.teamId}
           //   workspacePath={currentWorkspacePath} /> in an onboarding sheet
           //   here so the joiner auto-pulls workspace config and enters the

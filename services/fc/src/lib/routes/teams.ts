@@ -1,9 +1,29 @@
 import { requireString, optionalStringOrNull } from "../routing-utils.js";
+import { optionalBearerToken } from "../http-utils.js";
 
 export function registerTeams(router) {
   router.get("/v1/teams", async (ctx) => {
+    // scope=all lists the caller's teams across ALL orgs (cross-org team picker);
+    // omitted preserves the active-org listing.
+    const scope = ctx.query?.get?.("scope") ?? null;
+    if (scope === "all") {
+      const items = await ctx.repository.listAllMyTeams();
+      return { body: { items, nextCursor: null } };
+    }
     const items = await ctx.repository.listTeams({ limit: 50 });
     return { body: { items, nextCursor: null } };
+  });
+
+  // Switch the caller's active team (and org), minting a fresh session. The
+  // bearer is forwarded so the SECURITY DEFINER `switch_active_team` RPC resolves
+  // `auth.uid()` for the member check + org swap. `auth: "none"` routes the call
+  // to the auth repository (which owns switchActiveTeam alongside claimInvite);
+  // the token is passed explicitly rather than baked into a business repo.
+  router.post("/v1/teams/:id/activate", { auth: "none" }, async (ctx) => {
+    const teamId = decodeURIComponent(ctx.params.id);
+    const accessToken = optionalBearerToken(ctx.headers) ?? undefined;
+    const result = await ctx.repository.switchActiveTeam(teamId, { accessToken });
+    return { body: result };
   });
 
   // POST /v1/teams — slim team creation (Task 3 of share-onboarding refactor).
