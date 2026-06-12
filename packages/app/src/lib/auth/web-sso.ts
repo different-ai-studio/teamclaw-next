@@ -5,6 +5,7 @@
 // against TeamClaw's Cloud API. This is the reverse of betly-auth-inject.ts.
 
 import { buildConfig } from "@/lib/build-config";
+import { fetchPublicConfig } from "@/lib/bootstrap";
 import { getEffectiveServerConfigSync } from "@/lib/server-config";
 import { invoke } from "@tauri-apps/api/core";
 import { AuthError } from "@/lib/auth/types";
@@ -76,7 +77,13 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
  * AuthError with code websso_cancelled | websso_timeout | websso_failed.
  */
 export async function runWebSso(opts: RunWebSsoOptions = {}): Promise<string> {
-  const cfg = ssoConfig();
+  let cfg = ssoConfig();
+  if (!cfg) {
+    // Login-time feature: the FC-delivered target may not be cached yet (no
+    // session has run the authed bootstrap). Fetch the public config on demand.
+    await fetchPublicConfig();
+    cfg = ssoConfig();
+  }
   if (!cfg) throw new AuthError("Web SSO is not available.", 0, "websso_failed");
 
   const controller = new AbortController();

@@ -14,6 +14,9 @@ vi.mock("@/lib/server-config", () => ({
 const invokeMock = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invokeMock(...a) }));
 
+const fetchPublicConfigMock = vi.fn(async () => {});
+vi.mock("@/lib/bootstrap", () => ({ fetchPublicConfig: (...a: unknown[]) => fetchPublicConfigMock(...a) }));
+
 import { ssoConfig, runWebSso, cancelWebSso } from "@/lib/auth/web-sso";
 
 const TEST_CFG = {
@@ -101,5 +104,18 @@ describe("runWebSso", () => {
   it("rejects with websso_timeout when the deadline passes", async () => {
     invokeMock.mockResolvedValue(null);
     await expect(runWebSso({ pollMs: 1, timeoutMs: 10 })).rejects.toMatchObject({ code: "websso_timeout" });
+  });
+
+  it("fetches the public config on demand when the target isn't cached yet", async () => {
+    // Pre-login: ssoConfig is null until fetchPublicConfig populates the cache.
+    serverCfgMock.mockReturnValueOnce({}).mockReturnValue(TEST_CFG);
+    fetchPublicConfigMock.mockResolvedValueOnce(undefined);
+    const session = JSON.stringify({ access_token: "AT", refresh_token: "RT", user: { id: "u1" } });
+    invokeMock.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "webview_read_local_storage" ? session : undefined),
+    );
+    const rt = await runWebSso({ pollMs: 1, timeoutMs: 1000 });
+    expect(fetchPublicConfigMock).toHaveBeenCalled();
+    expect(rt).toBe("RT");
   });
 });
