@@ -43,7 +43,7 @@ export function TeamBootstrapErrorScreen({
             </p>
           ) : null}
           <Button
-            className="mt-1 h-10 w-full rounded-[10px] bg-coral text-paper hover:opacity-90"
+            className="mt-1 h-10 w-full rounded-[10px] bg-coral text-coral-foreground hover:opacity-90"
             disabled={busy}
             onClick={onRetry}
           >

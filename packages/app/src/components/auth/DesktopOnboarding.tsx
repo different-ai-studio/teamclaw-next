@@ -80,7 +80,7 @@ function ChoiceRow({
       <span
         className={[
           "flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px]",
-          primary ? "bg-coral text-white" : "bg-panel text-ink-2",
+          primary ? "bg-coral text-coral-foreground" : "bg-panel text-ink-2",
         ].join(" ")}
       >
         {icon}
@@ -191,7 +191,7 @@ function InviteStep({ onBack, onNeedLogin }: { onBack: () => void; onNeedLogin: 
         {(localError || errorMessage) && (
           <p className="mt-3 text-[12px] text-destructive">{localError || errorMessage}</p>
         )}
-        <Button type="submit" disabled={!raw.trim()} className="mt-5 h-10 w-full bg-coral text-paper">
+        <Button type="submit" disabled={!raw.trim()} className="mt-5 h-10 w-full bg-coral text-coral-foreground">
           {t("auth.onboarding.inviteContinueToSignIn", "Continue to sign in")}
         </Button>
       </form>

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'fs'
+import { createRequire } from 'node:module'
 import path from 'path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -46,6 +47,14 @@ const envConfig = buildEnv ? readJSON(path.join(rootDir, `build.config.${buildEn
 const localConfig = readJSON(path.join(rootDir, 'build.config.local.json'))
 const buildConfig = deepMerge(baseConfig || {}, envConfig, localConfig)
 
+const nodeRequire = createRequire(import.meta.url)
+const { resolveBrandTheme, generateBrandThemeCss, extractRootTokenNames } =
+  nodeRequire(path.join(rootDir, 'scripts/lib/brand-theme.js')) as {
+    resolveBrandTheme: (buildConfig: unknown, repoRoot: string) => { palette: string; tokens: Record<string, string> } | null
+    generateBrandThemeCss: (palette: string, tokens: Record<string, string>, allowed: Set<string>) => string
+    extractRootTokenNames: (css: string) => Set<string>
+  }
+
 // Derive shortName if not explicitly set
 if (!(buildConfig as any).app?.shortName) {
   const app = (buildConfig as any).app || ((buildConfig as any).app = {})
@@ -58,6 +67,19 @@ if (!(buildConfig as any).app?.shortName) {
 const sn = (buildConfig as any).app?.shortName as string | undefined
 if (!sn || sn.length > 20 || !/^[a-z0-9]+$/.test(sn)) {
   throw new Error(`app.shortName must be 1-20 chars, [a-z0-9] only, got: '${sn}'`)
+}
+
+// --- Per-brand theme palette: generate a :root[data-palette="<brand>"] block ---
+let brandThemeStyle = ''
+const brandTheme = resolveBrandTheme(buildConfig as any, rootDir)
+if (brandTheme) {
+  const globalsCss = readFileSync(
+    path.resolve(__dirname, 'src/styles/globals.css'),
+    'utf-8'
+  )
+  const allowed = extractRootTokenNames(globalsCss)
+  const block = generateBrandThemeCss(brandTheme.palette, brandTheme.tokens, allowed)
+  brandThemeStyle = `<style id="brand-theme">${block}</style>`
 }
 
 // https://vitejs.dev/config/
@@ -73,6 +95,7 @@ export default defineConfig({
         return html
           .replace(/__APP_SHORT_NAME__/g, sn as string)
           .replace(/__PALETTE__/g, palette)
+          .replace(/<!--__BRAND_THEME__-->/g, brandThemeStyle)
       },
     },
     // Bundle analysis: run with ANALYZE=true pnpm build

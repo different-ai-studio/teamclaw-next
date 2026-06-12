@@ -379,7 +379,7 @@ export function SessionListColumn() {
                     />
                   )}
                   {!isActive && isHighlighted && (
-                    <span className="shrink-0 rounded-full bg-coral px-1.5 py-px text-[10px] font-semibold leading-4 text-white">
+                    <span className="shrink-0 rounded-full bg-coral px-1.5 py-px text-[10px] font-semibold leading-4 text-coral-foreground">
                       {t('chat.newSessionBadge', 'NEW')}
                     </span>
                   )}

@@ -11,6 +11,7 @@ import {
 } from '@/lib/daemon-local-client'
 import { getLocalDaemonActorId } from '@/lib/daemon-agent-admin'
 import { markStartup } from '@/lib/startup-perf'
+import { appScheme } from '@/lib/build-config'
 
 /**
  * After onboarding a local daemon, adopt it as the user's default agent — but
@@ -100,7 +101,7 @@ async function onboard(teamId: string, displayName: string, targetActorId: strin
   // falls back to its own hardcoded default and diverges in non-prod builds.
   const { getEffectiveServerConfig } = await import('@/lib/server-config')
   const cloudApiUrl = (await getEffectiveServerConfig()).cloudApiUrl
-  let inviteUrl = `teamclaw://invite?token=${encodeURIComponent(invite.token)}`
+  let inviteUrl = `${appScheme}://invite?token=${encodeURIComponent(invite.token)}`
   if (cloudApiUrl) {
     inviteUrl += `&cloud_api_url=${encodeURIComponent(cloudApiUrl)}`
   }

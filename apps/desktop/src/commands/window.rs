@@ -86,11 +86,12 @@ pub async fn create_workspace_window(
     let encoded_ws = urlencoding::encode(&workspace_path);
     let url = format!("index.html?workspace={}", encoded_ws);
 
+    let brand = crate::branding::brand_name(app.config().product_name.as_deref());
     let ws_name = std::path::Path::new(&workspace_path)
         .file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or("TeamClaw");
-    let window_title = format!("TeamClaw — {}", ws_name);
+        .unwrap_or(brand.as_str());
+    let window_title = format!("{} — {}", brand, ws_name);
 
     // Match the main window chrome: hidden title + overlay traffic lights on macOS,
     // so the workspace name shown inside the app remains the only label.

@@ -141,3 +141,23 @@ opencode.json
 
 # Local-only manual belayo deploy workflow (not committed; deploy via deploy-local.sh)
 .github/workflows/belayo-deploy.yml
+
+# White-label icon generation: `tauri icon` emits extra outputs that are NOT in
+# tauri.conf.json's bundle.icon list. Branded builds regenerate them; keep them
+# out of git so a branded build's working tree stays clean.
+apps/desktop/icons/64x64.png
+apps/desktop/icons/icon.png
+apps/desktop/icons/StoreLogo.png
+apps/desktop/icons/Square*Logo.png
+apps/desktop/icons/android/
+apps/desktop/icons/ios/
+
+# OEM brand assets — kept local to the build machine, never in the shared repo.
+# Brand owners supply branding/<brand>/{logo.png,theme.json} + build.config.<brand>.json
+# locally; the white-label build reads them from disk at build time.
+/branding/
+# Ignore all root build.config.<brand>.json except the in-repo flavors.
+/build.config.*.json
+!/build.config.example.json
+!/build.config.production.json
+!/build.config.teal.json
