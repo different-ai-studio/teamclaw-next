@@ -1,5 +1,8 @@
 import { loadSessionWorkspacesForTeam, type SessionWorkspaceRow } from "@/lib/local-cache";
-import { workspacePathsMatch } from "@/stores/session-utils";
+import {
+  isWorkspacePathOnLocalMachine,
+  workspacePathsMatch,
+} from "@/stores/session-utils";
 
 export function workspaceLabelFromPath(path: string | null | undefined): string | null {
   if (!path) return null;
@@ -33,7 +36,7 @@ export async function resolveSessionWorkspacePath(
   if (!best) return null;
 
   const path = best.workspacePath?.trim();
-  if (path) return path;
+  if (path && (await isWorkspacePathOnLocalMachine(path))) return path;
 
   const workspaceId = best.workspaceId?.trim();
   if (!workspaceId) return null;
@@ -41,7 +44,9 @@ export async function resolveSessionWorkspacePath(
   const { listDaemonWorkspaces } = await import("@/lib/daemon-workspaces");
   const workspaces = await listDaemonWorkspaces(teamId).catch(() => []);
   const match = workspaces.find((w) => !w.archived && w.id === workspaceId);
-  return match?.path?.trim() ?? null;
+  const cloudPath = match?.path?.trim();
+  if (cloudPath && (await isWorkspacePathOnLocalMachine(cloudPath))) return cloudPath;
+  return null;
 }
 
 /** Switch the desktop workspace when opening a session bound to another folder. */
@@ -51,6 +56,13 @@ export async function switchToSessionWorkspaceIfNeeded(
 ): Promise<void> {
   const targetPath = await resolveSessionWorkspacePath(teamId, sessionId);
   if (!targetPath) return;
+  if (!(await isWorkspacePathOnLocalMachine(targetPath))) {
+    console.warn(
+      "[session-by-workspace] skip workspace switch — path is not on this machine:",
+      targetPath,
+    );
+    return;
+  }
 
   const { useWorkspaceStore } = await import("@/stores/workspace");
   const currentPath = useWorkspaceStore.getState().workspacePath;

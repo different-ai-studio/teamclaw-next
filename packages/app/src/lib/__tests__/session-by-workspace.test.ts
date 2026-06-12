@@ -6,8 +6,19 @@ const { loadSessionWorkspacesForTeam } = vi.hoisted(() => ({
 const { listDaemonWorkspaces } = vi.hoisted(() => ({
   listDaemonWorkspaces: vi.fn(),
 }));
+const { isWorkspacePathOnLocalMachine } = vi.hoisted(() => ({
+  isWorkspacePathOnLocalMachine: vi.fn().mockResolvedValue(true),
+}));
 vi.mock("@/lib/local-cache", () => ({ loadSessionWorkspacesForTeam }));
 vi.mock("@/lib/daemon-workspaces", () => ({ listDaemonWorkspaces }));
+vi.mock("@/stores/session-utils", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/stores/session-utils")>();
+  return {
+    ...actual,
+    isWorkspacePathOnLocalMachine: (...args: unknown[]) =>
+      isWorkspacePathOnLocalMachine(...args),
+  };
+});
 
 const workspaceStoreState = vi.hoisted(() => ({
   workspacePath: null as string | null,
@@ -71,6 +82,8 @@ describe("resolveSessionWorkspacePath", () => {
   beforeEach(() => {
     loadSessionWorkspacesForTeam.mockReset();
     listDaemonWorkspaces.mockReset();
+    isWorkspacePathOnLocalMachine.mockReset();
+    isWorkspacePathOnLocalMachine.mockResolvedValue(true);
   });
 
   it("returns the newest workspace path for the session", async () => {
@@ -90,12 +103,26 @@ describe("resolveSessionWorkspacePath", () => {
     ]);
     await expect(resolveSessionWorkspacePath("teamA", "s1")).resolves.toBe("/Users/me/from-cloud");
   });
+
+  it("returns null when stored path is not on this machine", async () => {
+    loadSessionWorkspacesForTeam.mockResolvedValue([
+      {
+        sessionId: "s1",
+        workspacePath: "/Users/matt.chow/TeamClaw",
+        updatedAt: "2026-06-01T00:00:00Z",
+      },
+    ]);
+    isWorkspacePathOnLocalMachine.mockResolvedValue(false);
+    await expect(resolveSessionWorkspacePath("teamA", "s1")).resolves.toBeNull();
+  });
 });
 
 describe("switchToSessionWorkspaceIfNeeded", () => {
   beforeEach(() => {
     loadSessionWorkspacesForTeam.mockReset();
     listDaemonWorkspaces.mockReset();
+    isWorkspacePathOnLocalMachine.mockReset();
+    isWorkspacePathOnLocalMachine.mockResolvedValue(true);
     workspaceStoreState.workspacePath = null;
     workspaceStoreState.setWorkspace.mockClear();
   });
@@ -114,6 +141,20 @@ describe("switchToSessionWorkspaceIfNeeded", () => {
     loadSessionWorkspacesForTeam.mockResolvedValue([
       { sessionId: "s1", workspacePath: "/Users/me/copilot-ws-v3/", updatedAt: "2026-06-01T00:00:00Z" },
     ]);
+    await switchToSessionWorkspaceIfNeeded("teamA", "s1");
+    expect(workspaceStoreState.setWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("skips switch when session path belongs to another machine", async () => {
+    workspaceStoreState.workspacePath = "/Users/me/TeamClaw";
+    loadSessionWorkspacesForTeam.mockResolvedValue([
+      {
+        sessionId: "s1",
+        workspacePath: "/Users/matt.chow/TeamClaw",
+        updatedAt: "2026-06-01T00:00:00Z",
+      },
+    ]);
+    isWorkspacePathOnLocalMachine.mockResolvedValue(false);
     await switchToSessionWorkspaceIfNeeded("teamA", "s1");
     expect(workspaceStoreState.setWorkspace).not.toHaveBeenCalled();
   });
