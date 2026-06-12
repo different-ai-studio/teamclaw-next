@@ -5,6 +5,7 @@ import { useSessionListStore } from "./session-list-store";
 import { createLoaderActions } from "./session-loader";
 import { createMessageActions } from "./session-messages";
 import { useSessionSelectionStore } from "./session-selection-store";
+import { useCurrentTeamStore } from "./current-team";
 
 // ────────────────────────────────────────────────────────────────────
 // v2 Phase 1 compat shim.
@@ -141,7 +142,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ sessionError: msg, errorSessionId: sid ?? null }),
   clearSessionError: () => set({ sessionError: null, errorSessionId: null }),
   toggleSessionPinned: (sid: string) => {
-    useSessionListStore.getState().toggleSessionPinned(sid);
+    const teamId = useCurrentTeamStore.getState().team?.id ?? null;
+    useSessionListStore.getState().toggleSessionPinned(sid, teamId);
   },
   /** Briefly mark a session as freshly-created in the sidebar.
    * Auto-clears after ttlMs. */

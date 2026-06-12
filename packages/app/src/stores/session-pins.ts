@@ -17,8 +17,8 @@ function parsePinnedSessionStorage(raw: string | null): PinnedSessionStorage | n
 
     const entries = Object.entries(parsed as Record<string, unknown>);
     return Object.fromEntries(
-      entries.map(([workspaceKey, ids]) => [
-        workspaceKey,
+      entries.map(([key, ids]) => [
+        key,
         Array.isArray(ids) ? ids.filter((item): item is string => typeof item === "string") : [],
       ]),
     );
@@ -27,41 +27,74 @@ function parsePinnedSessionStorage(raw: string | null): PinnedSessionStorage | n
   }
 }
 
-function normalizeWorkspaceKey(workspacePath: string | null | undefined): string | null {
-  const trimmed = workspacePath?.trim();
+function normalizeTeamId(teamId: string | null | undefined): string | null {
+  const trimmed = teamId?.trim();
   return trimmed ? trimmed : null;
 }
 
-export function loadPinnedSessionIds(workspacePath?: string | null): string[] {
+/** Keys from the pre-team workspace-scoped pin format. */
+function isLegacyWorkspaceKey(key: string, teamId: string): boolean {
+  return key !== teamId && (key === "__legacy__" || key.includes("/"));
+}
+
+function migrateWorkspacePinsToTeam(storage: PinnedSessionStorage, teamId: string): string[] {
+  const ids = new Set<string>();
+  for (const [key, list] of Object.entries(storage)) {
+    if (!isLegacyWorkspaceKey(key, teamId)) continue;
+    for (const id of list) ids.add(id);
+  }
+  return [...ids];
+}
+
+function persistTeamPins(storage: PinnedSessionStorage, teamId: string, ids: string[]): void {
+  if (ids.length > 0) {
+    storage[teamId] = ids;
+  } else {
+    delete storage[teamId];
+  }
+  for (const key of Object.keys(storage)) {
+    if (isLegacyWorkspaceKey(key, teamId)) delete storage[key];
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(storage));
+}
+
+/** Load pinned session ids for the active team (team-scoped, not workspace-scoped). */
+export function loadPinnedSessionIds(teamId?: string | null): string[] {
   const storage = parsePinnedSessionStorage(localStorage.getItem(STORAGE_KEY));
-  const workspaceKey = normalizeWorkspaceKey(workspacePath);
+  const teamKey = normalizeTeamId(teamId);
 
   if (!storage) return [];
-  if (workspaceKey) {
-    return storage[workspaceKey] ?? storage.__legacy__ ?? [];
+  if (!teamKey) return storage.__legacy__ ?? [];
+
+  const existing = storage[teamKey];
+  if (existing && existing.length > 0) return existing;
+
+  const migrated = migrateWorkspacePinsToTeam(storage, teamKey);
+  if (migrated.length > 0) {
+    try {
+      persistTeamPins(storage, teamKey, migrated);
+    } catch {
+      // Ignore storage failures so session list still works in constrained envs.
+    }
   }
-  return storage.__legacy__ ?? [];
+  return migrated;
 }
 
 export function savePinnedSessionIds(
-  workspacePath: string | null | undefined,
+  teamId: string | null | undefined,
   ids: string[],
 ): void {
   try {
-    const workspaceKey = normalizeWorkspaceKey(workspacePath);
+    const teamKey = normalizeTeamId(teamId);
     const storage = parsePinnedSessionStorage(localStorage.getItem(STORAGE_KEY)) ?? {};
 
-    if (!workspaceKey) {
+    if (!teamKey) {
       storage.__legacy__ = ids;
-    } else if (ids.length > 0) {
-      storage[workspaceKey] = ids;
-      delete storage.__legacy__;
-    } else {
-      delete storage[workspaceKey];
-      delete storage.__legacy__;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(storage));
+      return;
     }
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(storage));
+    persistTeamPins(storage, teamKey, ids);
   } catch {
     // Ignore storage failures so session list still works in constrained envs.
   }

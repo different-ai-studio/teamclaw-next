@@ -153,8 +153,8 @@ export function SessionListColumn() {
   const teamIdFromList = useCurrentTeamStore((s) => s.team?.id ?? '')
   const sessionWorkspaceLabels = useSessionWorkspaceLabels(teamIdFromList || null)
   React.useEffect(() => {
-    initPinnedSessionIds(workspacePath)
-  }, [initPinnedSessionIds, workspacePath])
+    initPinnedSessionIds(teamIdFromList || null)
+  }, [initPinnedSessionIds, teamIdFromList])
   React.useEffect(() => {
     if (filter.kind !== 'actor') {
       setActorSessionIds(null)
@@ -307,7 +307,7 @@ export function SessionListColumn() {
   const handleArchive = async (e: React.SyntheticEvent, id: string) => { e.stopPropagation(); await archiveSession(id) }
   const handleTogglePinned = (e: React.SyntheticEvent, id: string) => {
     e.stopPropagation()
-    toggleSessionPinned(id, workspacePath)
+    toggleSessionPinned(id, teamIdFromList || null)
   }
   const handleViewDetail = (e: React.SyntheticEvent, row: ListRow) => {
     e.stopPropagation()
