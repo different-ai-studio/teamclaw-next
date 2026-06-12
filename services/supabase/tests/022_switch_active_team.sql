@@ -50,17 +50,17 @@ end $$;
 
 -- 即使活跃 org=A，list_all_my_teams 也要返回 A、B 两个 team（跨 org）。
 select is(
-  (select count(*)::int from app.list_all_my_teams()),
+  (select count(*)::int from amux.list_all_my_teams()),
   2,
   'list_all_my_teams returns teams across all orgs');
 select ok(
-  exists(select 1 from app.list_all_my_teams() where team_slug = 'team-b'),
+  exists(select 1 from amux.list_all_my_teams() where team_slug = 'team-b'),
   'includes a team from the non-active org');
 select ok(
-  (select org_name from app.list_all_my_teams() where team_slug = 'team-a') = 'Org A',
+  (select org_name from amux.list_all_my_teams() where team_slug = 'team-a') = 'Org A',
   'annotates org name');
 select ok(
-  (select org_id from app.list_all_my_teams() where team_slug = 'team-b') is not null,
+  (select org_id from amux.list_all_my_teams() where team_slug = 'team-b') is not null,
   'annotates org id');
 
 -- ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ begin
   select id, oid into v_teamB, v_orgB from amux.teams where slug = 'team-b';
   -- 复用上面的 fixture 用户：经 team-b 的 actor 确定地定位它（不依赖未过滤表上的 limit 1）。
   select a.user_id into v_uid from amux.actors a where a.team_id = v_teamB;
-  select refresh_token into v_rt from public.switch_active_team(v_teamB);
+  select refresh_token into v_rt from amux.switch_active_team(v_teamB);
   perform ok(v_rt is not null, 'switch returns a refresh token');
   perform is(
     (select org_id from public.users where auth_user_id = v_uid),
@@ -90,7 +90,7 @@ end $$;
 -- 因而在换 org 前就抛 42501（非成员），覆盖到拒绝路径。
 select ok(
   pg_temp.raises_sqlstate(
-    'select public.switch_active_team(''00000000-0000-0000-0000-0000000000ff''::uuid)',
+    'select amux.switch_active_team(''00000000-0000-0000-0000-0000000000ff''::uuid)',
     '42501'),
   'switch rejects a team the caller is not a member of');
 

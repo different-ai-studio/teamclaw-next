@@ -26,7 +26,7 @@ end;
 $function$;
 
 -- (2) 列出当前用户在「所有 org」下的 team —— security definer 绕过 teams_org_guard。
-create or replace function app.list_all_my_teams()
+create or replace function amux.list_all_my_teams()
 returns table(team_id uuid, team_name text, team_slug text, org_id uuid, org_name text)
 language sql stable security definer
 set search_path to 'amux', 'public', 'auth'
@@ -43,7 +43,7 @@ $function$;
 
 -- (3) 切换活跃 team：校验成员 → 改 public.users.org_id 为该 team 的 oid → 铸新 session。
 --     不做 personal-org GC（切换场景两个 org 都要保留，区别于 claim）。
-create or replace function public.switch_active_team(p_team_id uuid)
+create or replace function amux.switch_active_team(p_team_id uuid)
 returns table(actor_id uuid, team_id uuid, refresh_token text)
 language plpgsql security definer
 set search_path to 'amux', 'public', 'auth', 'app'
@@ -84,5 +84,5 @@ begin
 end;
 $function$;
 
-grant execute on function app.list_all_my_teams() to authenticated;
-grant execute on function public.switch_active_team(uuid) to authenticated;
+grant execute on function amux.list_all_my_teams() to authenticated;
+grant execute on function amux.switch_active_team(uuid) to authenticated;

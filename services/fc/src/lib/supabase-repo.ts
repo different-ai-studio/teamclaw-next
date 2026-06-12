@@ -127,11 +127,11 @@ export function createSupabaseBusinessRepository(options) {
     },
 
     // List the caller's teams across ALL orgs they belong to (cross-org team
-    // picker). The `list_all_my_teams` function lives in the `app` schema and is
-    // SECURITY DEFINER (it bypasses teams_org_guard), so it must be addressed
-    // via `.schema("app")` — the default client schema here is `amux`.
+    // picker). The `list_all_my_teams` function lives in the `amux` schema and is
+    // SECURITY DEFINER (it bypasses teams_org_guard). The default client schema
+    // here is `amux`, so it resolves via a plain `.rpc(...)` like create_team etc.
     async listAllMyTeams() {
-      const { data, error } = await supabase.schema("app").rpc("list_all_my_teams");
+      const { data, error } = await supabase.rpc("list_all_my_teams");
       if (error) throw error;
       return (data ?? []).map((r: any) => ({
         id: r.team_id,
@@ -2182,9 +2182,9 @@ export function createSupabaseAuthRepository(options) {
     },
 
     // Switch the caller's active team (and org), minting a fresh server session.
-    // `switch_active_team` is a SECURITY DEFINER function in the `public` schema;
-    // like `claim_team_invite` above it resolves via a plain `.rpc(...)` even
-    // though clientForToken's default schema is `amux`. The caller bearer is
+    // `switch_active_team` is a SECURITY DEFINER function in the `amux` schema;
+    // like `claim_team_invite` above it resolves via a plain `.rpc(...)` since
+    // clientForToken's default schema is `amux`. The caller bearer is
     // forwarded so `auth.uid()` resolves to the switching user (member check +
     // org swap). 42501 (non-member / unauthenticated) maps to 403.
     async switchActiveTeam(teamId, ctx: { accessToken?: string } = {}) {
