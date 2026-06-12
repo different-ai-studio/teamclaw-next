@@ -51,6 +51,23 @@ pub struct DaemonMetadata {
     /// (`GET /v1/workspaces/:id/model-catalog`). Empty in focused tests that
     /// build metadata via `metadata()` without daemon config.
     pub configured_agent_types: Vec<String>,
+    /// Live status of the background "advertise agent_types to the cloud"
+    /// task. Shared (interior-mutable) so the task can record the outcome and
+    /// `/v1/info` can surface a failure instead of swallowing it in a log line.
+    pub agent_types_advertise: Arc<parking_lot::Mutex<AgentTypesAdvertise>>,
+}
+
+/// Outcome of the cloud `agents.agent_types` advertise. Surfaced via
+/// `/v1/info` so a denied/failed advertise (e.g. RLS or permission error) is
+/// visible to the desktop instead of only living in a daemon log line.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTypesAdvertise {
+    /// True once the advertise has succeeded at least once this run.
+    pub advertised: bool,
+    /// The last advertise error (cleared on success). `None` while pending or
+    /// after a success.
+    pub last_error: Option<String>,
 }
 
 #[derive(Clone)]
@@ -125,5 +142,36 @@ impl HttpState {
     pub fn with_backend(mut self, backend: Option<Arc<dyn Backend>>) -> Self {
         self.backend = backend;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_types_advertise_serializes_camel_case() {
+        let s = AgentTypesAdvertise {
+            advertised: false,
+            last_error: Some("permission denied".into()),
+        };
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["advertised"], serde_json::json!(false));
+        assert_eq!(v["lastError"], serde_json::json!("permission denied"));
+    }
+
+    #[test]
+    fn advertise_status_is_shared_through_metadata_clone() {
+        // The advertise task holds one clone of the Arc; `/v1/info` reads it
+        // through `meta`. A write on one handle must be visible on the other,
+        // otherwise a failed advertise would never surface.
+        let shared = Arc::new(parking_lot::Mutex::new(AgentTypesAdvertise::default()));
+        let via_meta = shared.clone();
+        shared.lock().last_error = Some("update did not apply".into());
+        assert_eq!(
+            via_meta.lock().last_error.as_deref(),
+            Some("update did not apply")
+        );
+        assert!(!via_meta.lock().advertised);
     }
 }

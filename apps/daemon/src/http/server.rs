@@ -177,6 +177,7 @@ pub fn metadata(actor_id: String, backend_kind: impl Into<String>) -> DaemonMeta
         actor_id,
         backend_kind: backend_kind.into(),
         configured_agent_types: Vec::new(),
+        agent_types_advertise: Default::default(),
     }
 }
 

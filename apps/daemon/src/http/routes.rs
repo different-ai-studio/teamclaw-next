@@ -159,6 +159,15 @@ struct InfoBody {
     /// desktop polls this to trigger auto re-onboard.
     #[serde(skip_serializing_if = "Option::is_none")]
     cloud_auth: Option<CloudAuthInfo>,
+    /// Agent backends this daemon has configured locally (from daemon.toml).
+    /// Authoritative regardless of cloud state, so the desktop can show the
+    /// daemon's agents even when the cloud advertise is failing.
+    configured_agent_types: Vec<String>,
+    /// Status of advertising `configured_agent_types` to the cloud.
+    /// `advertised: false` with a non-null `lastError` means the cloud never
+    /// accepted the types (e.g. permission/RLS denied) — surfaced here instead
+    /// of being swallowed in a daemon log line.
+    agent_types_advertise: crate::http::state::AgentTypesAdvertise,
 }
 
 #[derive(serde::Serialize)]
@@ -186,5 +195,7 @@ async fn info_handler(State(state): State<HttpState>) -> Json<InfoBody> {
         actor_id: state.meta.actor_id.clone(),
         backend_kind: state.meta.backend_kind.clone(),
         cloud_auth,
+        configured_agent_types: state.meta.configured_agent_types.clone(),
+        agent_types_advertise: state.meta.agent_types_advertise.lock().clone(),
     })
 }
