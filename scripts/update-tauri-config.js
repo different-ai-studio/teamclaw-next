@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { applyNameToTauriConf } = require('./lib/branding');
 
 const rootDir = path.resolve(__dirname, '..');
 const tauriConfPath = path.join(rootDir, 'apps/desktop', 'tauri.conf.json');
@@ -51,6 +52,11 @@ if (localConfig) {
 const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf8'));
 
 let updated = false;
+
+if (applyNameToTauriConf(tauriConf, buildConfig)) {
+  console.log(`✓ Updated productName/window title: ${buildConfig.app.name}`);
+  updated = true;
+}
 
 function ensureUpdater() {
   if (!tauriConf.plugins) tauriConf.plugins = {};
