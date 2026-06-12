@@ -16,12 +16,39 @@ impl Drop for DaemonLockGuard {
     }
 }
 
-/// Send a single-line control command to a running amuxd via its Unix socket.
-/// The real handler (reading acknowledgement, etc.) is wired in G2.
+/// Send a single-line control command to a running amuxd via its control
+/// endpoint (Unix socket on unix, named pipe on Windows).
 pub fn send_control(sock_path: &Path, cmd: &str) -> anyhow::Result<()> {
-    let mut s = UnixStream::connect(sock_path)?;
+    let mut s = connect_control(sock_path)?;
     s.write_all(format!("{cmd}\n").as_bytes())?;
     Ok(())
+}
+
+/// Open a synchronous client connection to the daemon's control endpoint.
+#[cfg(unix)]
+pub(crate) fn connect_control(sock_path: &Path) -> std::io::Result<UnixStream> {
+    UnixStream::connect(sock_path)
+}
+
+/// Named-pipe client: opening the pipe path as a file gives a byte-mode
+/// duplex stream. ERROR_PIPE_BUSY (231) means every server instance is
+/// taken — retry briefly, like WaitNamedPipe would.
+#[cfg(windows)]
+pub(crate) fn connect_control(sock_path: &Path) -> std::io::Result<File> {
+    const ERROR_PIPE_BUSY: i32 = 231;
+    for _ in 0..50 {
+        match OpenOptions::new().read(true).write(true).open(sock_path) {
+            Ok(f) => return Ok(f),
+            Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "amuxd control pipe busy",
+    ))
 }
 
 /// How long `start` waits for a previous instance to release the singleton
@@ -99,8 +126,32 @@ fn read_pidfile() -> anyhow::Result<Option<(i32, PathBuf)>> {
 }
 
 /// libc::kill(pid, 0) — returns 0 if the process exists and we can signal it.
+#[cfg(unix)]
 fn is_alive(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
+}
+
+/// OpenProcess + GetExitCodeProcess == STILL_ACTIVE. PROCESS_QUERY_LIMITED_INFORMATION
+/// succeeds across elevation boundaries that full query rights would not.
+#[cfg(windows)]
+fn is_alive(pid: i32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    if pid <= 0 {
+        return false;
+    }
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+        if handle.is_null() {
+            return false;
+        }
+        let mut code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut code) != 0;
+        CloseHandle(handle);
+        ok && code == STILL_ACTIVE as u32
+    }
 }
 
 pub fn run_status() -> anyhow::Result<()> {
@@ -139,11 +190,7 @@ pub fn run_stop() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    println!("amuxd: sending SIGTERM to pid {pid}…");
-    if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
-        let err = std::io::Error::last_os_error();
-        anyhow::bail!("kill({pid}, SIGTERM) failed: {err}");
-    }
+    request_graceful_stop(pid)?;
 
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
@@ -155,12 +202,46 @@ pub fn run_stop() -> anyhow::Result<()> {
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    println!("amuxd: still running after 5s; sending SIGKILL.");
+    println!("amuxd: still running after 5s; killing.");
+    force_kill(pid);
+    let _ = fs::remove_file(&path);
+    Ok(())
+}
+
+#[cfg(unix)]
+fn request_graceful_stop(pid: i32) -> anyhow::Result<()> {
+    println!("amuxd: sending SIGTERM to pid {pid}…");
+    if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
+        let err = std::io::Error::last_os_error();
+        anyhow::bail!("kill({pid}, SIGTERM) failed: {err}");
+    }
+    Ok(())
+}
+
+/// Windows has no SIGTERM. Ask the daemon to exit via its own control
+/// command (handled as SockCommand::Shutdown in the main loop); if the pipe
+/// is gone the force-kill fallback below still applies after the wait loop.
+#[cfg(windows)]
+fn request_graceful_stop(pid: i32) -> anyhow::Result<()> {
+    println!("amuxd: sending shutdown command to pid {pid}…");
+    if let Err(e) = send_control(&DaemonConfig::sock_path(), "shutdown") {
+        println!("amuxd: control pipe unavailable ({e}); will force-kill.");
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn force_kill(pid: i32) {
     unsafe {
         libc::kill(pid, libc::SIGKILL);
     }
-    let _ = fs::remove_file(&path);
-    Ok(())
+}
+
+#[cfg(windows)]
+fn force_kill(pid: i32) {
+    let _ = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F"])
+        .status();
 }
 
 #[cfg(test)]
