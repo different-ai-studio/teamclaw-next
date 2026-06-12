@@ -156,5 +156,8 @@ apps/desktop/icons/ios/
 # Brand owners supply branding/<brand>/{logo.png,theme.json} + build.config.<brand>.json
 # locally; the white-label build reads them from disk at build time.
 /branding/
-/build.config.banana.json
-/build.config.belayo.json
+# Ignore all root build.config.<brand>.json except the in-repo flavors.
+/build.config.*.json
+!/build.config.example.json
+!/build.config.production.json
+!/build.config.teal.json
