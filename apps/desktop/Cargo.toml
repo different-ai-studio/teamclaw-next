@@ -129,6 +129,7 @@ cocoa = "0.24"
 objc = "0.2"
 objc2 = "0.6"
 objc2-web-kit = { version = "0.3", features = ["WKWebViewConfiguration", "WKWebView"] }
+block2 = "0.6"
 
 [dev-dependencies]
 wiremock = "0.5"

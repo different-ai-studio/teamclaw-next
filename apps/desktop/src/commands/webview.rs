@@ -252,6 +252,14 @@ fn build_supabase_session_script(storage_key: &str, session_json: &str) -> Strin
     )
 }
 
+/// Build a JS expression that returns the string value at `key` in
+/// localStorage (or null when absent). Used to harvest a webview's
+/// supabase-js session out of its own localStorage.
+fn build_read_local_storage_js(key: &str) -> String {
+    let key_lit = serde_json::to_string(key).unwrap_or_else(|_| "\"\"".to_string());
+    format!("(function(){{ try {{ return localStorage.getItem({key}); }} catch (_e) {{ return null; }} }})()", key = key_lit)
+}
+
 #[cfg(target_os = "macos")]
 fn add_document_start_script<R: Runtime>(webview: &tauri::Webview<R>, script: &str) {
     let script = script.to_string();
@@ -832,6 +840,86 @@ pub async fn webview_get_title(app: tauri::AppHandle, label: String) -> Result<S
     }
 }
 
+/// Read a string value out of a child webview's localStorage.
+///
+/// Child webviews loading external URLs have no `__TAURI_INTERNALS__`, so we
+/// read directly from the native WKWebView via evaluateJavaScript with a
+/// completion handler. Returns `Ok(None)` when the key is absent / value is
+/// JS null, or on any read error. macOS-only; a no-op (`None`) elsewhere until
+/// a WebView2 implementation is added.
+#[tauri::command]
+pub async fn webview_read_local_storage(
+    app: tauri::AppHandle,
+    label: String,
+    key: String,
+) -> Result<Option<String>, String> {
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "Webview not found".to_string())?;
+    let js = build_read_local_storage_js(&key);
+
+    let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
+    webview
+        .with_webview(move |wv| {
+            #[cfg(target_os = "macos")]
+            {
+                use block2::RcBlock;
+                use objc2::msg_send;
+                use objc2::runtime::AnyObject;
+                use std::ffi::CString;
+
+                unsafe {
+                    let wk_webview: *mut AnyObject = wv.inner().cast();
+                    let Ok(src) = CString::new(js.clone()) else {
+                        let _ = tx.send(None);
+                        return;
+                    };
+                    let ns_src: *mut AnyObject =
+                        msg_send![objc2::class!(NSString), stringWithUTF8String: src.as_ptr()];
+
+                    // completion: (id result, NSError *error) -> void
+                    let handler =
+                        RcBlock::new(move |result: *mut AnyObject, _err: *mut AnyObject| {
+                            if result.is_null() {
+                                let _ = tx.send(None);
+                                return;
+                            }
+                            let is_string: bool =
+                                msg_send![result, isKindOfClass: objc2::class!(NSString)];
+                            if !is_string {
+                                let _ = tx.send(None);
+                                return;
+                            }
+                            let utf8: *const std::ffi::c_char = msg_send![result, UTF8String];
+                            if utf8.is_null() {
+                                let _ = tx.send(None);
+                                return;
+                            }
+                            let s = std::ffi::CStr::from_ptr(utf8).to_string_lossy().to_string();
+                            let _ = tx.send(Some(s));
+                        });
+
+                    let _: () = msg_send![
+                        wk_webview,
+                        evaluateJavaScript: ns_src,
+                        completionHandler: &*handler
+                    ];
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = (wv, &js);
+                let _ = tx.send(None);
+            }
+        })
+        .map_err(|e| e.to_string())?;
+
+    match rx.recv_timeout(std::time::Duration::from_secs(3)) {
+        Ok(value) => Ok(value),
+        Err(_) => Ok(None),
+    }
+}
+
 /// Get the favicon URL for a child webview.
 /// Derives from the webview's current URL origin — no JS eval needed
 /// since child webviews don't have __TAURI_INTERNALS__.
@@ -937,5 +1025,17 @@ mod tests {
         assert!(EXTERNAL_WEBVIEW_INIT_SCRIPT.contains("__TEAMCLAW_SAFE_NOTIFICATION__"));
         assert!(EXTERNAL_WEBVIEW_INIT_SCRIPT.contains("function SafeNotification"));
         assert!(EXTERNAL_WEBVIEW_INIT_SCRIPT.contains("set: function(next)"));
+    }
+
+    #[test]
+    fn read_local_storage_js_reads_the_given_key() {
+        let js = build_read_local_storage_js("sb-test-supa-auth-token");
+        assert!(js.contains("localStorage.getItem(\"sb-test-supa-auth-token\")"));
+    }
+
+    #[test]
+    fn read_local_storage_js_escapes_the_key() {
+        let js = build_read_local_storage_js("a\"b");
+        assert!(js.contains("\"a\\\"b\""));
     }
 }

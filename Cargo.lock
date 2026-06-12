@@ -10293,6 +10293,7 @@ dependencies = [
  "arboard",
  "axum 0.7.9",
  "base64 0.22.1",
+ "block2 0.6.2",
  "chrono",
  "chrono-tz",
  "cocoa",
