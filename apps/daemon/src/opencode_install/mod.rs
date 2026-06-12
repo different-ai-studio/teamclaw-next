@@ -108,9 +108,30 @@ fn progress(event: &str, message: &str) {
     println!("{}", serde_json::json!({ "event": event, "message": message }));
 }
 
+/// Official opencode release asset for a Windows arch (std::env::consts::ARCH names).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_zip_asset(arch: &str) -> Option<&'static str> {
+    match arch {
+        "x86_64" => Some("opencode-windows-x64.zip"),
+        "aarch64" => Some("opencode-windows-arm64.zip"),
+        _ => None,
+    }
+}
+
+/// Download URL for a Windows asset. `base_override` comes from the
+/// OPENCODE_DOWNLOAD_BASE env var (mirror escape hatch for slow networks).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_download_url(base_override: Option<&str>, asset: &str) -> String {
+    let base = base_override
+        .unwrap_or("https://github.com/sst/opencode/releases/latest/download")
+        .trim_end_matches('/');
+    format!("{base}/{asset}")
+}
+
 /// Minimal system PATH for subprocesses spawned from a GUI/sidecar context.
 /// Dock-launched apps (and their sidecars) often inherit an empty PATH; the
 /// official opencode install script calls `mkdir`, `curl`, `unzip`, etc. by name.
+#[cfg(not(windows))]
 fn minimal_system_path() -> &'static str {
     if cfg!(target_os = "macos") {
         "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
@@ -121,6 +142,7 @@ fn minimal_system_path() -> &'static str {
     }
 }
 
+#[cfg(not(windows))]
 fn install_command_path() -> String {
     let base = minimal_system_path();
     match std::env::var("PATH") {
@@ -150,10 +172,48 @@ pub fn run_install(force: bool) -> anyhow::Result<()> {
 
     #[cfg(windows)]
     {
-        let _ = want;
-        anyhow::bail!(
-            "Install opencode on Windows via `scoop install opencode`, `choco install opencode`, or `npm i -g opencode-ai`, then re-check."
-        );
+        let asset = windows_zip_asset(std::env::consts::ARCH).ok_or_else(|| {
+            anyhow::anyhow!("unsupported Windows arch: {}", std::env::consts::ARCH)
+        })?;
+        let base = std::env::var("OPENCODE_DOWNLOAD_BASE").ok();
+        let url = windows_download_url(base.as_deref(), asset);
+        progress("download", &format!("downloading {url}"));
+        let bytes = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(async {
+                let resp = reqwest::get(&url).await?.error_for_status()?;
+                Ok::<_, anyhow::Error>(resp.bytes().await?)
+            })?;
+
+        progress("unpack", "unpacking opencode.exe");
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes.as_ref()))?;
+        // The exe may sit at the zip root or under a directory; match by suffix.
+        let entry_name = zip
+            .file_names()
+            .find(|n| n.ends_with("opencode.exe"))
+            .map(|n| n.to_string())
+            .ok_or_else(|| anyhow::anyhow!("opencode.exe not found in {asset}"))?;
+        let dest = opencode_default_bin().ok_or_else(|| anyhow::anyhow!("no home dir"))?;
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let tmp = dest.with_extension("exe.tmp");
+        {
+            let mut entry = zip.by_name(&entry_name)?;
+            let mut out = std::fs::File::create(&tmp)?;
+            std::io::copy(&mut entry, &mut out)?;
+        }
+        if dest.exists() {
+            // A running opencode locks its exe against overwrite; renaming a
+            // running exe is allowed on Windows, so move it aside first.
+            let old = dest.with_extension("exe.old");
+            let _ = std::fs::remove_file(&old);
+            let _ = std::fs::rename(&dest, &old);
+        }
+        std::fs::rename(&tmp, &dest)?;
+        progress("ok", &format!("opencode installed/upgraded (require >= {want})"));
+        Ok(())
     }
     #[cfg(not(windows))]
     {
@@ -341,6 +401,7 @@ mod tests {
         assert_eq!(resolve_binary_with(None, Some(p.clone())), p.to_string_lossy().to_string());
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn install_command_path_includes_system_dirs_when_empty() {
         let prev = std::env::var("PATH").ok();
@@ -352,6 +413,25 @@ mod tests {
             Some(v) => std::env::set_var("PATH", v),
             None => std::env::remove_var("PATH"),
         }
+    }
+
+    #[test]
+    fn windows_zip_asset_matches_supported_arches() {
+        assert_eq!(windows_zip_asset("x86_64"), Some("opencode-windows-x64.zip"));
+        assert_eq!(windows_zip_asset("aarch64"), Some("opencode-windows-arm64.zip"));
+        assert_eq!(windows_zip_asset("riscv64"), None);
+    }
+
+    #[test]
+    fn windows_download_url_honors_base_override() {
+        assert_eq!(
+            windows_download_url(None, "opencode-windows-x64.zip"),
+            "https://github.com/sst/opencode/releases/latest/download/opencode-windows-x64.zip"
+        );
+        assert_eq!(
+            windows_download_url(Some("https://mirror.example/oc/"), "opencode-windows-x64.zip"),
+            "https://mirror.example/oc/opencode-windows-x64.zip"
+        );
     }
 
     #[test]
