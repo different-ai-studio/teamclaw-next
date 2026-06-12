@@ -12,6 +12,7 @@ import { useStreamRevealText } from "@/hooks/useStreamRevealText";
 import { ToolCallCard } from "./ToolCallCard";
 import { ActorLabel } from "./ActorLabel";
 import { ThinkingBlock } from "./ThinkingBlock";
+import { StreamMarkdown } from "./StreamMarkdown";
 import type { MessagePart } from "@/stores/session-types";
 
 function StreamRevealedResponse({
@@ -24,7 +25,11 @@ function StreamRevealedResponse({
   const displayed = useStreamRevealText(text, reveal);
   return (
     <MessageContent>
-      <MessageResponse>{displayed}</MessageResponse>
+      {reveal ? (
+        <StreamMarkdown text={displayed} />
+      ) : (
+        <MessageResponse>{displayed}</MessageResponse>
+      )}
     </MessageContent>
   );
 }
