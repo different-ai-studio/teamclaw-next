@@ -210,6 +210,16 @@ async function attempt(entry: OutboxEntry): Promise<void> {
           return row ? isAgentActorType(row.actor_type) : false;
         });
         if (agentActorIds.length === 0) return;
+        let localDaemonActorId: string | null = null;
+        const { isTauri } = await import("@/lib/utils");
+        if (isTauri()) {
+          try {
+            const { getLocalDaemonActorId } = await import("@/lib/daemon-agent-admin");
+            localDaemonActorId = await getLocalDaemonActorId();
+          } catch {
+            localDaemonActorId = null;
+          }
+        }
         const workspaceIdHint =
           entry.workspaceIdHint?.trim() ||
           (await resolveSessionWorkspaceHintForRuntimeStart({
@@ -217,6 +227,7 @@ async function attempt(entry: OutboxEntry): Promise<void> {
             localWorkspacePath: useWorkspaceStore.getState().workspacePath,
             sessionId: entry.sessionId,
             agentActorIds,
+            localDaemonActorId,
           }));
         sessionFlowLog("outbox_sender.runtime_ensure.begin", {
           messageId: entry.messageId,

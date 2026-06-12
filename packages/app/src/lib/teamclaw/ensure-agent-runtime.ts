@@ -177,6 +177,16 @@ export async function ensureAgentRuntimesForSession(args: EnsureAgentRuntimeArgs
     );
 
     const localWorkspacePath = useWorkspaceStore.getState().workspacePath?.trim() || null
+    let localDaemonActorId: string | null = null
+    const { isTauri } = await import("@/lib/utils")
+    if (isTauri()) {
+      try {
+        const { getLocalDaemonActorId } = await import("@/lib/daemon-agent-admin")
+        localDaemonActorId = await getLocalDaemonActorId()
+      } catch {
+        localDaemonActorId = null
+      }
+    }
     const workspaceIdHint =
       args.workspaceIdHint?.trim() ||
       (await resolveSessionWorkspaceHintForRuntimeStart({
@@ -184,6 +194,7 @@ export async function ensureAgentRuntimesForSession(args: EnsureAgentRuntimeArgs
         localWorkspacePath,
         sessionId: args.sessionId,
         agentActorIds,
+        localDaemonActorId,
       })) ||
       undefined
 

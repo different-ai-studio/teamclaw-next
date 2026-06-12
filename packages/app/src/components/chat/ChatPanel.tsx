@@ -1416,12 +1416,22 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
           //    asynchronously after the bubble is visible.
           let workspaceIdHint: string | null = null;
           if (agentRuntimeIdsForSend.length > 0 && teamIdForSend) {
+            let localDaemonActorId: string | null = null;
+            if (isTauri()) {
+              try {
+                const { getLocalDaemonActorId } = await import("@/lib/daemon-agent-admin");
+                localDaemonActorId = await getLocalDaemonActorId();
+              } catch {
+                localDaemonActorId = null;
+              }
+            }
             workspaceIdHint =
               (await resolveSessionWorkspaceHintForRuntimeStart({
                 teamId: teamIdForSend,
                 localWorkspacePath: workspacePath,
                 sessionId: sid,
                 agentActorIds: agentRuntimeIdsForSend,
+                localDaemonActorId,
               })) || null;
           }
           sessionFlowLog("send.outbox_enqueue.begin", {

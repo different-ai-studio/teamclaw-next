@@ -373,6 +373,16 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
 
   const agentActorIds = args.agentActorIds
 
+  let localDaemonActorId: string | null = null
+  if (isTauri()) {
+    try {
+      const { getLocalDaemonActorId } = await import('@/lib/daemon-agent-admin')
+      localDaemonActorId = await getLocalDaemonActorId()
+    } catch {
+      localDaemonActorId = null
+    }
+  }
+
   const backend = getBackend()
   const priorByAgent = new Map<string, { workspace_id: string | null; backend_type: string | null }>()
   let priorRows: Awaited<ReturnType<typeof backend.runtime.listLatestAgentRuntimeHints>> = []
@@ -471,14 +481,20 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
       workspaceId = await ensureCloudWorkspaceIdForAgentRuntime({
         teamId: args.teamId,
         agentActorId,
-        localWorkspacePath: localWorkspacePath || null,
+        localWorkspacePath:
+          localDaemonActorId && agentActorId === localDaemonActorId
+            ? localWorkspacePath || null
+            : null,
         sessionId: args.sessionId,
         createdByMemberId,
       })
     }
 
+    const isLocalDaemonAgent =
+      localDaemonActorId !== null && agentActorId === localDaemonActorId
+
     let runtimeWorkspaceId = workspaceId
-    if (workspaceId) {
+    if (workspaceId && isLocalDaemonAgent) {
       try {
         const ensured = await ensureDaemonWorkspaceRegistered({
           targetActorId: agentActorId,
@@ -505,6 +521,14 @@ export async function startAgentRuntimesAsync(args: StartAgentRuntimesArgs): Pro
         })
         return
       }
+    } else if (workspaceId && !isLocalDaemonAgent) {
+      sessionFlowLog('daemon_workspace.skip_remote_agent', {
+        sessionId: args.sessionId,
+        teamId: args.teamId,
+        agentActorId,
+        cloudWorkspaceId: workspaceId,
+        localDaemonActorId,
+      })
     }
 
     try {
