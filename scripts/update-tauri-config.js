@@ -2,7 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { applyNameToTauriConf } = require('./lib/branding');
+const { applyNameToTauriConf, resolveLogoPlan } = require('./lib/branding');
+const { execFileSync } = require('child_process');
 
 const rootDir = path.resolve(__dirname, '..');
 const tauriConfPath = path.join(rootDir, 'apps/desktop', 'tauri.conf.json');
@@ -55,6 +56,30 @@ let updated = false;
 
 if (applyNameToTauriConf(tauriConf, buildConfig)) {
   console.log(`✓ Updated productName/window title: ${buildConfig.app.name}`);
+  updated = true;
+}
+
+const logoPlan = resolveLogoPlan(buildConfig, rootDir);
+if (logoPlan) {
+  if (!fs.existsSync(logoPlan.source)) {
+    console.error(`✗ app.logo source not found: ${logoPlan.source}`);
+    process.exit(1);
+  }
+  console.log(`✓ Generating icon set from ${logoPlan.source}`);
+  // Use the @tauri-apps/cli binary directly (NOT the `tauri` npm script, which
+  // rebuilds sidecars). `pnpm exec tauri` resolves node_modules/.bin/tauri.
+  execFileSync('pnpm', ['exec', 'tauri', 'icon', logoPlan.source, '-o', logoPlan.iconsOutDir], {
+    cwd: rootDir,
+    stdio: 'inherit',
+  });
+  if (!fs.existsSync(logoPlan.generatedIcon)) {
+    console.error(`✗ tauri icon did not produce ${logoPlan.generatedIcon}`);
+    process.exit(1);
+  }
+  for (const target of logoPlan.publicLogoTargets) {
+    fs.copyFileSync(logoPlan.generatedIcon, target);
+    console.log(`✓ Wrote in-app logo: ${target}`);
+  }
   updated = true;
 }
 

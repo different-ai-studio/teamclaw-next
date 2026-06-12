@@ -1,4 +1,5 @@
 "use strict";
+const path = require("path");
 
 /**
  * Apply the configured app name to a parsed tauri.conf.json object (mutates it).
@@ -20,4 +21,23 @@ function applyNameToTauriConf(tauriConf, buildConfig) {
   return changed;
 }
 
-module.exports = { applyNameToTauriConf };
+/**
+ * Build a (side-effect-free) plan describing how to regenerate icons from
+ * buildConfig.app.logo. Returns null when no logo is configured.
+ */
+function resolveLogoPlan(buildConfig, repoRoot) {
+  const logo = buildConfig && buildConfig.app && buildConfig.app.logo;
+  if (!logo) return null;
+  const iconsOutDir = path.join(repoRoot, "apps/desktop/icons");
+  return {
+    source: path.resolve(repoRoot, logo),
+    iconsOutDir,
+    generatedIcon: path.join(iconsOutDir, "128x128.png"),
+    publicLogoTargets: [
+      path.join(repoRoot, "packages/app/public/logo.png"),
+      path.join(repoRoot, "packages/app/public/logo-64.png"),
+    ],
+  };
+}
+
+module.exports = { applyNameToTauriConf, resolveLogoPlan };
