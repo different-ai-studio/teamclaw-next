@@ -62,21 +62,29 @@ export function stripPriorTranscriptTextPrefix(
   const trimmed = candidate.trim();
   if (!trimmed) return "";
 
+  // Incremental acp.output token deltas often carry meaningful leading spaces
+  // (e.g. " J", " page"). Only rewrite when we actually strip a cumulative
+  // pre-tool prefix; otherwise return the delta unchanged.
   let text = trimmed;
+  let strippedPrefix = false;
   for (const prior of priorTexts) {
     if (!prior) continue;
     if (text === prior || agentReplyTextsEquivalent(text, prior)) return "";
     if (text.startsWith(prior)) {
       text = text.slice(prior.length).replace(/^\s*\n+\s*/, "");
+      strippedPrefix = true;
     }
   }
 
   const joinedPrior = priorTexts.join("\n\n");
   if (joinedPrior && text.startsWith(joinedPrior)) {
     text = text.slice(joinedPrior.length).replace(/^\s*\n+\s*/, "");
+    strippedPrefix = true;
   }
 
-  return text.trim();
+  if (!strippedPrefix) return candidate;
+
+  return text;
 }
 
 /** Derive message.content from the live transcript; pending is metadata + drift hint only. */

@@ -168,6 +168,31 @@ describe("v2-streaming-store", () => {
     expect(stream.parts[2].text).toBe("After tool.");
   });
 
+  it("preserves spaces in tokenized post-tool acp.output deltas", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendOutput("s1", "a1", "The `issue-normalizer` skill is not available.");
+    store.pushToolUse("s1", "a1", {
+      toolId: "tool-1",
+      toolName: "skill",
+      description: "skill",
+      params: { name: "issue-normalizer" },
+    });
+    for (const delta of [
+      "The",
+      " J",
+      "IRA",
+      " page",
+      " requires",
+      " login",
+    ]) {
+      store.appendOutput("s1", "a1", delta);
+    }
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.outputText).toContain("The JIRA page requires login");
+    expect(stream.parts[2].text).toBe("The JIRA page requires login");
+  });
+
   it("merges later toolUse updates into the existing tool call", () => {
     const store = useV2StreamingStore.getState();
     store.pushToolUse("s1", "a1", {
