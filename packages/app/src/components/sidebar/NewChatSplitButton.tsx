@@ -46,7 +46,7 @@ export function NewChatSplitButton({
             onClick={onPrimaryClick}
             disabled={primaryDisabled}
             className={cn(
-              'flex min-w-0 flex-1 items-center gap-2 rounded-none px-2.5 py-1.5 text-left text-[13px] font-semibold text-white transition-colors',
+              'flex min-w-0 flex-1 items-center gap-2 rounded-none px-2.5 py-1.5 text-left text-[13px] font-semibold text-coral-foreground transition-colors',
               'hover:bg-coral/90 disabled:cursor-not-allowed disabled:opacity-40',
             )}
           >
@@ -67,7 +67,7 @@ export function NewChatSplitButton({
             aria-expanded={moreOpen}
             onClick={() => setMoreOpen((open) => !open)}
             className={cn(
-              'flex w-8 shrink-0 items-center justify-center rounded-none border-l border-white/20 text-white transition-colors',
+              'flex w-8 shrink-0 items-center justify-center rounded-none border-l border-coral-foreground/20 text-coral-foreground transition-colors',
               'hover:bg-coral/90 disabled:cursor-not-allowed disabled:opacity-40',
             )}
           >

@@ -101,7 +101,7 @@ export function DaemonOnboardingWizard({ onDone }: { onDone: () => void }) {
       >
         {error && <ErrorLine error={error} />}
         <Button
-          className="mt-1 h-10 w-full rounded-[10px] bg-coral text-paper hover:opacity-90"
+          className="mt-1 h-10 w-full rounded-[10px] bg-coral text-coral-foreground hover:opacity-90"
           disabled={busy}
           onClick={() => void refresh()}
         >
@@ -137,7 +137,7 @@ export function DaemonOnboardingWizard({ onDone }: { onDone: () => void }) {
       >
         {error && <ErrorLine error={error} />}
         <Button
-          className="mt-1 h-10 w-full rounded-[10px] bg-coral text-paper hover:opacity-90"
+          className="mt-1 h-10 w-full rounded-[10px] bg-coral text-coral-foreground hover:opacity-90"
           disabled={busy}
           onClick={() => void forceReset()}
         >
@@ -217,7 +217,7 @@ export function DaemonOnboardingWizard({ onDone }: { onDone: () => void }) {
           {error && <ErrorLine error={error} />}
 
           <Button
-            className="h-10 w-full rounded-[10px] bg-coral text-paper hover:opacity-90"
+            className="h-10 w-full rounded-[10px] bg-coral text-coral-foreground hover:opacity-90"
             disabled={busy || name.trim().length === 0}
             onClick={() => void createNewAgent(name.trim(), visibility)}
           >

@@ -392,7 +392,7 @@ function CandidateRow({
         className={cn(
           'flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors',
           checked
-            ? 'border-coral bg-coral text-white'
+            ? 'border-coral bg-coral text-coral-foreground'
             : 'border-border bg-paper',
         )}
         aria-hidden

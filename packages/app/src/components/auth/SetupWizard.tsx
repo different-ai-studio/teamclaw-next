@@ -131,7 +131,7 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
         </div>
 
         <Button
-          className="mt-2 h-10 bg-coral text-paper hover:opacity-90"
+          className="mt-2 h-10 bg-coral text-coral-foreground hover:opacity-90"
           disabled={!allReady || installing !== null}
           onClick={onDone}
         >

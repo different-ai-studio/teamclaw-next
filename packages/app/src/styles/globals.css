@@ -42,6 +42,7 @@
     /* Brand coral — use sparingly. See AGENTS.md §1 "Where coral is allowed". */
     --coral: #e85a4a;
     --coral-soft: #f5d6cf;
+    --coral-foreground: #ffffff;
 
     /* Type stacks: Chinese-first sans, JetBrains-leaning mono. */
     --font-sans: "PingFang SC", "Noto Sans SC", "Source Han Sans SC",
@@ -93,6 +94,7 @@
     --system-accent: var(--ring);
     --coral: #e85a4a;
     --coral-soft: oklch(0.45 0.13 28);
+    --coral-foreground: #ffffff;
     --chart-1: oklch(0.488 0.243 264.376);
     --chart-2: oklch(0.696 0.17 162.48);
     --chart-3: oklch(0.769 0.188 70.08);
@@ -152,6 +154,7 @@
     /* The single accent slot — coral becomes bright teal here. */
     --coral: #16998a;
     --coral-soft: #cfe3df;
+    --coral-foreground: #ffffff;
 
     /* --chart-* kept as-is (data viz, orthogonal to brand). */
     --sidebar: #e5e6e1;
@@ -205,6 +208,7 @@
     --color-sidebar-ring: var(--sidebar-ring);
     --color-coral: var(--coral);
     --color-coral-soft: var(--coral-soft);
+    --color-coral-foreground: var(--coral-foreground);
     --color-paper: var(--paper);
     --color-panel: var(--panel);
     --color-selected: var(--selected);
