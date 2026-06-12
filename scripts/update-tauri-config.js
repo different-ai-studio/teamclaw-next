@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { applyNameToTauriConf, resolveLogoPlan } = require('./lib/branding');
+const { applyNameToTauriConf, resolveLogoPlan, applyIdentityToTauriConf } = require('./lib/branding');
 const { execFileSync } = require('child_process');
 
 const rootDir = path.resolve(__dirname, '..');
@@ -56,6 +56,11 @@ let updated = false;
 
 if (applyNameToTauriConf(tauriConf, buildConfig)) {
   console.log(`✓ Updated productName/window title: ${buildConfig.app.name}`);
+  updated = true;
+}
+
+if (applyIdentityToTauriConf(tauriConf, buildConfig)) {
+  console.log(`✓ Updated identifier/scheme`);
   updated = true;
 }
 

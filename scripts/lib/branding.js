@@ -40,4 +40,49 @@ function resolveLogoPlan(buildConfig, repoRoot) {
   };
 }
 
-module.exports = { applyNameToTauriConf, resolveLogoPlan };
+/**
+ * Apply the configured bundle identifier and deep-link scheme to a parsed
+ * tauri.conf.json object (mutates it). Both are optional. Throws (to fail the
+ * build) when a provided value is malformed. Returns true if anything changed.
+ *
+ * - identifier: reverse-DNS, ≥2 dot-separated segments, [A-Za-z0-9-] per segment
+ *   (Tauri's rule: no underscores).
+ * - scheme: a URL scheme — must start with a letter, then [a-z0-9+.-].
+ *   Uppercase is rejected; supply a lowercase scheme.
+ */
+function applyIdentityToTauriConf(tauriConf, buildConfig) {
+  const app = (buildConfig && buildConfig.app) || {};
+  let changed = false;
+
+  if (app.identifier) {
+    if (!/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(app.identifier)) {
+      throw new Error(
+        `brand identity: invalid identifier '${app.identifier}' — must be reverse-DNS (e.g. com.acme.app), letters/digits/hyphens, no underscores`
+      );
+    }
+    if (tauriConf.identifier !== app.identifier) {
+      tauriConf.identifier = app.identifier;
+      changed = true;
+    }
+  }
+
+  if (app.scheme) {
+    if (!/^[a-z][a-z0-9+.-]*$/.test(app.scheme)) {
+      throw new Error(
+        `brand identity: invalid scheme '${app.scheme}' — must start with a lowercase letter, then [a-z0-9+.-]`
+      );
+    }
+    if (!tauriConf.plugins) tauriConf.plugins = {};
+    if (!tauriConf.plugins["deep-link"]) tauriConf.plugins["deep-link"] = {};
+    if (!tauriConf.plugins["deep-link"].desktop) tauriConf.plugins["deep-link"].desktop = {};
+    const desktop = tauriConf.plugins["deep-link"].desktop;
+    if (desktop.schemes?.length !== 1 || desktop.schemes[0] !== app.scheme) {
+      desktop.schemes = [app.scheme];
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+module.exports = { applyNameToTauriConf, resolveLogoPlan, applyIdentityToTauriConf };
