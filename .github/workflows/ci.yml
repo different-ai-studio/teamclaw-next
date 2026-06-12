@@ -71,3 +71,28 @@ jobs:
 
       - name: Run Clippy
         run: cargo clippy --manifest-path apps/desktop/Cargo.toml -- -D warnings
+
+  daemon-windows:
+    name: Daemon (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install protoc (for prost_build)
+        run: choco install protoc -y
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+
+      # Compile + link gate only. amuxd now compiles and links on Windows.
+      # The full unit-test suite is NOT run here: the broader daemon tests
+      # carry Unix assumptions (paths, sockets) beyond this port's scope, so
+      # behavioral verification on Windows is done manually on a real machine.
+      - name: Check amuxd compiles on Windows
+        run: cargo check -p amuxd --locked
+
+      - name: Build amuxd on Windows
+        run: cargo build -p amuxd --locked
