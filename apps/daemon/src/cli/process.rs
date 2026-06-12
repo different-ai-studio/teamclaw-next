@@ -1,7 +1,7 @@
 use crate::config::DaemonConfig;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
-use std::os::fd::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -12,9 +12,7 @@ pub struct DaemonLockGuard {
 
 impl Drop for DaemonLockGuard {
     fn drop(&mut self) {
-        unsafe {
-            libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
-        }
+        let _ = self.file.unlock();
     }
 }
 
@@ -55,17 +53,10 @@ fn acquire_daemon_lock_at(path: &Path, wait: Duration) -> anyhow::Result<DaemonL
 
     let deadline = Instant::now() + wait;
     loop {
-        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        if rc == 0 {
-            return Ok(DaemonLockGuard { file });
-        }
-        let err = std::io::Error::last_os_error();
-        let would_block = matches!(
-            err.raw_os_error(),
-            Some(code) if code == libc::EWOULDBLOCK || code == libc::EAGAIN
-        );
-        if !would_block {
-            return Err(err.into());
+        match file.try_lock() {
+            Ok(()) => return Ok(DaemonLockGuard { file }),
+            Err(std::fs::TryLockError::WouldBlock) => {}
+            Err(std::fs::TryLockError::Error(err)) => return Err(err.into()),
         }
         if Instant::now() >= deadline {
             anyhow::bail!(
