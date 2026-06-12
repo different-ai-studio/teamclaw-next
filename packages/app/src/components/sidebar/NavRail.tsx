@@ -2,7 +2,6 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { Inbox, Lightbulb, Keyboard, Pin } from 'lucide-react'
 import { useUIStore } from '@/stores/ui'
-import { useSessionStore } from '@/stores/session'
 import { useSessionListStore } from '@/stores/session-list-store'
 import { useCronStore } from '@/stores/cron'
 import { createQuickDaemonSession } from '@/lib/quick-daemon-session'
@@ -54,7 +53,6 @@ export function NavRail() {
   const filter = useUIStore((s) => s.sidebarFilter)
   const setFilter = useUIStore((s) => s.setSidebarFilter)
   const openDaemonAgentSettings = useUIStore((s) => s.openDaemonAgentSettings)
-  const sessions = useSessionStore((s) => s.sessions)
   const listRows = useSessionListStore((s) => s.rows)
   const pinnedSessionIds = useSessionListStore((s) => s.pinnedSessionIds)
   const cronSessionIds = useCronStore((s) => s.cronSessionIds)
@@ -62,8 +60,8 @@ export function NavRail() {
   const [creating, setCreating] = React.useState(false)
 
   const sessionsCount = React.useMemo(
-    () => sessions.filter((s) => !s.parentID && !cronSessionIds.has(s.id)).length,
-    [sessions, cronSessionIds],
+    () => listRows.filter((r) => !cronSessionIds.has(r.id)).length,
+    [listRows, cronSessionIds],
   )
 
   const pinnedCount = React.useMemo(() => {

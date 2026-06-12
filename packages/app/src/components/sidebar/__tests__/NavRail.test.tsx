@@ -5,6 +5,19 @@ import { useUIStore } from '@/stores/ui'
 import { useSessionStore } from '@/stores/session'
 import { useSessionListStore } from '@/stores/session-list-store'
 
+const mkListRow = (id: string, title: string) => ({
+  id,
+  title,
+  team_id: 't1',
+  last_message_at: null,
+  last_message_preview: null,
+  mode: 'collab' as const,
+  idea_id: null,
+  has_unread: false,
+  created_at: '',
+  updated_at: '',
+})
+
 vi.mock('@/components/sidebar/ActorsSection', () => ({
   ActorsSection: () => <div data-testid="actors-section" />,
 }))
@@ -21,10 +34,11 @@ vi.mock('sonner', () => ({
 describe('NavRail', () => {
   beforeEach(() => {
     useUIStore.setState({ sidebarFilter: { kind: 'all' } })
-    useSessionStore.setState({ sessions: [
-      { id: 's1', title: 'A', messages: [], createdAt: new Date(), updatedAt: new Date() },
-      { id: 's2', title: 'B', messages: [], createdAt: new Date(), updatedAt: new Date() },
-    ] as any })
+    useSessionListStore.setState({
+      rows: [mkListRow('s1', 'A'), mkListRow('s2', 'B')],
+      pinnedSessionIds: [],
+    })
+    useSessionStore.setState({ sessions: [] })
   })
 
   it('clicking Sessions sets filter to { kind: "all" }', () => {
@@ -51,12 +65,18 @@ describe('NavRail', () => {
     expect(screen.getByText('2')).toBeInTheDocument()
   })
 
+  it('keeps session count when legacy session store is empty', () => {
+    useSessionStore.setState({ sessions: [] })
+    useSessionListStore.setState({
+      rows: [mkListRow('s1', 'A'), mkListRow('s2', 'B'), mkListRow('s3', 'C')],
+    })
+    render(<NavRail />)
+    expect(screen.getByText('3')).toBeInTheDocument()
+  })
+
   it('shows pinned count badge in Pinned row', () => {
     useSessionListStore.setState({
-      rows: [
-        { id: 's1', title: 'A', team_id: 't1', last_message_at: null, last_message_preview: null, mode: 'collab', idea_id: null, has_unread: false, created_at: '', updated_at: '' },
-        { id: 's2', title: 'B', team_id: 't1', last_message_at: null, last_message_preview: null, mode: 'collab', idea_id: null, has_unread: false, created_at: '', updated_at: '' },
-      ],
+      rows: [mkListRow('s1', 'A'), mkListRow('s2', 'B')],
       pinnedSessionIds: ['s1'],
     })
     render(<NavRail />)
