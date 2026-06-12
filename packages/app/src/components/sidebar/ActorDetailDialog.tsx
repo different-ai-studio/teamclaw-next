@@ -47,6 +47,13 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
   const [clientVersions, setClientVersions] = React.useState<ClientVersionEntry[]>([])
   const [detailAvatarUrl, setDetailAvatarUrl] = React.useState<string | null>(null)
   const [avatarFailed, setAvatarFailed] = React.useState(false)
+  // Freshest member contact from the detail fetch — used to decide whether the
+  // member is a registered (non-anonymous) account. The libsql first-paint cache
+  // doesn't carry email/phone, so we enrich from the detail fetch when it lands.
+  const [detailContact, setDetailContact] = React.useState<{ email: string | null; phone: string | null }>({
+    email: null,
+    phone: null,
+  })
 
   // Reset the re-invite result whenever the dialog targets a different actor
   // (or is reopened) so a stale link from a previous actor never leaks through.
@@ -62,6 +69,7 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
     setClientVersions([])
     setDetailAvatarUrl(null)
     setAvatarFailed(false)
+    setDetailContact({ email: null, phone: null })
     if (!id) return
     let cancelled = false
     void (async () => {
@@ -70,6 +78,7 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
         if (cancelled || !entry) return
         setClientVersions(entry.client_versions ?? [])
         if (entry.avatar_url) setDetailAvatarUrl(entry.avatar_url)
+        setDetailContact({ email: entry.email ?? null, phone: entry.phone ?? null })
       } catch {
         // Detail enrichment is best-effort; keep the cached-row view.
       }
@@ -80,6 +89,17 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
   }, [actor?.id])
 
   if (!displayActor) return null
+
+  // A member with a bound (non-anonymous) auth identity carries an email or
+  // phone; anonymous members carry neither. Re-invite rotates the actor onto a
+  // fresh auth user, which only makes sense for anonymous members — the server
+  // rejects it for registered members ("cannot re-invite member with bound auth
+  // identity"). Gate the button on the contact signal we already have so we
+  // never offer an action that can only fail. Use the freshest of the cached
+  // row and the detail fetch.
+  const memberHasBoundIdentity =
+    !isAgent &&
+    Boolean(displayActor.email || displayActor.phone || detailContact.email || detailContact.phone)
 
   const online = isAgent
     ? (agentPresence ? agentPresence.online : isActorOnline(displayActor.last_active_at))
@@ -189,7 +209,19 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
       })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      toast.error(t('invite.failed', 'Failed to create invite: {{msg}}', { msg }))
+      // Safety net for members whose bound identity isn't visible client-side
+      // (e.g. OAuth without email/phone): the server rejects re-invite with a
+      // raw English message — surface a friendly localized reason instead.
+      if (/bound auth identity/i.test(msg)) {
+        toast.error(
+          t(
+            'actors.reinvite.memberBound',
+            'This member has a registered account and can sign in again — re-invite is only for anonymous accounts.',
+          ),
+        )
+      } else {
+        toast.error(t('invite.failed', 'Failed to create invite: {{msg}}', { msg }))
+      }
     } finally {
       setReinviting(false)
     }
@@ -428,6 +460,16 @@ export function ActorDetailDialog({ actor, teamId, onOpenChange }: Props) {
                     })}
                   </p>
                 </div>
+              ) : memberHasBoundIdentity ? (
+                // Registered members can sign in again on their own — re-invite
+                // is reserved for anonymous accounts, so we explain rather than
+                // offer a button that the server would only reject.
+                <p className="text-[12px] leading-5 text-faint">
+                  {t(
+                    'actors.reinvite.memberBound',
+                    'This member has a registered account and can sign in again — re-invite is only for anonymous accounts.',
+                  )}
+                </p>
               ) : (
                 <Button
                   variant="outline"
