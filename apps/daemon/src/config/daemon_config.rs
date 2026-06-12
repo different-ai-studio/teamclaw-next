@@ -416,8 +416,39 @@ impl DaemonConfig {
         Self::config_dir().join("amuxd.lock")
     }
 
+    /// Control endpoint: a Unix socket path on unix, a named-pipe name on
+    /// Windows. Pipe names live in a machine-global namespace, so the name
+    /// carries the (sanitized) username for per-user uniqueness.
+    #[cfg(not(windows))]
     pub fn sock_path() -> PathBuf {
         Self::config_dir().join("amuxd.sock")
+    }
+
+    #[cfg(windows)]
+    pub fn sock_path() -> PathBuf {
+        let user = std::env::var("USERNAME")
+            .or_else(|_| std::env::var("USER"))
+            .unwrap_or_else(|_| "default".into());
+        PathBuf::from(format!(
+            r"\\.\pipe\amuxd-{}",
+            Self::control_pipe_suffix_from(&user)
+        ))
+    }
+
+    /// Sanitize a username into `[A-Za-z0-9_-]` for use inside a pipe name.
+    /// Non-ASCII / separator characters map to `-` (multi-byte chars produce
+    /// one `-` per char). Kept platform-independent so it is unit-testable
+    /// everywhere.
+    pub(crate) fn control_pipe_suffix_from(user: &str) -> String {
+        user.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect()
     }
 
     pub fn http_token_path() -> PathBuf {
@@ -530,5 +561,18 @@ broker_url = "tcp://localhost:1883"
         let cfg: DaemonConfig = toml::from_str(toml_src).unwrap();
         assert_eq!(cfg.actor.id, "legacy-actor");
         assert_eq!(cfg.actor.name, "Old Mac");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_pipe_suffix_sanitizes_to_safe_charset() {
+        assert_eq!(DaemonConfig::control_pipe_suffix_from("matt.chow"), "matt-chow");
+        // 2 CJK chars + 1 space -> 3 dashes.
+        assert_eq!(DaemonConfig::control_pipe_suffix_from("\u{7b80}\u{4f53} user"), "---user");
+        assert_eq!(DaemonConfig::control_pipe_suffix_from("Win_User-1"), "Win_User-1");
     }
 }
