@@ -619,7 +619,7 @@ pub fn run() {
                         tauri::WindowEvent::CloseRequested { api, .. } => {
                             api.prevent_close();
                             let state = close_app_handle.state::<commands::window_chrome::MainWindowState>();
-                            commands::window_chrome::save_main_geometry(&main_win_clone, &state);
+                            commands::window_chrome::save_main_window_state(&main_win_clone, &state);
                             let is_fullscreen = main_win_clone.is_fullscreen().unwrap_or(false);
                             if is_fullscreen {
                                 // macOS doesn't allow hide() on fullscreen windows.

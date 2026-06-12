@@ -464,46 +464,49 @@ export function SessionListColumn() {
           </div>
         </SidebarMenuButton>
         {/* Direction B: ellipsis menu sits on row 3 (avatars row), right-aligned.
-            Avoids overlapping title & preview text. AGENTS.md §2. */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute right-2 bottom-2 h-6 w-6 opacity-0 group-hover/menu-item:opacity-100 data-[state=open]:opacity-100 transition-opacity hover:bg-black/10 dark:hover:bg-white/10 rounded-md"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Ellipsis className="h-3 w-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              className="text-[13px]"
-              onClick={(e) => handleTogglePinned(e as React.SyntheticEvent, row.id)}
-            >
-              <Pin className="h-3.5 w-3.5 mr-2" />
-              {row.isPinned ? t('sidebar.unpin', 'Unpin') : t('sidebar.pinToTop', 'Pin to top')}
-            </DropdownMenuItem>
-            <DropdownMenuItem className="text-[13px]" onClick={(e) => handleStartRename(e, row.id)}>
-              <Pencil className="h-3.5 w-3.5 mr-2" />
-              {t('sidebar.rename', 'Rename')}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-[13px]"
-              onClick={(e) => handleViewDetail(e, row)}
-            >
-              <Info className="h-3.5 w-3.5 mr-2" />
-              {t('sidebar.viewDetail', 'View detail')}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-[13px]"
-              onClick={(e) => handleArchive(e as React.SyntheticEvent, row.id)}
-            >
-              <Archive className="h-3.5 w-3.5 mr-2" />
-              {t('sidebar.archive', 'Archive')}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            Avoids overlapping title & preview text. AGENTS.md §2.
+            Hidden while renaming so the trigger does not overlap the input. */}
+        {!isRenaming && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute right-2 bottom-2 h-6 w-6 opacity-0 group-hover/menu-item:opacity-100 data-[state=open]:opacity-100 transition-opacity hover:bg-black/10 dark:hover:bg-white/10 rounded-md"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Ellipsis className="h-3 w-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                className="text-[13px]"
+                onClick={(e) => handleTogglePinned(e as React.SyntheticEvent, row.id)}
+              >
+                <Pin className="h-3.5 w-3.5 mr-2" />
+                {row.isPinned ? t('sidebar.unpin', 'Unpin') : t('sidebar.pinToTop', 'Pin to top')}
+              </DropdownMenuItem>
+              <DropdownMenuItem className="text-[13px]" onClick={(e) => handleStartRename(e, row.id)}>
+                <Pencil className="h-3.5 w-3.5 mr-2" />
+                {t('sidebar.rename', 'Rename')}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-[13px]"
+                onClick={(e) => handleViewDetail(e, row)}
+              >
+                <Info className="h-3.5 w-3.5 mr-2" />
+                {t('sidebar.viewDetail', 'View detail')}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-[13px]"
+                onClick={(e) => handleArchive(e as React.SyntheticEvent, row.id)}
+              >
+                <Archive className="h-3.5 w-3.5 mr-2" />
+                {t('sidebar.archive', 'Archive')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </SidebarMenuItem>
     )
   }

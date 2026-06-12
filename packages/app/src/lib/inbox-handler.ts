@@ -18,25 +18,31 @@ export interface InboxEnvelope {
   bytes: number[];
 }
 
-/** Debounce window for coalescing burst inbox pings into one list fetch. */
-export const INBOX_LIST_REFRESH_MS = 300;
+/** Debounce window for coalescing burst list-refresh triggers into one fetch. */
+export const SESSION_LIST_REFRESH_MS = 300;
+/** @deprecated Use SESSION_LIST_REFRESH_MS */
+export const INBOX_LIST_REFRESH_MS = SESSION_LIST_REFRESH_MS;
 
-let inboxListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let sessionListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Test hook — clears pending debounced refresh. */
-export function resetInboxListRefreshForTests(): void {
-  if (inboxListRefreshTimer) {
-    clearTimeout(inboxListRefreshTimer);
-    inboxListRefreshTimer = null;
+export function resetSessionListRefreshForTests(): void {
+  if (sessionListRefreshTimer) {
+    clearTimeout(sessionListRefreshTimer);
+    sessionListRefreshTimer = null;
   }
 }
 
-function scheduleInboxListRefresh(loadFirstPage: () => Promise<void>): void {
-  if (inboxListRefreshTimer) clearTimeout(inboxListRefreshTimer);
-  inboxListRefreshTimer = setTimeout(() => {
-    inboxListRefreshTimer = null;
+/** @deprecated Use resetSessionListRefreshForTests */
+export const resetInboxListRefreshForTests = resetSessionListRefreshForTests;
+
+/** Shared by inbox pings and session/live events (e.g. unknown session message.created). */
+export function scheduleSessionListRefresh(loadFirstPage: () => Promise<void>): void {
+  if (sessionListRefreshTimer) clearTimeout(sessionListRefreshTimer);
+  sessionListRefreshTimer = setTimeout(() => {
+    sessionListRefreshTimer = null;
     void loadFirstPage();
-  }, INBOX_LIST_REFRESH_MS);
+  }, SESSION_LIST_REFRESH_MS);
 }
 
 /**
@@ -90,5 +96,5 @@ export function handleInboxEnvelope(
     store.patchRow(payload.session_id, { has_unread: true });
   }
 
-  scheduleInboxListRefresh(() => store.loadFirstPage());
+  scheduleSessionListRefresh(() => store.loadFirstPage());
 }

@@ -3,6 +3,8 @@ import {
   handleInboxEnvelope,
   INBOX_LIST_REFRESH_MS,
   resetInboxListRefreshForTests,
+  scheduleSessionListRefresh,
+  SESSION_LIST_REFRESH_MS,
   type InboxStore,
 } from "./inbox-handler";
 
@@ -111,6 +113,23 @@ describe("handleInboxEnvelope", () => {
     );
     expect(store.patchRow).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it("scheduleSessionListRefresh debounces loadFirstPage", () => {
+    const loadFirstPage = vi.fn(async () => {});
+    scheduleSessionListRefresh(loadFirstPage);
+    expect(loadFirstPage).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(SESSION_LIST_REFRESH_MS);
+    expect(loadFirstPage).toHaveBeenCalledOnce();
+  });
+
+  it("scheduleSessionListRefresh coalesces burst calls", () => {
+    const loadFirstPage = vi.fn(async () => {});
+    scheduleSessionListRefresh(loadFirstPage);
+    vi.advanceTimersByTime(100);
+    scheduleSessionListRefresh(loadFirstPage);
+    vi.advanceTimersByTime(SESSION_LIST_REFRESH_MS);
+    expect(loadFirstPage).toHaveBeenCalledOnce();
   });
 
   it("warns on payload missing session_id", () => {
