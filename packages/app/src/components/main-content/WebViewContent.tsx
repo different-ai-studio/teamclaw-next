@@ -5,6 +5,7 @@ import { isTauri } from "@/lib/utils"
 import { normalizeUrl, urlToLabel } from "@/lib/webview-utils"
 import { useTabsStore } from "@/stores/tabs"
 import { useCurrentTeamStore } from "@/stores/current-team"
+import { betlyAuthInjectionFor } from "@/lib/betly-auth-inject"
 
 interface WebViewContentProps {
   url: string
@@ -149,6 +150,11 @@ export function WebViewContent({ url: rawUrl }: WebViewContentProps) {
               // Empty deviceName is acceptable; injection still happens.
             }
 
+            // Betly admin auto-login: for allowlisted admin hosts, hand the
+            // current TeamClaw session to the native side so it seeds the
+            // page's supabase-js localStorage before the bundle runs.
+            const authInject = betlyAuthInjectionFor(url)
+
             await invoke("webview_create", {
               label,
               url,
@@ -158,6 +164,8 @@ export function WebViewContent({ url: rawUrl }: WebViewContentProps) {
               height: Math.max(1, bounds.height),
               deviceNo,
               deviceName,
+              authStorageKey: authInject?.storageKey,
+              authSessionJson: authInject?.sessionJson,
             })
 
             if (!cancelled) {

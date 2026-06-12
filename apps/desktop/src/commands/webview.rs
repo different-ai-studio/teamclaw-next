@@ -219,6 +219,39 @@ fn build_teamclaw_identity_script(device_no: &str, device_name: &str) -> String 
     )
 }
 
+/// Hosts of the Betly admin SPA that share TeamClaw's GoTrue. Only these hosts
+/// receive an injected TeamClaw session — never inject tokens into arbitrary
+/// third-party webviews, that would leak the bearer token to any site.
+const BETLY_ADMIN_HOSTS: &[&str] = &["testadmin.ucar.cc", "admin.mx5.cn"];
+
+fn host_allows_session_injection(url: &tauri::Url) -> bool {
+    url.host_str()
+        .map(|h| BETLY_ADMIN_HOSTS.contains(&h))
+        .unwrap_or(false)
+}
+
+/// Build a documentStart script that seeds a supabase-js session into the
+/// page's localStorage so it is already authenticated when its bundle runs.
+/// `session_json` is the already-serialized supabase session object; it is
+/// written under `storage_key` only when absent, so supabase-js's own
+/// refreshed session is never clobbered on reload.
+fn build_supabase_session_script(storage_key: &str, session_json: &str) -> String {
+    let key_lit = serde_json::to_string(storage_key).unwrap_or_else(|_| "\"\"".to_string());
+    let val_lit = serde_json::to_string(session_json).unwrap_or_else(|_| "\"\"".to_string());
+    format!(
+        r#"(function(){{
+  try {{
+    var k = {key};
+    if (!localStorage.getItem(k)) {{
+      localStorage.setItem(k, {val});
+    }}
+  }} catch (_e) {{}}
+}})();"#,
+        key = key_lit,
+        val = val_lit,
+    )
+}
+
 #[cfg(target_os = "macos")]
 fn add_document_start_script<R: Runtime>(webview: &tauri::Webview<R>, script: &str) {
     let script = script.to_string();
@@ -412,6 +445,8 @@ pub async fn webview_create(
     height: f64,
     device_no: Option<String>,
     device_name: Option<String>,
+    auth_storage_key: Option<String>,
+    auth_session_json: Option<String>,
 ) -> Result<(), String> {
     // If webview with this label already exists, just show and reposition it
     let exists = state
@@ -454,6 +489,20 @@ pub async fn webview_create(
         width,
         height
     );
+
+    // Betly admin auto-login: seed the current TeamClaw session into the page's
+    // supabase-js localStorage key, but ONLY for allowlisted hosts that share
+    // TeamClaw's GoTrue. Computed before parsed_url is moved into the builder.
+    let auth_inject_script = match (auth_storage_key.as_deref(), auth_session_json.as_deref()) {
+        (Some(key), Some(session))
+            if !key.is_empty()
+                && !session.is_empty()
+                && host_allows_session_injection(&parsed_url) =>
+        {
+            Some(build_supabase_session_script(key, session))
+        }
+        _ => None,
+    };
 
     #[allow(unused_mut)]
     let mut webview_builder =
@@ -515,6 +564,7 @@ pub async fn webview_create(
     {
         let progress_label = label.clone();
         let identity = identity.clone();
+        let auth_script = auth_inject_script.clone();
         webview_builder = webview_builder.on_page_load(move |webview, payload| {
             use tauri::Emitter;
             let progress = match payload.event() {
@@ -540,6 +590,14 @@ pub async fn webview_create(
                     }
                 }
             }
+
+            // Re-seed the supabase session at documentStart on every (re)load so
+            // a hard refresh of the admin SPA stays authenticated.
+            if let Some(script) = &auth_script {
+                if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                    add_document_start_script(&webview, script);
+                }
+            }
         });
     }
 
@@ -550,6 +608,12 @@ pub async fn webview_create(
     // its getters read refreshed values after OAuth redirects and page reloads.
     if let Some(script) = initial_identity_script {
         webview_builder = webview_builder.initialization_script(&script);
+    }
+
+    // Seed the supabase session before the admin SPA's bundle runs, so
+    // supabase-js picks up the logged-in TeamClaw session on init.
+    if let Some(ref script) = auth_inject_script {
+        webview_builder = webview_builder.initialization_script(script);
     }
 
     let webview = window
