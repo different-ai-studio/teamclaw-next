@@ -151,3 +151,10 @@ apps/desktop/icons/StoreLogo.png
 apps/desktop/icons/Square*Logo.png
 apps/desktop/icons/android/
 apps/desktop/icons/ios/
+
+# OEM brand assets — kept local to the build machine, never in the shared repo.
+# Brand owners supply branding/<brand>/{logo.png,theme.json} + build.config.<brand>.json
+# locally; the white-label build reads them from disk at build time.
+/branding/
+/build.config.banana.json
+/build.config.belayo.json
