@@ -65,6 +65,7 @@ export function releaseStreamAfterAgentReplyPersist(
     persistedPartsJson: opts.persistedPartsJson,
     persistedSourceStreamId: opts.streamEntrySnapshot?.streamId,
   });
+  useV2StreamingStore.getState().clearStaleStreamErrors(sessionId, actorId);
   const archivedAfter = useV2StreamingStore.getState().archived.filter(
     (entry) => entry.sessionId === sessionId && entry.actorId === actorId,
   ).length;

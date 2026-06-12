@@ -1217,6 +1217,16 @@ function AppContent() {
             }
 
             if (
+              msg.kind === MessageKind.TEXT ||
+              (msg.kind === MessageKind.AGENT_REPLY && !parkedAgentReply)
+            ) {
+              useV2StreamingStore.getState().clearStaleStreamErrors(
+                sid,
+                msg.kind === MessageKind.AGENT_REPLY ? senderActorId : undefined,
+              );
+            }
+
+            if (
               !parkedAgentReply &&
               messageKindUpdatesSessionPreview(decoded.message.kind)
             ) {
