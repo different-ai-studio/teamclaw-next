@@ -27,6 +27,9 @@ struct SessionListContent: View {
     /// Tap handler for the empty-state CTA. Caller presents an invite sheet.
     /// Pass nil to hide the action (e.g. when no ActorStore is available yet).
     let onInviteFirstAgent: (() -> Void)?
+    /// Per-session mute state + toggle. Nil hides the mute affordances
+    /// (e.g. before the team runtime is built).
+    let notificationPrefsStore: NotificationPrefsStore?
 
     @Environment(\.modelContext) private var modelContext
 
@@ -216,7 +219,8 @@ struct SessionListContent: View {
                 runtime: runtime,
                 cachedRuntime: cached,
                 workspaceName: workspaceName(runtime: runtime, cached: cached),
-                participants: participantPreviews(for: session)
+                participants: participantPreviews(for: session),
+                isMuted: notificationPrefsStore?.isMuted(session.sessionId) ?? false
             )
         }
         .contentShape(Rectangle())
@@ -237,6 +241,17 @@ struct SessionListContent: View {
         // the only visible structure is the subtle inset rule under the title.
         .listRowBackground(Color.clear)
         .listRowSeparatorTint(Color.amux.hairline)
+        .contextMenu {
+            if let store = notificationPrefsStore {
+                let isMuted = store.isMuted(session.sessionId)
+                Button {
+                    Task { await store.toggleMute(sessionID: session.sessionId) }
+                } label: {
+                    Label(isMuted ? "Unmute notifications" : "Mute notifications",
+                          systemImage: isMuted ? "bell" : "bell.slash")
+                }
+            }
+        }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button {
                 session.isArchived = true
@@ -293,19 +308,22 @@ struct AgentRowView: View {
     let cachedRuntime: CachedAgentRuntime?
     let workspaceName: String
     let participants: [ParticipantPreview]
+    let isMuted: Bool
 
     init(
         session: Session,
         runtime: Runtime? = nil,
         cachedRuntime: CachedAgentRuntime? = nil,
         workspaceName: String = "",
-        participants: [ParticipantPreview] = []
+        participants: [ParticipantPreview] = [],
+        isMuted: Bool = false
     ) {
         self.session = session
         self.runtime = runtime
         self.cachedRuntime = cachedRuntime
         self.workspaceName = workspaceName
         self.participants = participants
+        self.isMuted = isMuted
     }
 
     private var displayTitle: String {
@@ -411,6 +429,14 @@ struct AgentRowView: View {
                     .lineLimit(1)
                     .foregroundStyle(isStopped ? Color.amux.basalt : Color.amux.onyx)
                 Spacer(minLength: 4)
+                // Quiet muted marker — bare Slate glyph, no capsule, per the
+                // Hai restraint rules (status whispers, never shouts).
+                if isMuted {
+                    Image(systemName: "bell.slash")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.amux.slate)
+                        .accessibilityLabel("Muted")
+                }
                 if isUnread {
                     Circle()
                         .fill(Color.amux.cinnabar)

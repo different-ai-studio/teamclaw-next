@@ -80,6 +80,16 @@ public struct CloudAPIClient: Sendable {
         try await requestVoid("PUT", path: path, body: data, idempotencyKey: idempotencyKey)
     }
 
+    public func put<Body: Encodable & Sendable, T: Decodable & Sendable>(
+        _ path: String,
+        body: Body,
+        idempotencyKey: String? = nil,
+        as type: T.Type = T.self
+    ) async throws -> T {
+        let data = try JSONEncoder().encode(body)
+        return try await request("PUT", path: path, body: data, idempotencyKey: idempotencyKey, as: type)
+    }
+
     /// POST raw bytes (e.g. an octet-stream upload) and decode the JSON result.
     public func postRaw<T: Decodable & Sendable>(
         _ path: String,

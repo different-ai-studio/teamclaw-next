@@ -538,6 +538,60 @@ public actor CloudAPIIdeaRepository: IdeaRepository {
     }
 }
 
+public actor CloudAPINotificationsRepository: NotificationsRepository {
+    private let client: CloudAPIClient
+
+    public init(client: CloudAPIClient) {
+        self.client = client
+    }
+
+    public func getPrefs() async throws -> NotificationPrefsRecord? {
+        // FC returns the raw snake_case prefs row, or JSON `null` when the
+        // user has no row yet. Tolerate an empty body the same way — both
+        // map to nil and the store falls back to defaults (enabled = true).
+        do {
+            let row: CloudNotificationPrefsRow? = try await client.get("/v1/notifications/prefs")
+            return row?.record
+        } catch is DecodingError {
+            return nil
+        }
+    }
+
+    public func putPrefs(_ prefs: NotificationPrefsRecord) async throws -> NotificationPrefsRecord {
+        let body = CloudNotificationPrefsWrite(
+            enabled: prefs.enabled,
+            dndStartMin: prefs.dndStartMin,
+            dndEndMin: prefs.dndEndMin,
+            dndTZ: prefs.dndTZ
+        )
+        // FC echoes the upserted row (snake_case, server-normalized).
+        let row: CloudNotificationPrefsRow = try await client.put("/v1/notifications/prefs", body: body)
+        return row.record
+    }
+
+    public func listMutedSessionIDs() async throws -> Set<String> {
+        let list: CloudMutedSessionsList = try await client.get("/v1/notifications/muted-sessions")
+        return Set(list.items)
+    }
+
+    public func mute(sessionID: String, until: Date?) async throws {
+        // `until == nil` is omitted from the body (JSONEncoder drops nil
+        // keys), which FC reads as a permanent mute.
+        let body = CloudMuteSessionRequest(
+            until: until.map { ISO8601DateFormatter.cloudWithFractionalSeconds.string(from: $0) }
+        )
+        try await client.postVoid("/v1/sessions/\(Self.enc(sessionID))/mute", body: body)
+    }
+
+    public func unmute(sessionID: String) async throws {
+        try await client.deleteVoid("/v1/sessions/\(Self.enc(sessionID))/mute")
+    }
+
+    private static func enc(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    }
+}
+
 public actor CloudAPIInviteClaimer {
     private let client: CloudAPIClient
 
@@ -677,6 +731,13 @@ public enum CloudAPIRepositoryFactory {
         accessToken: @escaping @Sendable () async throws -> String
     ) -> any ActorRepository {
         CloudAPIActorRepository(client: client(configuration: configuration, accessToken: accessToken))
+    }
+
+    public static func notificationsRepository(
+        configuration: CloudAPIConfiguration,
+        accessToken: @escaping @Sendable () async throws -> String
+    ) -> any NotificationsRepository {
+        CloudAPINotificationsRepository(client: client(configuration: configuration, accessToken: accessToken))
     }
 
     public static func clientVersion(client: CloudAPIClient) -> CloudAPIClientVersionRepository {
@@ -1091,6 +1152,55 @@ private struct CloudInsertMessageRequest<Metadata: Encodable & Sendable>: Encoda
     let replyToMessageId: String?
     let model: String?
     let createdAt: String?
+}
+
+// The notifications endpoints are the one Cloud API surface that speaks raw
+// snake_case on the wire (FC returns the DB row unmapped, matching the
+// desktop client); every other DTO in this file is camelCase. Keep explicit
+// CodingKeys here instead of flipping the decoder's key strategy.
+private struct CloudNotificationPrefsRow: Decodable, Sendable {
+    let enabled: Bool?
+    let dndStartMin: Int?
+    let dndEndMin: Int?
+    let dndTZ: String?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case dndStartMin = "dnd_start_min"
+        case dndEndMin = "dnd_end_min"
+        case dndTZ = "dnd_tz"
+    }
+
+    var record: NotificationPrefsRecord {
+        NotificationPrefsRecord(
+            enabled: enabled ?? true,
+            dndStartMin: dndStartMin,
+            dndEndMin: dndEndMin,
+            dndTZ: dndTZ
+        )
+    }
+}
+
+private struct CloudNotificationPrefsWrite: Encodable, Sendable {
+    let enabled: Bool
+    let dndStartMin: Int?
+    let dndEndMin: Int?
+    let dndTZ: String?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case dndStartMin = "dnd_start_min"
+        case dndEndMin = "dnd_end_min"
+        case dndTZ = "dnd_tz"
+    }
+}
+
+private struct CloudMutedSessionsList: Decodable, Sendable {
+    let items: [String]
+}
+
+private struct CloudMuteSessionRequest: Encodable, Sendable {
+    let until: String?
 }
 
 private struct CloudClaimInviteRequest: Encodable, Sendable {
