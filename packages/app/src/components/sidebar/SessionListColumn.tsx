@@ -198,10 +198,8 @@ export function SessionListColumn() {
   }, [hasWorkspace])
 
   /**
-   * Apply cron / pin / idea / actor filters and sort: pinned first within
-   * each filter mode, then last_message_at DESC. Rows with null
-   * last_message_at (brand-new sessions) sort to the top, matching the
-   * convention in `session-list-store.sortEntries`.
+   * Apply cron / pin / idea / actor filters and sort by last_message_at DESC.
+   * Pinned vs unpinned split happens at render time for the "all" filter.
    */
   const filteredRows = React.useMemo<ListRow[]>(() => {
     const pinnedSet = new Set(pinnedSessionIds)
@@ -224,7 +222,6 @@ export function SessionListColumn() {
     }
 
     return base.sort((a, b) => {
-      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1
       if (!a.lastMessageAt && !b.lastMessageAt) return 0
       if (!a.lastMessageAt) return -1
       if (!b.lastMessageAt) return 1
@@ -232,38 +229,22 @@ export function SessionListColumn() {
     })
   }, [listRows, pinnedSessionIds, cronSessionIds, showCronSessions, filter, actorSessionIds, workspaceSessionIds])
 
+  const { pinnedRows, regularRows } = React.useMemo(() => {
+    if (filter.kind !== 'all') {
+      return { pinnedRows: [] as ListRow[], regularRows: filteredRows }
+    }
+    return {
+      pinnedRows: filteredRows.filter((r) => r.isPinned),
+      regularRows: filteredRows.filter((r) => !r.isPinned),
+    }
+  }, [filteredRows, filter.kind])
+
   /** Load participants for any visible row we haven't seen yet. */
   const visibleIds = filteredRows.map((r) => r.id).join('|')
   React.useEffect(() => {
     if (filteredRows.length === 0) return
     void ensureParticipants(filteredRows.map((r) => r.id))
   }, [ensureParticipants, filteredRows, visibleIds])
-
-  /**
-   * Date-bucket rows (Today / Yesterday / This week / Earlier). Rows without
-   * a last_message_at — brand new sessions — fall into Today so they're
-   * immediately visible at the top.
-   */
-  const groupedRows = React.useMemo(() => {
-    const now = new Date()
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-    const startOfYesterday = startOfToday - 86400_000
-    const startOfWeek = startOfToday - 6 * 86400_000
-    const groups: { key: string; label: string; items: ListRow[] }[] = [
-      { key: 'today',     label: t('sidebar.dateToday', 'Today'),         items: [] },
-      { key: 'yesterday', label: t('sidebar.dateYesterday', 'Yesterday'), items: [] },
-      { key: 'thisWeek',  label: t('sidebar.dateThisWeek', 'This week'),  items: [] },
-      { key: 'earlier',   label: t('sidebar.dateEarlier', 'Earlier'),     items: [] },
-    ]
-    for (const r of filteredRows) {
-      const ts = r.lastMessageAt?.getTime() ?? Number.POSITIVE_INFINITY
-      if (ts >= startOfToday) groups[0].items.push(r)
-      else if (ts >= startOfYesterday) groups[1].items.push(r)
-      else if (ts >= startOfWeek) groups[2].items.push(r)
-      else groups[3].items.push(r)
-    }
-    return groups.filter((g) => g.items.length > 0)
-  }, [filteredRows, t])
 
   const sessionActivityMap = React.useMemo(
     () =>
@@ -413,10 +394,10 @@ export function SessionListColumn() {
                 {workspaceLabel}
               </span>
             )}
-            {/* Preview line: 2 lines max from last_message_preview. AGENTS.md §2. */}
+            {/* Preview line: single line from last_message_preview. */}
             {!isRenaming && row.lastMessagePreview && (
               <div
-                className="w-full text-[12px] leading-[1.45] text-muted-foreground overflow-hidden text-ellipsis [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical]"
+                className="w-full truncate text-[12px] leading-[1.45] text-muted-foreground"
                 data-testid="v2-session-row-preview"
               >
                 {row.lastMessagePreview}
@@ -597,15 +578,27 @@ export function SessionListColumn() {
           </div>
         ) : (
           <SidebarMenu>
-            {groupedRows.map((group) => (
-              <React.Fragment key={group.key}>
-                <div className="px-4 pt-3 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-faint">
-                  {group.label}{' '}
-                  <span className="font-mono text-faint/80">· {group.items.length}</span>
+            {filter.kind === 'all' && pinnedRows.length > 0 && (
+              <>
+                <div
+                  className="px-4 pt-3 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-faint"
+                  data-testid="v2-session-pinned-header"
+                >
+                  {t('sidebar.pinned', 'Pinned')}{' '}
+                  <span className="font-mono text-faint/80">· {pinnedRows.length}</span>
                 </div>
-                {group.items.map(renderSessionItem)}
-              </React.Fragment>
-            ))}
+                {pinnedRows.map(renderSessionItem)}
+                {regularRows.length > 0 && (
+                  <div
+                    className="mx-4 my-2 border-t border-border-soft"
+                    data-testid="v2-session-pinned-divider"
+                    role="separator"
+                    aria-hidden
+                  />
+                )}
+              </>
+            )}
+            {(filter.kind === 'all' ? regularRows : filteredRows).map(renderSessionItem)}
           </SidebarMenu>
         )}
         {listHasMore && (

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Inbox, Lightbulb, Keyboard, Pin } from 'lucide-react'
 import { useUIStore } from '@/stores/ui'
 import { useSessionStore } from '@/stores/session'
+import { useSessionListStore } from '@/stores/session-list-store'
 import { useCronStore } from '@/stores/cron'
 import { createQuickDaemonSession } from '@/lib/quick-daemon-session'
 import { useQuickChatReadiness } from '@/hooks/use-quick-chat-readiness'
@@ -54,6 +55,8 @@ export function NavRail() {
   const setFilter = useUIStore((s) => s.setSidebarFilter)
   const openDaemonAgentSettings = useUIStore((s) => s.openDaemonAgentSettings)
   const sessions = useSessionStore((s) => s.sessions)
+  const listRows = useSessionListStore((s) => s.rows)
+  const pinnedSessionIds = useSessionListStore((s) => s.pinnedSessionIds)
   const cronSessionIds = useCronStore((s) => s.cronSessionIds)
   const quickChatState = useQuickChatReadiness()
   const [creating, setCreating] = React.useState(false)
@@ -62,6 +65,13 @@ export function NavRail() {
     () => sessions.filter((s) => !s.parentID && !cronSessionIds.has(s.id)).length,
     [sessions, cronSessionIds],
   )
+
+  const pinnedCount = React.useMemo(() => {
+    const visibleIds = new Set(
+      listRows.filter((r) => !cronSessionIds.has(r.id)).map((r) => r.id),
+    )
+    return pinnedSessionIds.filter((id) => visibleIds.has(id)).length
+  }, [listRows, pinnedSessionIds, cronSessionIds])
 
   const handleQuickNewChat = React.useCallback(() => {
     if (quickChatState.kind === 'agent_not_bound') {
@@ -120,6 +130,7 @@ export function NavRail() {
           label={t('sidebar.pinned', 'Pinned')}
           icon={Pin}
           active={filter.kind === 'pinned'}
+          badge={pinnedCount}
           onClick={() => setFilter({ kind: 'pinned' })}
         />
         <TopEntry
