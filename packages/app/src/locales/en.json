@@ -132,6 +132,8 @@
     "signInWithWechat": "Sign in with WeChat",
     "oauthWaiting": "Finish signing in in your browser, then come back.",
     "oauthCancel": "Cancel and try another way",
+    "signInWithWebSso": "Quick sign-in",
+    "webSsoWaiting": "Finish signing in in the window, then come back.",
     "upgrade": {
       "title": "Upgrade account",
       "desc": "Verify your email to upgrade your anonymous session.",

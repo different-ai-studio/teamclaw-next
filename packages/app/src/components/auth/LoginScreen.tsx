@@ -12,11 +12,12 @@ import type { OAuthProvider } from "@/lib/auth";
 
 export function OAuthButtons() {
   const { t } = useTranslation();
-  const { signInWithOAuth, cancelOAuth, loading, oauthPending } = useAuthStore();
+  const { signInWithOAuth, cancelOAuth, signInWithWebSso, cancelWebSso, loading, oauthPending, webSsoPending } = useAuthStore();
   const auth = buildConfig.features?.auth;
   const showGoogle = isTauri() && Boolean(auth?.google);
   const showWechat = isTauri() && Boolean(auth?.wechat);
-  if (!showGoogle && !showWechat) return null;
+  const showWebSso = isTauri() && Boolean(auth?.webSSO);
+  if (!showGoogle && !showWechat && !showWebSso) return null;
 
   const Btn = ({ provider, icon, label }: { provider: OAuthProvider; icon: React.ReactNode; label: string }) => (
     <button
@@ -29,6 +30,29 @@ export function OAuthButtons() {
       {label}
     </button>
   );
+
+  // While web SSO window is open, show a waiting message + cancel affordance.
+  if (webSsoPending) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-[11px] text-faint">
+          <span className="h-px flex-1 bg-border" />
+          {t("auth.orContinueWith", "or continue with")}
+          <span className="h-px flex-1 bg-border" />
+        </div>
+        <p className="text-center text-[12px] text-muted-foreground">
+          {t("auth.webSsoWaiting", "Finish signing in in the window, then come back.")}
+        </p>
+        <button
+          type="button"
+          onClick={() => cancelWebSso()}
+          className="flex h-10 w-full items-center justify-center rounded-[8px] border border-border bg-paper text-[13px] font-medium text-foreground transition-colors hover:bg-selected/45"
+        >
+          {t("auth.oauthCancel", "Cancel and try another way")}
+        </button>
+      </div>
+    );
+  }
 
   // While a provider page is open and the loopback is awaiting, give the user an
   // explicit escape. Without it a broken provider page leaves every sign-in
@@ -67,6 +91,16 @@ export function OAuthButtons() {
       )}
       {showGoogle && (
         <Btn provider="google" icon={<GoogleIcon className="h-4 w-4" />} label={t("auth.signInWithGoogle", "Sign in with Google")} />
+      )}
+      {showWebSso && (
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => void signInWithWebSso()}
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-[8px] border border-border bg-paper text-[13px] font-medium text-foreground transition-colors hover:bg-selected/45 disabled:opacity-50"
+        >
+          {t("auth.signInWithWebSso", "Quick sign-in")}
+        </button>
       )}
     </div>
   );

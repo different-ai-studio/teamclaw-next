@@ -132,6 +132,8 @@
     "signInWithWechat": "使用微信登录",
     "oauthWaiting": "请在浏览器中完成登录后返回。",
     "oauthCancel": "取消并换一种方式",
+    "signInWithWebSso": "快捷登录",
+    "webSsoWaiting": "在窗口里登录完成后回到这里。",
     "upgrade": {
       "title": "升级账号",
       "desc": "验证邮箱以升级匿名会话。",
