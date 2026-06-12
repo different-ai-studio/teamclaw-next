@@ -13,6 +13,15 @@ use tokio::process::{ChildStdin, ChildStdout, Command};
 use tokio::time::timeout;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// MCP configs commonly say "npx"/"npm"; those are .cmd shims on Windows.
+fn platform_program(program: &str) -> String {
+    if cfg!(windows) && matches!(program, "npx" | "npm") {
+        format!("{program}.cmd")
+    } else {
+        program.to_string()
+    }
+}
 const CACHE_TTL: Duration = Duration::from_secs(300);
 const INITIALIZE_PROTOCOL_VERSION: &str = "2024-11-05";
 
@@ -87,7 +96,7 @@ pub async fn probe_local_stdio(
         return Err("empty command".to_string());
     }
 
-    let mut cmd = Command::new(command);
+    let mut cmd = Command::new(platform_program(command));
     cmd.args(&config.command[1..])
         .current_dir(workspace_path)
         .stdin(std::process::Stdio::piped())
@@ -109,6 +118,23 @@ pub async fn probe_local_stdio(
         }
         if let Some(dyld) = std::env::var_os("DYLD_FALLBACK_LIBRARY_PATH") {
             cmd.env("DYLD_FALLBACK_LIBRARY_PATH", dyld);
+        }
+    }
+    #[cfg(windows)]
+    {
+        for key in [
+            "USERPROFILE",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "SYSTEMROOT",
+            "COMSPEC",
+            "PATHEXT",
+            "TEMP",
+            "TMP",
+        ] {
+            if let Some(v) = std::env::var_os(key) {
+                cmd.env(key, v);
+            }
         }
     }
     for (k, v) in &config.environment {

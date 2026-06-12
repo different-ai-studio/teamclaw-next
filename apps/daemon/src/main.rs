@@ -247,6 +247,7 @@ impl Drop for PidfileGuard {
     }
 }
 
+#[cfg(unix)]
 async fn shutdown_signal() {
     use tokio::signal::unix::{signal, SignalKind};
     let mut term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
@@ -255,6 +256,13 @@ async fn shutdown_signal() {
         _ = term.recv() => {},
         _ = int.recv()  => {},
     }
+}
+
+/// Windows: Ctrl-C / console-close. Service-style stops arrive as the
+/// `shutdown` control command instead (SockCommand::Shutdown in the run loop).
+#[cfg(windows)]
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 /// Print onboarding instructions and block on stdin for the deeplink the

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use teamclaw_transport::MessagePublisher;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+#[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::{mpsc, oneshot};
@@ -202,6 +203,10 @@ pub struct DaemonServer {
 /// `cmd` strings written by `cli::process::send_control`.
 #[derive(Debug)]
 enum SockCommand {
+    /// Graceful daemon exit, requested over the control endpoint. This is the
+    /// Windows substitute for SIGTERM (`amuxd stop` sends it); on unix it is
+    /// an additional equivalent trigger.
+    Shutdown,
     /// Tear down the running channel manager and rebuild from the latest
     /// `daemon.toml`. One-way (no reply).
     ChannelReload,
@@ -1539,6 +1544,12 @@ impl DaemonServer {
                     }
                     sock_cmd = sock_rx.recv() => {
                         match sock_cmd {
+                            Some(SockCommand::Shutdown) => {
+                                info!("shutdown control command received, draining channels");
+                                self.shutdown_channels().await;
+                                let _ = std::fs::remove_file(&sock_path);
+                                return Ok(());
+                            }
                             Some(SockCommand::ChannelReload) => {
                                 self.reload_channels().await;
                             }
@@ -1853,6 +1864,15 @@ impl DaemonServer {
                     }
                     sock_cmd = sock_rx.recv() => {
                         match sock_cmd {
+                            Some(SockCommand::Shutdown) => {
+                                info!("shutdown control command received, draining channels");
+                                if let Some(nats) = &self.nats {
+                                    let _ = nats.announce_offline(&self.config.actor.name).await;
+                                }
+                                self.shutdown_channels().await;
+                                let _ = std::fs::remove_file(&sock_path);
+                                return Ok(());
+                            }
                             Some(SockCommand::ChannelReload) => self.reload_channels().await,
                             Some(SockCommand::ChannelStatus { reply_tx }) => {
                                 let body = self.channel_status_payload().await;
@@ -5289,6 +5309,287 @@ fn fit_available_commands_in_budget(ac: &mut crate::proto::amux::AcpAvailableCom
     }
 }
 
+/// Handle one control connection: read a newline-terminated command (line
+/// protocol or `{`-sniffed JSON envelope) and forward it to the main loop.
+/// Generic over the transport: UnixStream on unix, NamedPipeServer on Windows.
+async fn handle_control_conn<S>(stream: S, tx: mpsc::Sender<SockCommand>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let mut reader = BufReader::new(stream);
+    let mut first_line = String::new();
+    match reader.read_line(&mut first_line).await {
+        Ok(0) => {}
+        Ok(_) => {
+            let head = first_line.trim();
+
+            // JSON envelopes (currently just `mcp-send`)
+            // are framed differently from the legacy
+            // line-based control protocol — sniff the
+            // first byte and branch.
+            if head.starts_with('{') {
+                let parsed: Result<serde_json::Value, _> =
+                    serde_json::from_str(head);
+                match parsed {
+                    Ok(v) => {
+                        let cmd =
+                            v.get("cmd").and_then(|c| c.as_str()).unwrap_or("");
+                        if cmd == "mcp-send" {
+                            let (reply_tx, reply_rx) = oneshot::channel();
+                            if tx
+                                .send(SockCommand::McpSend {
+                                    payload: v,
+                                    reply_tx,
+                                })
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                            match reply_rx.await {
+                                Ok(body) => {
+                                    let mut stream = reader.into_inner();
+                                    if let Err(e) =
+                                        stream.write_all(body.as_bytes()).await
+                                    {
+                                        warn!(
+                                            "amuxd.sock: mcp-send write failed: {e}"
+                                        );
+                                        return;
+                                    }
+                                    let _ = stream.write_all(b"\n").await;
+                                    let _ = stream.shutdown().await;
+                                }
+                                Err(_) => {
+                                    warn!("amuxd.sock: mcp-send reply dropped");
+                                }
+                            }
+                        } else if cmd == "prompt-await" {
+                            let (reply_tx, reply_rx) = oneshot::channel();
+                            if tx
+                                .send(SockCommand::PromptAwait {
+                                    payload: v,
+                                    reply_tx,
+                                })
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                            match reply_rx.await {
+                                Ok(body) => {
+                                    let mut stream = reader.into_inner();
+                                    if let Err(e) =
+                                        stream.write_all(body.as_bytes()).await
+                                    {
+                                        warn!(
+                                            "amuxd.sock: prompt-await write failed: {e}"
+                                        );
+                                        return;
+                                    }
+                                    let _ = stream.write_all(b"\n").await;
+                                    let _ = stream.shutdown().await;
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "amuxd.sock: prompt-await reply dropped"
+                                    );
+                                }
+                            }
+                        } else {
+                            warn!("amuxd.sock: unknown JSON cmd: {cmd:?}");
+                        }
+                    }
+                    Err(e) => {
+                        warn!("amuxd.sock: JSON parse failed: {e}");
+                    }
+                }
+                return;
+            }
+
+            match head {
+                "channel-reload" => {
+                    let _ = tx.send(SockCommand::ChannelReload).await;
+                }
+                "channel-status" => {
+                    // Round-trip: ask the main loop to build a
+                    // status snapshot, then write the JSON body
+                    // back to the connected client.
+                    let (reply_tx, reply_rx) = oneshot::channel();
+                    if tx
+                        .send(SockCommand::ChannelStatus { reply_tx })
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    match reply_rx.await {
+                        Ok(body) => {
+                            let mut stream = reader.into_inner();
+                            if let Err(e) =
+                                stream.write_all(body.as_bytes()).await
+                            {
+                                warn!(
+                                    "amuxd.sock: channel-status write failed: {e}"
+                                );
+                                return;
+                            }
+                            let _ = stream.write_all(b"\n").await;
+                            let _ = stream.shutdown().await;
+                        }
+                        Err(_) => {
+                            warn!("amuxd.sock: channel-status reply dropped");
+                        }
+                    }
+                }
+                "wecom-bots-status" => {
+                    // Round-trip: ask the main loop to build a
+                    // per-bot WeCom status snapshot, then write the
+                    // JSON body back to the connected client.
+                    let (reply_tx, reply_rx) = oneshot::channel();
+                    if tx
+                        .send(SockCommand::WecomBotsStatus { reply_tx })
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    match reply_rx.await {
+                        Ok(body) => {
+                            let mut stream = reader.into_inner();
+                            if let Err(e) =
+                                stream.write_all(body.as_bytes()).await
+                            {
+                                warn!(
+                                    "amuxd.sock: wecom-bots-status write failed: {e}"
+                                );
+                                return;
+                            }
+                            let _ = stream.write_all(b"\n").await;
+                            let _ = stream.shutdown().await;
+                        }
+                        Err(_) => {
+                            warn!("amuxd.sock: wecom-bots-status reply dropped");
+                        }
+                    }
+                }
+                "wechat-qr-start" => {
+                    let (reply_tx, reply_rx) = oneshot::channel();
+                    if tx
+                        .send(SockCommand::WechatQrStart { reply_tx })
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    if let Ok(body) = reply_rx.await {
+                        let mut stream = reader.into_inner();
+                        let _ = stream.write_all(body.as_bytes()).await;
+                        let _ = stream.write_all(b"\n").await;
+                        let _ = stream.shutdown().await;
+                    }
+                }
+                "wechat-qr-poll" => {
+                    let mut qrcode = String::new();
+                    if reader.read_line(&mut qrcode).await.is_err() {
+                        warn!("amuxd.sock: wechat-qr-poll missing qrcode");
+                        return;
+                    }
+                    let (reply_tx, reply_rx) = oneshot::channel();
+                    if tx
+                        .send(SockCommand::WechatQrPoll {
+                            qrcode: qrcode.trim().to_string(),
+                            reply_tx,
+                        })
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    if let Ok(body) = reply_rx.await {
+                        let mut stream = reader.into_inner();
+                        let _ = stream.write_all(body.as_bytes()).await;
+                        let _ = stream.write_all(b"\n").await;
+                        let _ = stream.shutdown().await;
+                    }
+                }
+                "wecom-qr-start" => {
+                    let (reply_tx, reply_rx) = oneshot::channel();
+                    if tx
+                        .send(SockCommand::WecomQrStart { reply_tx })
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    if let Ok(body) = reply_rx.await {
+                        let mut stream = reader.into_inner();
+                        let _ = stream.write_all(body.as_bytes()).await;
+                        let _ = stream.write_all(b"\n").await;
+                        let _ = stream.shutdown().await;
+                    }
+                }
+                "wecom-qr-poll" => {
+                    let mut scode = String::new();
+                    if reader.read_line(&mut scode).await.is_err() {
+                        warn!("amuxd.sock: wecom-qr-poll missing scode");
+                        return;
+                    }
+                    let (reply_tx, reply_rx) = oneshot::channel();
+                    if tx
+                        .send(SockCommand::WecomQrPoll {
+                            scode: scode.trim().to_string(),
+                            reply_tx,
+                        })
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    if let Ok(body) = reply_rx.await {
+                        let mut stream = reader.into_inner();
+                        let _ = stream.write_all(body.as_bytes()).await;
+                        let _ = stream.write_all(b"\n").await;
+                        let _ = stream.shutdown().await;
+                    }
+                }
+                "channel-save" => {
+                    // Wire format: line 1 = "channel-save",
+                    // line 2 = platform, line 3+ = JSON
+                    // (single line — JSON has no embedded \n
+                    // after `to_string()` serialization).
+                    let mut platform = String::new();
+                    if reader.read_line(&mut platform).await.is_err() {
+                        warn!("amuxd.sock: channel-save missing platform");
+                        return;
+                    }
+                    let mut config_json = String::new();
+                    if reader.read_line(&mut config_json).await.is_err() {
+                        warn!("amuxd.sock: channel-save missing config json");
+                        return;
+                    }
+                    let _ = tx
+                        .send(SockCommand::ChannelSave {
+                            platform: platform.trim().to_string(),
+                            config_json: config_json.trim().to_string(),
+                        })
+                        .await;
+                }
+                "shutdown" => {
+                    let _ = tx.send(SockCommand::Shutdown).await;
+                }
+                other => {
+                    let _ =
+                        tx.send(SockCommand::Unknown(other.to_string())).await;
+                }
+            }
+        }
+        Err(e) => {
+            warn!("amuxd.sock: read_line failed: {e}");
+        }
+    }
+}
+
 /// Bind `amuxd.sock` and spawn a task that accepts connections, reads a
 /// single newline-terminated control command per connection, and forwards
 /// the parsed `SockCommand` to the daemon's main loop via `tx`. Stale
@@ -5296,6 +5597,7 @@ fn fit_available_commands_in_budget(ac: &mut crate::proto::amux::AcpAvailableCom
 /// bind. Errors are logged and swallowed — the daemon must keep running
 /// even if the sock can't be set up (operators can still kill it via
 /// SIGTERM).
+#[cfg(unix)]
 fn spawn_sock_listener(sock_path: PathBuf, tx: mpsc::Sender<SockCommand>) {
     // Make sure the parent directory exists (e.g. on first run).
     if let Some(parent) = sock_path.parent() {
@@ -5324,284 +5626,58 @@ fn spawn_sock_listener(sock_path: PathBuf, tx: mpsc::Sender<SockCommand>) {
         loop {
             match listener.accept().await {
                 Ok((stream, _)) => {
-                    let tx = tx.clone();
-                    tokio::spawn(async move {
-                        let mut reader = BufReader::new(stream);
-                        let mut first_line = String::new();
-                        match reader.read_line(&mut first_line).await {
-                            Ok(0) => {}
-                            Ok(_) => {
-                                let head = first_line.trim();
-
-                                // JSON envelopes (currently just `mcp-send`)
-                                // are framed differently from the legacy
-                                // line-based control protocol — sniff the
-                                // first byte and branch.
-                                if head.starts_with('{') {
-                                    let parsed: Result<serde_json::Value, _> =
-                                        serde_json::from_str(head);
-                                    match parsed {
-                                        Ok(v) => {
-                                            let cmd =
-                                                v.get("cmd").and_then(|c| c.as_str()).unwrap_or("");
-                                            if cmd == "mcp-send" {
-                                                let (reply_tx, reply_rx) = oneshot::channel();
-                                                if tx
-                                                    .send(SockCommand::McpSend {
-                                                        payload: v,
-                                                        reply_tx,
-                                                    })
-                                                    .await
-                                                    .is_err()
-                                                {
-                                                    return;
-                                                }
-                                                match reply_rx.await {
-                                                    Ok(body) => {
-                                                        let mut stream = reader.into_inner();
-                                                        if let Err(e) =
-                                                            stream.write_all(body.as_bytes()).await
-                                                        {
-                                                            warn!(
-                                                                "amuxd.sock: mcp-send write failed: {e}"
-                                                            );
-                                                            return;
-                                                        }
-                                                        let _ = stream.write_all(b"\n").await;
-                                                        let _ = stream.shutdown().await;
-                                                    }
-                                                    Err(_) => {
-                                                        warn!("amuxd.sock: mcp-send reply dropped");
-                                                    }
-                                                }
-                                            } else if cmd == "prompt-await" {
-                                                let (reply_tx, reply_rx) = oneshot::channel();
-                                                if tx
-                                                    .send(SockCommand::PromptAwait {
-                                                        payload: v,
-                                                        reply_tx,
-                                                    })
-                                                    .await
-                                                    .is_err()
-                                                {
-                                                    return;
-                                                }
-                                                match reply_rx.await {
-                                                    Ok(body) => {
-                                                        let mut stream = reader.into_inner();
-                                                        if let Err(e) =
-                                                            stream.write_all(body.as_bytes()).await
-                                                        {
-                                                            warn!(
-                                                                "amuxd.sock: prompt-await write failed: {e}"
-                                                            );
-                                                            return;
-                                                        }
-                                                        let _ = stream.write_all(b"\n").await;
-                                                        let _ = stream.shutdown().await;
-                                                    }
-                                                    Err(_) => {
-                                                        warn!(
-                                                            "amuxd.sock: prompt-await reply dropped"
-                                                        );
-                                                    }
-                                                }
-                                            } else {
-                                                warn!("amuxd.sock: unknown JSON cmd: {cmd:?}");
-                                            }
-                                        }
-                                        Err(e) => {
-                                            warn!("amuxd.sock: JSON parse failed: {e}");
-                                        }
-                                    }
-                                    return;
-                                }
-
-                                match head {
-                                    "channel-reload" => {
-                                        let _ = tx.send(SockCommand::ChannelReload).await;
-                                    }
-                                    "channel-status" => {
-                                        // Round-trip: ask the main loop to build a
-                                        // status snapshot, then write the JSON body
-                                        // back to the connected client.
-                                        let (reply_tx, reply_rx) = oneshot::channel();
-                                        if tx
-                                            .send(SockCommand::ChannelStatus { reply_tx })
-                                            .await
-                                            .is_err()
-                                        {
-                                            return;
-                                        }
-                                        match reply_rx.await {
-                                            Ok(body) => {
-                                                let mut stream = reader.into_inner();
-                                                if let Err(e) =
-                                                    stream.write_all(body.as_bytes()).await
-                                                {
-                                                    warn!(
-                                                        "amuxd.sock: channel-status write failed: {e}"
-                                                    );
-                                                    return;
-                                                }
-                                                let _ = stream.write_all(b"\n").await;
-                                                let _ = stream.shutdown().await;
-                                            }
-                                            Err(_) => {
-                                                warn!("amuxd.sock: channel-status reply dropped");
-                                            }
-                                        }
-                                    }
-                                    "wecom-bots-status" => {
-                                        // Round-trip: ask the main loop to build a
-                                        // per-bot WeCom status snapshot, then write the
-                                        // JSON body back to the connected client.
-                                        let (reply_tx, reply_rx) = oneshot::channel();
-                                        if tx
-                                            .send(SockCommand::WecomBotsStatus { reply_tx })
-                                            .await
-                                            .is_err()
-                                        {
-                                            return;
-                                        }
-                                        match reply_rx.await {
-                                            Ok(body) => {
-                                                let mut stream = reader.into_inner();
-                                                if let Err(e) =
-                                                    stream.write_all(body.as_bytes()).await
-                                                {
-                                                    warn!(
-                                                        "amuxd.sock: wecom-bots-status write failed: {e}"
-                                                    );
-                                                    return;
-                                                }
-                                                let _ = stream.write_all(b"\n").await;
-                                                let _ = stream.shutdown().await;
-                                            }
-                                            Err(_) => {
-                                                warn!("amuxd.sock: wecom-bots-status reply dropped");
-                                            }
-                                        }
-                                    }
-                                    "wechat-qr-start" => {
-                                        let (reply_tx, reply_rx) = oneshot::channel();
-                                        if tx
-                                            .send(SockCommand::WechatQrStart { reply_tx })
-                                            .await
-                                            .is_err()
-                                        {
-                                            return;
-                                        }
-                                        if let Ok(body) = reply_rx.await {
-                                            let mut stream = reader.into_inner();
-                                            let _ = stream.write_all(body.as_bytes()).await;
-                                            let _ = stream.write_all(b"\n").await;
-                                            let _ = stream.shutdown().await;
-                                        }
-                                    }
-                                    "wechat-qr-poll" => {
-                                        let mut qrcode = String::new();
-                                        if reader.read_line(&mut qrcode).await.is_err() {
-                                            warn!("amuxd.sock: wechat-qr-poll missing qrcode");
-                                            return;
-                                        }
-                                        let (reply_tx, reply_rx) = oneshot::channel();
-                                        if tx
-                                            .send(SockCommand::WechatQrPoll {
-                                                qrcode: qrcode.trim().to_string(),
-                                                reply_tx,
-                                            })
-                                            .await
-                                            .is_err()
-                                        {
-                                            return;
-                                        }
-                                        if let Ok(body) = reply_rx.await {
-                                            let mut stream = reader.into_inner();
-                                            let _ = stream.write_all(body.as_bytes()).await;
-                                            let _ = stream.write_all(b"\n").await;
-                                            let _ = stream.shutdown().await;
-                                        }
-                                    }
-                                    "wecom-qr-start" => {
-                                        let (reply_tx, reply_rx) = oneshot::channel();
-                                        if tx
-                                            .send(SockCommand::WecomQrStart { reply_tx })
-                                            .await
-                                            .is_err()
-                                        {
-                                            return;
-                                        }
-                                        if let Ok(body) = reply_rx.await {
-                                            let mut stream = reader.into_inner();
-                                            let _ = stream.write_all(body.as_bytes()).await;
-                                            let _ = stream.write_all(b"\n").await;
-                                            let _ = stream.shutdown().await;
-                                        }
-                                    }
-                                    "wecom-qr-poll" => {
-                                        let mut scode = String::new();
-                                        if reader.read_line(&mut scode).await.is_err() {
-                                            warn!("amuxd.sock: wecom-qr-poll missing scode");
-                                            return;
-                                        }
-                                        let (reply_tx, reply_rx) = oneshot::channel();
-                                        if tx
-                                            .send(SockCommand::WecomQrPoll {
-                                                scode: scode.trim().to_string(),
-                                                reply_tx,
-                                            })
-                                            .await
-                                            .is_err()
-                                        {
-                                            return;
-                                        }
-                                        if let Ok(body) = reply_rx.await {
-                                            let mut stream = reader.into_inner();
-                                            let _ = stream.write_all(body.as_bytes()).await;
-                                            let _ = stream.write_all(b"\n").await;
-                                            let _ = stream.shutdown().await;
-                                        }
-                                    }
-                                    "channel-save" => {
-                                        // Wire format: line 1 = "channel-save",
-                                        // line 2 = platform, line 3+ = JSON
-                                        // (single line — JSON has no embedded \n
-                                        // after `to_string()` serialization).
-                                        let mut platform = String::new();
-                                        if reader.read_line(&mut platform).await.is_err() {
-                                            warn!("amuxd.sock: channel-save missing platform");
-                                            return;
-                                        }
-                                        let mut config_json = String::new();
-                                        if reader.read_line(&mut config_json).await.is_err() {
-                                            warn!("amuxd.sock: channel-save missing config json");
-                                            return;
-                                        }
-                                        let _ = tx
-                                            .send(SockCommand::ChannelSave {
-                                                platform: platform.trim().to_string(),
-                                                config_json: config_json.trim().to_string(),
-                                            })
-                                            .await;
-                                    }
-                                    other => {
-                                        let _ =
-                                            tx.send(SockCommand::Unknown(other.to_string())).await;
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                warn!("amuxd.sock: read_line failed: {e}");
-                            }
-                        }
-                    });
+                    tokio::spawn(handle_control_conn(stream, tx.clone()));
                 }
                 Err(e) => {
                     warn!("amuxd.sock: accept error: {e}");
                     tokio::time::sleep(Duration::from_millis(200)).await;
                 }
             }
+        }
+    });
+}
+
+/// Windows: serve the same line/JSON control protocol over a named pipe.
+/// `sock_path` carries the pipe name (`\\.\pipe\amuxd-<user>`, from
+/// `DaemonConfig::sock_path()`). Errors are logged and swallowed — the
+/// daemon must keep running even if the pipe can't be set up.
+#[cfg(windows)]
+fn spawn_sock_listener(sock_path: PathBuf, tx: mpsc::Sender<SockCommand>) {
+    use tokio::net::windows::named_pipe::ServerOptions;
+    let pipe_name = sock_path.to_string_lossy().into_owned();
+    let mut server = match ServerOptions::new()
+        .first_pipe_instance(true)
+        .create(&pipe_name)
+    {
+        Ok(s) => s,
+        Err(e) => {
+            error!("amuxd control pipe: create {pipe_name} failed: {e}");
+            return;
+        }
+    };
+    info!("amuxd control pipe: listening on {pipe_name}");
+    tokio::spawn(async move {
+        loop {
+            // A connect() error is typically transient (client vanished mid-
+            // handshake, spurious OS error). Mirror the unix accept loop's
+            // policy: log and keep serving rather than killing the control
+            // channel for the daemon's lifetime.
+            if let Err(e) = server.connect().await {
+                error!("amuxd control pipe: connect failed: {e}");
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                continue;
+            }
+            // Re-creating the next instance failing is unrecoverable (the pipe
+            // name itself is unusable), so the listener task exits here.
+            let next = match ServerOptions::new().create(&pipe_name) {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("amuxd control pipe: re-create failed: {e}");
+                    return;
+                }
+            };
+            let stream = std::mem::replace(&mut server, next);
+            tokio::spawn(handle_control_conn(stream, tx.clone()));
         }
     });
 }

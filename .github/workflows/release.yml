@@ -376,16 +376,12 @@ jobs:
           cp apps/desktop/target/release/teamclaw-introspect.exe apps/desktop/binaries/teamclaw-introspect-x86_64-pc-windows-msvc.exe
           echo "teamclaw-introspect ready"
 
-      - name: Place amuxd Windows stub (daemon is Unix-only)
+      - name: Build amuxd sidecar
         shell: bash
         run: |
-          # amuxd uses Unix sockets/flock; Windows desktop does not run the daemon locally.
-          # Tauri still requires the externalBin slot — ship a no-op stub executable.
-          cat > /tmp/amuxd-stub.rs <<'RS'
-          fn main() {}
-          RS
-          rustc -O /tmp/amuxd-stub.rs -o apps/desktop/binaries/amuxd-x86_64-pc-windows-msvc.exe
-          echo "amuxd Windows stub ready"
+          cargo build --release --locked --manifest-path apps/daemon/Cargo.toml -p amuxd --target-dir apps/desktop/target
+          cp apps/desktop/target/release/amuxd.exe apps/desktop/binaries/amuxd-x86_64-pc-windows-msvc.exe
+          echo "amuxd sidecar ready"
 
       # Skip beforeBuildCommand since frontend is already built above
       - name: Finalize tauri.conf.json for build

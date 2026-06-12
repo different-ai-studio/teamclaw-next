@@ -175,7 +175,20 @@ fn amuxd_service_registered() -> bool {
     {
         home.join(".config/systemd/user/amuxd.service").exists()
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
+    {
+        let _ = home;
+        // Mirrors amuxd's own service registration (schtasks task "amuxd").
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        std::process::Command::new("schtasks")
+            .args(["/Query", "/TN", "amuxd"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         let _ = home;
         false
@@ -224,7 +237,22 @@ async fn install_amuxd<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let bin_dir = home.join(AMUXD_DIR).join("bin");
     std::fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
     let dest = bin_dir.join(if cfg!(windows) { "amuxd.exe" } else { "amuxd" });
-    std::fs::copy(&src, &dest).map_err(|e| format!("copy amuxd failed: {e}"))?;
+    if let Err(copy_err) = std::fs::copy(&src, &dest) {
+        #[cfg(windows)]
+        {
+            // A running daemon locks amuxd.exe against overwrite (sharing
+            // violation), but renaming a running exe is allowed — move it
+            // aside, then copy. The .old file is cleaned up on the next pass.
+            let old = dest.with_extension("exe.old");
+            let _ = std::fs::remove_file(&old);
+            std::fs::rename(&dest, &old)
+                .map_err(|e| format!("copy amuxd failed: {copy_err}; rename aside failed: {e}"))?;
+            std::fs::copy(&src, &dest)
+                .map_err(|e| format!("copy amuxd failed after rename: {e}"))?;
+        }
+        #[cfg(not(windows))]
+        return Err(format!("copy amuxd failed: {copy_err}"));
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
