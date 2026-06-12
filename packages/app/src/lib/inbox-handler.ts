@@ -15,7 +15,9 @@ export interface InboxPing {
 
 export interface InboxEnvelope {
   topic: string;
-  bytes: number[];
+  // Accepts the live bridge's Uint8Array as well as plain number[] (tests).
+  // The handler always wraps via `new Uint8Array(env.bytes)`, which takes both.
+  bytes: Uint8Array | number[];
 }
 
 /** Debounce window for coalescing burst list-refresh triggers into one fetch. */

@@ -60,6 +60,42 @@ pub async fn run_event_loop(bus: Arc<super::MqttBusInner>, app: tauri::AppHandle
     use rumqttc::{ConnectReturnCode, Event, Packet};
     use tauri::Emitter;
 
+    // Burst-coalescing forwarder. The daemon drains ACP events in ~50ms
+    // batches, so publishes arrive in bursts. Collect everything within an
+    // 8ms window into ONE `mqtt:envelopes` emit — cuts webview IPC wakeups
+    // ~10x during streaming. Payload bytes are base64 (a serde_json number
+    // array would otherwise ~4x the size). Lives for this generation: when
+    // run_event_loop returns, env_tx drops and the forwarder exits.
+    let (env_tx, mut env_rx) =
+        tokio::sync::mpsc::unbounded_channel::<(String, Vec<u8>)>();
+    {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            use base64::Engine as _;
+            while let Some(first) = env_rx.recv().await {
+                let mut batch = vec![first];
+                let deadline =
+                    tokio::time::Instant::now() + Duration::from_millis(8);
+                while let Ok(Some(next)) =
+                    tokio::time::timeout_at(deadline, env_rx.recv()).await
+                {
+                    batch.push(next);
+                }
+                let payload: Vec<serde_json::Value> = batch
+                    .iter()
+                    .map(|(topic, bytes)| {
+                        serde_json::json!({
+                            "topic": topic,
+                            "b64": base64::engine::general_purpose::STANDARD
+                                .encode(bytes),
+                        })
+                    })
+                    .collect();
+                let _ = app.emit("mqtt:envelopes", payload);
+            }
+        });
+    }
+
     let mut backoff_secs: u64 = 1;
     loop {
         if bus.current_generation() != generation {
@@ -111,11 +147,7 @@ pub async fn run_event_loop(bus: Arc<super::MqttBusInner>, app: tauri::AppHandle
             }
             Ok(Event::Incoming(Packet::Publish(p))) => {
                 backoff_secs = 1;
-                let payload = serde_json::json!({
-                    "topic": p.topic,
-                    "bytes": p.payload.to_vec(),
-                });
-                let _ = app.emit("mqtt:envelope", payload);
+                let _ = env_tx.send((p.topic.clone(), p.payload.to_vec()));
             }
             Ok(_) => {
                 backoff_secs = 1;

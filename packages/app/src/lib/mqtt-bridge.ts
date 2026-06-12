@@ -3,7 +3,19 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export interface IncomingEnvelope {
   topic: string;
-  bytes: number[];
+  bytes: Uint8Array;
+}
+
+interface RawBatchedEnvelope {
+  topic: string;
+  b64: string;
+}
+
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
 export async function mqttConnect(args: {
@@ -46,8 +58,12 @@ export async function mqttStatus(): Promise<{ connected: boolean; subscribedTopi
   return invoke("mqtt_status");
 }
 
-export async function listenForEnvelopes(handler: (env: IncomingEnvelope) => void): Promise<UnlistenFn> {
-  return listen<IncomingEnvelope>("mqtt:envelope", (msg) => {
-    handler(msg.payload);
+export async function listenForEnvelopes(
+  handler: (env: IncomingEnvelope) => void,
+): Promise<UnlistenFn> {
+  return listen<RawBatchedEnvelope[]>("mqtt:envelopes", (msg) => {
+    for (const raw of msg.payload) {
+      handler({ topic: raw.topic, bytes: b64ToBytes(raw.b64) });
+    }
   });
 }
