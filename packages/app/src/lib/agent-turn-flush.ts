@@ -6,6 +6,7 @@ import { persistStreamingPartsForReply } from "@/lib/streaming-persist";
 import { upsertMessagesBatch, type MessageRow } from "@/lib/local-cache";
 import { useSessionMessageStore } from "@/stores/session-message-store";
 import { useV2StreamingStore, type AgentStreamEntry } from "@/stores/v2-streaming-store";
+import { flushStreamDeltasFor } from "@/lib/stream-delta-buffer";
 
 export function buildAgentReplyMessageRow(
   teamId: string,
@@ -141,6 +142,8 @@ export async function executeAgentTurnFlush(args: {
   afterEnriched?: (enriched: TeamclawMessage) => void;
   persistedStage: string;
 }): Promise<void> {
+  // Drain any buffered text deltas so persisted parts include all arrived text.
+  flushStreamDeltasFor(args.sessionId, args.actorId);
   args.beforePersist?.();
   const enrichedReply = await persistStreamingPartsForReply(
     args.sessionId,

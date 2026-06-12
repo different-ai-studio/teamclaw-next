@@ -82,6 +82,8 @@ interface State {
   isInterruptedFlushPending: (sessionId: string, actorId: string) => boolean;
   appendOutput: (sessionId: string, actorId: string, delta: string) => void;
   appendThinking: (sessionId: string, actorId: string, delta: string) => void;
+  appendOutputBatch: (sessionId: string, actorId: string, deltas: string[]) => void;
+  appendThinkingBatch: (sessionId: string, actorId: string, deltas: string[]) => void;
   pushToolUse: (
     sessionId: string,
     actorId: string,
@@ -726,6 +728,66 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           ...entry,
           thinkingText: appendOverlappingChunk(entry.thinkingText, delta),
           parts: appendReasoningPart(entryParts(entry), delta),
+          lastUpdate: Date.now(),
+          active: true,
+        },
+      },
+      archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
+    });
+  },
+
+  appendOutputBatch: (sessionId, actorId, deltas) => {
+    if (deltas.length === 0) return;
+    const state = get();
+    const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
+    let outputText = entry.outputText;
+    let parts = entryParts(entry);
+    let changed = false;
+    for (const delta of deltas) {
+      if (!delta) continue;
+      outputText = appendOverlappingChunk(outputText, delta);
+      parts = appendOutputToParts(parts, delta);
+      changed = true;
+    }
+    if (!changed) return;
+    set({
+      byKey: {
+        ...state.byKey,
+        [k(sessionId, actorId)]: {
+          ...entry,
+          outputText,
+          parts,
+          lastUpdate: Date.now(),
+          active: true,
+        },
+      },
+      archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
+    });
+  },
+
+  appendThinkingBatch: (sessionId, actorId, deltas) => {
+    if (deltas.length === 0) return;
+    const state = get();
+    const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
+    let thinkingText = entry.thinkingText;
+    let parts = entryParts(entry);
+    let changed = false;
+    for (const delta of deltas) {
+      if (!delta) continue;
+      thinkingText = appendOverlappingChunk(thinkingText, delta);
+      parts = appendReasoningPart(parts, delta);
+      changed = true;
+    }
+    if (!changed) return;
+    set({
+      byKey: {
+        ...state.byKey,
+        [k(sessionId, actorId)]: {
+          ...entry,
+          thinkingText,
+          parts,
           lastUpdate: Date.now(),
           active: true,
         },
