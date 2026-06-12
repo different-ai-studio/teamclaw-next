@@ -1155,12 +1155,19 @@ impl DaemonServer {
         // `SockCommand::AddWorkspace` so the existing main-loop handler runs it.
         let (register_workspace_tx, mut register_workspace_rx) =
             mpsc::channel::<crate::http::state::RegisterWorkspaceRequest>(16);
+        // Shared status for the background agent_types advertise (below). Held
+        // here so `/v1/info` (via `meta`) and the advertise task both reference
+        // the same cell — a failed advertise surfaces instead of being swallowed.
+        let agent_types_advertise = std::sync::Arc::new(parking_lot::Mutex::new(
+            crate::http::state::AgentTypesAdvertise::default(),
+        ));
         let _http_handle = {
             let mut meta = crate::http::server::metadata(self.actor_id.clone(), "amuxd");
             // Expose configured backends so the model-catalog endpoint can
             // group models per backend (opencode providers vs claude/codex
             // static tables).
             meta.configured_agent_types = supported_agent_type_names(&self.config);
+            meta.agent_types_advertise = agent_types_advertise.clone();
             // The HTTP workspace runtime endpoints share this supervisor's
             // refresh coordinator for status + apply-intent semantics.
             let runtime_supervisor = crate::runtime::RuntimeSupervisor::new(self.agents.clone());
@@ -1322,6 +1329,7 @@ impl DaemonServer {
             let supported_agent_types = supported_agent_type_names(&self.config);
             let default_agent_type =
                 default_advertised_agent_type(&supported_agent_types);
+            let advertise_status = agent_types_advertise.clone();
             tokio::spawn(async move {
                 let mut delay = Duration::from_secs(2);
                 for attempt in 1..=12 {
@@ -1335,6 +1343,9 @@ impl DaemonServer {
                                 default = %default_agent_type,
                                 "advertised agent backend types to cloud"
                             );
+                            let mut s = advertise_status.lock();
+                            s.advertised = true;
+                            s.last_error = None;
                             break;
                         }
                         Err(e) if attempt < 12 => {
@@ -1343,14 +1354,19 @@ impl DaemonServer {
                                 error = %e,
                                 "cloud agents.agent_types advertise failed; retrying"
                             );
+                            advertise_status.lock().last_error = Some(e.to_string());
                             tokio::time::sleep(delay).await;
                             delay = (delay * 2).min(Duration::from_secs(60));
                         }
                         Err(e) => {
-                            warn!(
+                            // Terminal: don't swallow it. Record on the status
+                            // cell (surfaced via /v1/info) and log at ERROR so
+                            // an advertise that never lands is visible.
+                            error!(
                                 error = %e,
                                 "cloud agents.agent_types advertise failed; giving up after retries"
                             );
+                            advertise_status.lock().last_error = Some(e.to_string());
                         }
                     }
                 }
