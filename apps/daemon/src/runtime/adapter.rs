@@ -1220,6 +1220,21 @@ fn should_use_claude_agent_acp_wrapper(binary: &str) -> bool {
     binary_name == "claude" || binary_name == "claude-agent-acp"
 }
 
+/// `npx` is `npx.cmd` on Windows; CreateProcess does not apply PATHEXT to a
+/// bare name the way a shell would, so the spawn must name the .cmd file.
+pub(crate) fn npx_program() -> &'static str {
+    if cfg!(windows) {
+        "npx.cmd"
+    } else {
+        "npx"
+    }
+}
+
+#[cfg(windows)]
+const PATH_SEP: char = ';';
+#[cfg(not(windows))]
+const PATH_SEP: char = ':';
+
 /// Build a PATH for spawned agent runtimes that includes common user-level
 /// binary directories.
 ///
@@ -1240,17 +1255,27 @@ pub(crate) fn enriched_spawn_path(existing: Option<&str>, home: Option<&Path>) -
 
     // Inherited PATH first — preserves whatever the launcher configured.
     if let Some(existing) = existing {
-        candidates.extend(existing.split(':').map(|s| s.to_string()));
+        candidates.extend(existing.split(PATH_SEP).map(|s| s.to_string()));
     }
 
     // Well-known user-level bin dirs that minimal launchd/systemd PATHs omit.
-    if let Some(home) = home {
-        for sub in [".local/bin", ".npm-global/bin", ".bun/bin", ".cargo/bin"] {
-            candidates.push(home.join(sub).to_string_lossy().into_owned());
+    if cfg!(windows) {
+        // Node installer dir + global npm prefix, where npx.cmd/claude.cmd live.
+        if let Ok(pf) = std::env::var("ProgramFiles") {
+            candidates.push(format!("{pf}\\nodejs"));
         }
-    }
-    for dir in ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"] {
-        candidates.push(dir.to_string());
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            candidates.push(format!("{appdata}\\npm"));
+        }
+    } else {
+        if let Some(home) = home {
+            for sub in [".local/bin", ".npm-global/bin", ".bun/bin", ".cargo/bin"] {
+                candidates.push(home.join(sub).to_string_lossy().into_owned());
+            }
+        }
+        for dir in ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"] {
+            candidates.push(dir.to_string());
+        }
     }
 
     // Dedupe preserving first occurrence; drop empty segments.
@@ -1259,7 +1284,7 @@ pub(crate) fn enriched_spawn_path(existing: Option<&str>, home: Option<&Path>) -
         .into_iter()
         .filter(|d| !d.is_empty() && seen.insert(d.clone()))
         .collect::<Vec<_>>()
-        .join(":")
+        .join(&PATH_SEP.to_string())
 }
 
 #[cfg(test)]
@@ -1320,7 +1345,7 @@ mod command_selection_tests {
 
 #[cfg(test)]
 mod spawn_path_tests {
-    use super::enriched_spawn_path;
+    use super::{enriched_spawn_path, PATH_SEP};
     use std::path::Path;
 
     #[test]
@@ -1366,6 +1391,15 @@ mod spawn_path_tests {
         assert!(path.split(':').any(|d| d == "/home/u/.local/bin"), "{path}");
         assert!(path.split(':').any(|d| d == "/opt/homebrew/bin"), "{path}");
     }
+
+    #[test]
+    fn uses_platform_path_separator() {
+        let path = enriched_spawn_path(Some("/usr/bin"), None);
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        assert!(path.contains(sep) || !path.contains(if cfg!(windows) { ':' } else { ';' }));
+        // Confirm PATH_SEP matches the platform expectation.
+        assert_eq!(PATH_SEP, sep);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1384,7 +1418,7 @@ fn build_acp_process_command(
     force_env_keys: &std::collections::HashSet<String>,
 ) -> tokio::process::Command {
     let mut cmd = if should_use_claude_agent_acp_wrapper(binary) {
-        let mut c = tokio::process::Command::new("npx");
+        let mut c = tokio::process::Command::new(npx_program());
         c.arg("--yes").arg("@zed-industries/claude-agent-acp");
         c
     } else if (agent_type == amux::AgentType::Opencode || agent_type == amux::AgentType::Codex)
@@ -1406,7 +1440,10 @@ fn build_acp_process_command(
         "PATH",
         enriched_spawn_path(
             std::env::var("PATH").ok().as_deref(),
-            std::env::var_os("HOME").map(PathBuf::from).as_deref(),
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(PathBuf::from)
+                .as_deref(),
         ),
     );
     for (key, value) in extra_env {
