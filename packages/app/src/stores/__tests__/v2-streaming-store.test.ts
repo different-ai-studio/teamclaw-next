@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
+  isErrorOnlyStreamEntry,
   isStreamInterruptible,
   useV2StreamingStore,
   selectStreamsForSession,
@@ -500,6 +501,58 @@ describe("v2-streaming-store", () => {
     expect(stream.active).toBe(true);
     expect(stream.errorMessage).toBe("No output");
     expect(isStreamInterruptible(stream)).toBe(false);
+  });
+
+  it("clearStaleStreamErrors removes error-only live and archived streams", () => {
+    const store = useV2StreamingStore.getState();
+    store.setError("s1", "a1", "ACP prompt failed", "Authentication required");
+    store.finishSessionActor("s1", "a1");
+    store.beginPlanningPlaceholder("s1", "a1");
+    store.appendOutput("s1", "a1", "Retry succeeded");
+
+    expect(
+      selectStreamsForSession(useV2StreamingStore.getState(), "s1").some(
+        (entry) => entry.errorMessage,
+      ),
+    ).toBe(false);
+  });
+
+  it("clearStaleStreamErrors drops inactive error-only live streams", () => {
+    const store = useV2StreamingStore.getState();
+    store.setError("s1", "a1", "ACP prompt failed", "Authentication required");
+    store.finishSessionActor("s1", "a1");
+    expect(isErrorOnlyStreamEntry(useV2StreamingStore.getState().byKey["s1::a1"]!)).toBe(
+      true,
+    );
+
+    store.clearStaleStreamErrors("s1", "a1");
+    expect(useV2StreamingStore.getState().byKey["s1::a1"]).toBeUndefined();
+    expect(useV2StreamingStore.getState().archived).toHaveLength(0);
+  });
+
+  it("clearStaleStreamErrors strips error banners but keeps partial transcript", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendOutput("s1", "a1", "Partial output");
+    store.setError("s1", "a1", "No output", "Model misconfigured");
+
+    store.clearStaleStreamErrors("s1", "a1");
+
+    const [stream] = selectStreamsForSession(useV2StreamingStore.getState(), "s1");
+    expect(stream.errorMessage).toBeNull();
+    expect(stream.outputText).toBe("Partial output");
+  });
+
+  it("beginPlanningPlaceholder does not archive error-only turns", () => {
+    const store = useV2StreamingStore.getState();
+    store.setError("s1", "a1", "ACP prompt failed", "Authentication required");
+    store.finishSessionActor("s1", "a1");
+
+    store.beginPlanningPlaceholder("s1", "a1");
+
+    const state = useV2StreamingStore.getState();
+    expect(state.archived).toHaveLength(0);
+    expect(state.byKey["s1::a1"]?.errorMessage).toBeNull();
+    expect(state.byKey["s1::a1"]?.active).toBe(true);
   });
 
   it("creates a completed placeholder when tool result arrives without tool use", () => {

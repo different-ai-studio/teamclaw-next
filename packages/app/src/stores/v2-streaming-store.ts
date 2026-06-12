@@ -142,6 +142,8 @@ interface State {
     opts?: { includeArchives?: boolean },
   ) => void;
   clearSession: (sessionId: string) => void;
+  /** Drop error-only streams and strip error banners once a new turn starts. */
+  clearStaleStreamErrors: (sessionId: string, actorId?: string) => void;
 }
 
 function k(sessionId: string, actorId: string): string {
@@ -195,9 +197,8 @@ function entryParts(entry: AgentStreamEntry): MessagePart[] {
   return Array.isArray(entry.parts) ? entry.parts : [];
 }
 
-/** True when the stream already has thinking, output, tools, or errors to render. */
-export function streamEntryHasVisibleContent(entry: AgentStreamEntry): boolean {
-  if (entry.errorMessage) return true;
+/** True when the stream has thinking, output, or tools — excluding error banners. */
+export function streamEntryHasNonErrorContent(entry: AgentStreamEntry): boolean {
   if (entry.thinkingText.length > 0 || entry.outputText.length > 0) return true;
   if (entry.toolCalls.length > 0) return true;
   return entryParts(entry).some(
@@ -206,6 +207,33 @@ export function streamEntryHasVisibleContent(entry: AgentStreamEntry): boolean {
       (part.type === "text" && Boolean(part.text || part.content)) ||
       (part.type === "tool-call" && Boolean(part.toolCall)),
   );
+}
+
+/** True when the stream already has thinking, output, tools, or errors to render. */
+export function streamEntryHasVisibleContent(entry: AgentStreamEntry): boolean {
+  if (entry.errorMessage) return true;
+  return streamEntryHasNonErrorContent(entry);
+}
+
+/** Error-only turns have no transcript artifacts worth keeping after a retry. */
+export function isErrorOnlyStreamEntry(entry: AgentStreamEntry): boolean {
+  return Boolean(entry.errorMessage) && !streamEntryHasNonErrorContent(entry);
+}
+
+function streamEntryMatchesScope(
+  entry: AgentStreamEntry,
+  sessionId: string,
+  actorId?: string,
+): boolean {
+  if (entry.sessionId !== sessionId) return false;
+  if (actorId && entry.actorId !== actorId) return false;
+  return true;
+}
+
+function stripStreamError(entry: AgentStreamEntry): AgentStreamEntry | null {
+  if (!entry.errorMessage) return entry;
+  if (isErrorOnlyStreamEntry(entry)) return null;
+  return { ...entry, errorMessage: null, errorDetails: null };
 }
 
 /** True when persisted parts_json already carries tool/thinking for ChatMessage. */
@@ -1174,6 +1202,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
   },
 
   beginPlanningPlaceholder: (sessionId, actorId) => {
+    get().clearStaleStreamErrors(sessionId, actorId);
     const state = get();
     const key = k(sessionId, actorId);
     const existing = state.byKey[key];
@@ -1216,9 +1245,49 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           active: true,
         },
       },
-      archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      archived:
+        toArchive && !isErrorOnlyStreamEntry(toArchive)
+          ? [...state.archived, toArchive]
+          : state.archived,
       interruptedFlushPending,
     });
+  },
+
+  clearStaleStreamErrors: (sessionId, actorId) => {
+    const state = get();
+    let changed = false;
+
+    const nextByKey = { ...state.byKey };
+    for (const [key, entry] of Object.entries(state.byKey)) {
+      if (!streamEntryMatchesScope(entry, sessionId, actorId)) continue;
+      if (!entry.errorMessage) continue;
+      const next = stripStreamError(entry);
+      if (next === null) {
+        delete nextByKey[key];
+        changed = true;
+      } else if (next !== entry) {
+        nextByKey[key] = next;
+        changed = true;
+      }
+    }
+
+    const nextArchived = state.archived.flatMap((entry) => {
+      if (!streamEntryMatchesScope(entry, sessionId, actorId)) return [entry];
+      if (!entry.errorMessage) return [entry];
+      const next = stripStreamError(entry);
+      if (next === null) {
+        changed = true;
+        return [];
+      }
+      if (next !== entry) {
+        changed = true;
+        return [next];
+      }
+      return [entry];
+    });
+
+    if (!changed) return;
+    set({ byKey: nextByKey, archived: nextArchived });
   },
 
   releaseActorAfterPersist: (sessionId, actorId, opts) => {

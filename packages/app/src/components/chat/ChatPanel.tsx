@@ -1396,6 +1396,7 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
           //    dedup-by-id in session-message-store means the eventual live
           //    echo (same messageId) is a no-op.
           useSessionMessageStore.getState().appendMessage(sid, msg);
+          useV2StreamingStore.getState().clearStaleStreamErrors(sid);
           if (displaySessionId !== sid) {
             setDisplaySessionId(sid);
             setSessionFadeOpacity(1);
