@@ -99,8 +99,37 @@ describe('resolveCloudWorkspaceIdForLocalPath', () => {
     ])
 
     await expect(
-      resolveCloudWorkspaceIdForLocalPath('team-1', '~/TeamClaw'),
+      resolveCloudWorkspaceIdForLocalPath('team-1', '~/TeamClaw', { agentActorId: 'agent-1' }),
     ).resolves.toBe('ws-cloud')
+  })
+
+  it('ignores teammate workspaces that share the same folder name', async () => {
+    backendMocks.listDaemonWorkspaces.mockResolvedValue([
+      {
+        id: 'ws-teammate',
+        team_id: 'team-1',
+        agent_id: 'agent-a',
+        name: 'TeamClaw',
+        path: '/Users/matt.chow/TeamClaw',
+        archived: false,
+        created_at: '',
+        updated_at: '',
+      },
+      {
+        id: 'ws-local',
+        team_id: 'team-1',
+        agent_id: 'agent-b',
+        name: 'TeamClaw',
+        path: '/Users/me/TeamClaw',
+        archived: false,
+        created_at: '',
+        updated_at: '',
+      },
+    ])
+
+    await expect(
+      resolveCloudWorkspaceIdForLocalPath('team-1', '~/TeamClaw', { agentActorId: 'agent-b' }),
+    ).resolves.toBe('ws-local')
   })
 })
 

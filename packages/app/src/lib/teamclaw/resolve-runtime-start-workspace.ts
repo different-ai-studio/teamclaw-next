@@ -111,14 +111,17 @@ export async function loadAgentWorkspaceLookups(
 export async function resolveCloudWorkspaceIdForLocalPath(
   teamId: string,
   localWorkspacePath: string,
+  opts?: { agentActorId?: string | null },
 ): Promise<string | null> {
   const trimmedTeam = teamId.trim()
   const trimmedPath = localWorkspacePath.trim()
+  const agentFilter = opts?.agentActorId?.trim() || null
   if (!trimmedTeam || !trimmedPath) return null
 
   const rows = await getBackend().workspaces.listDaemonWorkspaces(trimmedTeam).catch(() => [])
   for (const row of rows) {
     if (row.archived) continue
+    if (agentFilter && row.agent_id?.trim() !== agentFilter) continue
     const cloudId = row.id?.trim()
     const daemonPath = row.path?.trim()
     if (!cloudId || !daemonPath) continue
@@ -166,6 +169,7 @@ export async function ensureCloudWorkspaceIdForAgentRuntime(args: {
     localWorkspacePath: args.localWorkspacePath,
     sessionId: args.sessionId,
     agentActorIds: [agentActorId],
+    localDaemonActorId: args.localWorkspacePath?.trim() ? agentActorId : null,
   })
   if (fromHint) return fromHint
 
@@ -197,14 +201,10 @@ export async function resolveSessionWorkspaceHintForRuntimeStart(args: {
   localWorkspacePath?: string | null
   sessionId?: string
   agentActorIds?: string[]
+  /** When set, local-path matching only considers workspaces bound to this agent. */
+  localDaemonActorId?: string | null
 }): Promise<string> {
   const agentActorIds = [...new Set((args.agentActorIds ?? []).map((id) => id.trim()).filter(Boolean))]
-
-  const localPath = args.localWorkspacePath?.trim()
-  if (localPath) {
-    const fromPath = await resolveCloudWorkspaceIdForLocalPath(args.teamId, localPath)
-    if (fromPath) return fromPath
-  }
 
   if (agentActorIds.length > 0) {
     const fromAgentBinding = await resolveCloudWorkspaceIdForAgents(args.teamId, agentActorIds)
@@ -212,14 +212,24 @@ export async function resolveSessionWorkspaceHintForRuntimeStart(args: {
   }
 
   const sessionId = args.sessionId?.trim() ?? ''
-  if (!sessionId || agentActorIds.length === 0) return ''
-
-  const lookups = await loadAgentWorkspaceLookups(args.teamId, sessionId, agentActorIds).catch(
-    () => new Map<string, AgentWorkspaceLookup>(),
-  )
-  for (const agentId of agentActorIds) {
-    const resolved = resolveAgentRuntimeWorkspaceId(lookups.get(agentId) ?? {})
-    if (resolved) return resolved
+  if (sessionId && agentActorIds.length > 0) {
+    const lookups = await loadAgentWorkspaceLookups(args.teamId, sessionId, agentActorIds).catch(
+      () => new Map<string, AgentWorkspaceLookup>(),
+    )
+    for (const agentId of agentActorIds) {
+      const resolved = resolveAgentRuntimeWorkspaceId(lookups.get(agentId) ?? {})
+      if (resolved) return resolved
+    }
   }
+
+  const localPath = args.localWorkspacePath?.trim()
+  const localDaemonActorId = args.localDaemonActorId?.trim()
+  if (localPath && localDaemonActorId) {
+    const fromPath = await resolveCloudWorkspaceIdForLocalPath(args.teamId, localPath, {
+      agentActorId: localDaemonActorId,
+    })
+    if (fromPath) return fromPath
+  }
+
   return ''
 }

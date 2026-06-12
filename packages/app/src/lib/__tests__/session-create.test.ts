@@ -29,6 +29,18 @@ const workspaceStoreMocks = vi.hoisted(() => ({
   workspacePath: '',
 }))
 
+const daemonAdminMocks = vi.hoisted(() => ({
+  getLocalDaemonActorId: vi.fn().mockResolvedValue(null),
+}))
+
+vi.mock('@/lib/utils', () => ({
+  isTauri: () => true,
+}))
+
+vi.mock('@/lib/daemon-agent-admin', () => ({
+  getLocalDaemonActorId: (...args: unknown[]) => daemonAdminMocks.getLocalDaemonActorId(...args),
+}))
+
 vi.mock('@/lib/teamclaw-rpc', () => ({
   runtimeStart: (...args: unknown[]) => mockRuntimeStart(...args),
   setModel: (...args: unknown[]) => mockSetModel(...args),
@@ -89,6 +101,8 @@ describe('startAgentRuntimesAsync', () => {
     backendMocks.listActorDirectoryByIds.mockReset()
     backendMocks.listDaemonWorkspaces.mockReset()
     backendMocks.createDaemonWorkspace.mockReset()
+    daemonAdminMocks.getLocalDaemonActorId.mockReset()
+    daemonAdminMocks.getLocalDaemonActorId.mockResolvedValue(null)
     workspaceStoreMocks.workspacePath = ''
     backendMocks.createSessionShell.mockResolvedValue({ sessionId: 'sess-1' })
     backendMocks.insertOutgoingMessage.mockResolvedValue({})
@@ -340,6 +354,7 @@ describe('startAgentRuntimesAsync', () => {
   })
 
   it('creates a cloud workspace when runtime lookup fails but local path is known', async () => {
+    daemonAdminMocks.getLocalDaemonActorId.mockResolvedValue('agent-7')
     backendMocks.listLatestAgentRuntimeHints.mockRejectedValue(new Error('runtime hints unavailable'))
     backendMocks.listAgentDefaults.mockResolvedValue([
       { id: 'agent-7', agent_types: [], default_agent_type: null },
@@ -476,6 +491,7 @@ describe('startAgentRuntimesAsync', () => {
   })
 
   it('skips runtimeStart when daemon workspace ensure fails', async () => {
+    daemonAdminMocks.getLocalDaemonActorId.mockResolvedValue('agent-11')
     mockTables({
       runtimes: [],
       sessionRuntimes: [{ agent_id: 'agent-11', workspace_id: 'ws-missing' }],
@@ -499,6 +515,7 @@ describe('startAgentRuntimesAsync', () => {
   })
 
   it('uses daemon-local workspace id returned by ensure before runtimeStart', async () => {
+    daemonAdminMocks.getLocalDaemonActorId.mockResolvedValue('agent-12')
     mockTables({
       runtimes: [],
       sessionRuntimes: [{ agent_id: 'agent-12', workspace_id: 'cloud-ws-1' }],
@@ -516,6 +533,37 @@ describe('startAgentRuntimesAsync', () => {
       expect.objectContaining({
         targetActorId: 'agent-12',
         workspaceId: 'local-ws-1',
+        worktree: '',
+      }),
+    )
+  })
+
+  it('skips daemon workspace ensure for remote agents and sends cloud workspace id', async () => {
+    daemonAdminMocks.getLocalDaemonActorId.mockResolvedValue('local-agent')
+    mockTables({
+      runtimes: [],
+      actors: [
+        {
+          id: 'remote-agent',
+          agent_types: ['opencode'],
+          default_agent_type: 'opencode',
+          default_workspace_id: 'ws-remote',
+        },
+      ],
+    })
+
+    const { startAgentRuntimesAsync } = await import('../session-create')
+    await startAgentRuntimesAsync({
+      sessionId: 'sess-1',
+      teamId: 'team-1',
+      agentActorIds: ['remote-agent'],
+    })
+
+    expect(mockEnsureDaemonWorkspace).not.toHaveBeenCalled()
+    expect(mockRuntimeStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetActorId: 'remote-agent',
+        workspaceId: 'ws-remote',
         worktree: '',
       }),
     )

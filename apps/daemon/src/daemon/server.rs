@@ -3228,6 +3228,24 @@ impl DaemonServer {
             }
         };
 
+        // Each daemon only subscribes to its own `amux/{team}/{actor}/rpc/req`
+        // topic; ignore mis-delivered requests so we never apply another actor's
+        // workspace path on this machine.
+        let parts: Vec<&str> = topic.split('/').collect();
+        if parts.len() == 5
+            && parts[0] == "amux"
+            && parts[3] == "rpc"
+            && parts[4] == "req"
+            && parts[2] != self.actor_id.as_str()
+        {
+            warn!(
+                %topic,
+                expected_actor = %self.actor_id,
+                "ignoring RpcRequest routed to a different actor"
+            );
+            return;
+        }
+
         let response: RpcResponse = match &request.method {
             // ─── Session/idea methods — delegate to SessionManager ───
             Some(Method::CreateSession(_))
