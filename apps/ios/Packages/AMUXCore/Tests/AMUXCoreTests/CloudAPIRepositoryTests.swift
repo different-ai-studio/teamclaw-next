@@ -55,6 +55,23 @@ struct CloudAPIRepositoryTests {
                           "model": null,
                           "createdAt": "2026-05-27T10:00:00Z",
                           "updatedAt": null
+                        },
+                        {
+                          "id": "message-2",
+                          "teamId": "team-1",
+                          "sessionId": "session-1",
+                          "turnId": null,
+                          "senderActorId": "actor-2",
+                          "replyToMessageId": "message-1",
+                          "kind": "user_message",
+                          "content": "hi @agent",
+                          "metadata": {
+                            "mention_actor_ids": ["agent-1", "agent-2"],
+                            "some_future_key": {"nested": true}
+                          },
+                          "model": "claude-opus-4-7",
+                          "createdAt": "2026-05-27T10:01:00Z",
+                          "updatedAt": "2026-05-27T10:02:00Z"
                         }
                       ],
                       "nextCursor": null
@@ -77,8 +94,19 @@ struct CloudAPIRepositoryTests {
         #expect(sessions.first?.createdByActorID == "actor-1")
         #expect(sessions.first?.summary == "topic")
         #expect(sessions.first?.participantCount == 3)
-        #expect(messages.map(\.id) == ["message-1"])
+        #expect(messages.map(\.id) == ["message-1", "message-2"])
         #expect(messages.first?.turnID == "turn-1")
+        // Full contract round-trip: every field of the OpenAPI Message
+        // schema must survive decoding, including the typed metadata path.
+        let second = try #require(messages.last)
+        #expect(second.teamID == "team-1")
+        #expect(second.replyToMessageID == "message-1")
+        #expect(second.mentionActorIDs == ["agent-1", "agent-2"])
+        #expect(second.model == "claude-opus-4-7")
+        #expect(second.updatedAt == ISO8601DateFormatter().date(from: "2026-05-27T10:02:00Z"))
+        // null metadata must decode to "no mentions", not a decode failure.
+        #expect(messages.first?.mentionActorIDs == [])
+        #expect(messages.first?.updatedAt == nil)
         let requests = await recorder.requests
         #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer access-token" })
         #expect(requests.map { $0.value(forHTTPHeaderField: "X-Request-Id")?.isEmpty == false }.allSatisfy { $0 })
@@ -216,6 +244,71 @@ struct CloudAPIRepositoryTests {
         let body = try #require(request.httpBody)
         let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
         #expect(json["lastReadMessageId"] as? String == "msg-42")
+    }
+
+    @Test
+    func actorsAndWorkspacesDecodeContractShapes() async throws {
+        let client = CloudAPIClient(
+            configuration: configuration(),
+            accessToken: { "access-token" },
+            send: { request in
+                let path = request.url?.path ?? ""
+                if path == "/v1/teams/team-1/actors" {
+                    return try response("""
+                    {
+                      "items": [
+                        {
+                          "id": "actor-1", "teamId": "team-1", "kind": "member",
+                          "displayName": "Yan", "avatarUrl": "https://cdn/a.png",
+                          "userId": "user-1", "invitedByActorId": null,
+                          "teamRole": "owner", "memberStatus": "active",
+                          "agentStatus": null, "agentTypes": null, "agentKind": null,
+                          "defaultAgentType": null, "defaultWorkspaceId": null,
+                          "email": "yan@example.com", "phone": null,
+                          "lastActiveAt": "2026-05-27T10:00:00Z",
+                          "createdAt": "2026-05-27T09:00:00Z", "updatedAt": null
+                        },
+                        {
+                          "id": "actor-2", "teamId": "team-1", "kind": "agent",
+                          "displayName": "Coder", "avatarUrl": null,
+                          "userId": null, "invitedByActorId": "actor-1",
+                          "teamRole": null, "memberStatus": null,
+                          "agentStatus": "online", "agentTypes": ["claude_code"],
+                          "agentKind": "claude_code", "defaultAgentType": "claude_code",
+                          "defaultWorkspaceId": "ws-1", "email": null, "phone": null,
+                          "lastActiveAt": null, "createdAt": null, "updatedAt": null
+                        }
+                      ],
+                      "nextCursor": null
+                    }
+                    """)
+                }
+                if path == "/v1/workspaces" {
+                    return try response("""
+                    {
+                      "items": [
+                        { "id": "ws-1", "teamId": "team-1", "name": "Main",
+                          "path": "~/code/app", "agentId": "actor-2" },
+                        { "id": "ws-2", "teamId": "team-1", "name": "Scratch",
+                          "path": null, "agentId": null }
+                      ],
+                      "nextCursor": null
+                    }
+                    """)
+                }
+                return try response("{}", status: 404)
+            }
+        )
+
+        let actors = try await CloudAPIActorRepository(client: client).listActors(teamID: "team-1")
+        #expect(actors.map(\.id) == ["actor-1", "actor-2"])
+
+        let workspaces = try await CloudAPIWorkspaceRepository(client: client)
+            .listWorkspaces(teamID: "team-1", agentID: nil)
+        #expect(workspaces.map(\.id) == ["ws-1", "ws-2"])
+        #expect(workspaces.first?.path == "~/code/app")
+        // null path must decode to empty string, not a decode failure.
+        #expect(workspaces.last?.path == "")
     }
 
     private func configuration() -> CloudAPIConfiguration {

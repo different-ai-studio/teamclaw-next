@@ -30,7 +30,11 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     }
 
     // Foreground: suppress banner if user is already on that session.
-    func userNotificationCenter(_ center: UNUserNotificationCenter,
+    // nonisolated: UNUserNotificationCenterDelegate calls these off the main
+    // actor with non-Sendable parameters; the class is otherwise MainActor-
+    // inferred via UIApplicationDelegate. CurrentSessionFocus.sessionID is
+    // nonisolated(unsafe), so no actor hop is needed to read it.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                  willPresent notification: UNNotification) async
                                  -> UNNotificationPresentationOptions {
         let info = notification.request.content.userInfo
@@ -42,7 +46,7 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     }
 
     // Tap: post deep-link event for ContentView to handle.
-    func userNotificationCenter(_ center: UNUserNotificationCenter,
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                  didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
         guard let sid = info["session_id"] as? String else { return }

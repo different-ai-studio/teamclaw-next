@@ -214,13 +214,17 @@ public actor CloudAPIMessagesRepository: MessagesRepository {
         return page.items.map { row in
             MessageRecord(
                 id: row.id,
+                teamID: row.teamId,
                 sessionID: row.sessionId,
                 senderActorID: row.senderActorId ?? "",
                 kind: row.kind,
                 content: row.content,
                 createdAt: parseCloudDate(row.createdAt) ?? .distantPast,
+                updatedAt: parseCloudDate(row.updatedAt),
                 model: row.model,
                 turnID: row.turnId,
+                replyToMessageID: row.replyToMessageId,
+                mentionActorIDs: row.metadata?.mentionActorIds ?? [],
                 sequence: 0
             )
         }
@@ -704,6 +708,16 @@ private struct CloudSession: Decodable, Sendable {
     let createdAt: String?
 }
 
+/// Typed view of the freeform `messages.metadata` JSON column. Only the
+/// keys iOS consumes are decoded; unknown keys are ignored by `Decodable`.
+private struct CloudMessageMetadata: Decodable, Sendable {
+    let mentionActorIds: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case mentionActorIds = "mention_actor_ids"
+    }
+}
+
 private struct CloudMessage: Decodable, Sendable {
     let id: String
     let teamId: String
@@ -713,8 +727,10 @@ private struct CloudMessage: Decodable, Sendable {
     let replyToMessageId: String?
     let kind: String
     let content: String
+    let metadata: CloudMessageMetadata?
     let model: String?
     let createdAt: String
+    let updatedAt: String?
 }
 
 private struct CloudSessionFull: Decodable, Sendable {

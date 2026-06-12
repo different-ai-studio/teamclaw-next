@@ -35,8 +35,38 @@ struct ApplyTimelineInputFastPathTests {
                          agentBucketKey: "agent-1", modelContext: ctx)
 
         #expect(SessionDetailViewModel._testFastPathSkipCount == afterFirst + 1)
+        // The @Observable mirror is throttled on the fast path; the
+        // reducer's full text lands once the pending flush runs.
+        vm._testFlushStreamingMirror()
         #expect(vm.streamingTextByAgent["agent-1"] == "Hello")
         #expect(vm.events.isEmpty, "no entry committed until output is complete")
+    }
+
+    /// The throttled mirror must flush on its own (no explicit flush
+    /// call) so live UI eventually sees the latest streamed text.
+    @Test("throttled mirror flushes without an explicit flush")
+    func throttledMirrorFlushesOnItsOwn() async throws {
+        let vm = SessionDetailViewModel.testInstance()
+        let container = try ModelContainer(
+            for: AgentEvent.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let ctx = ModelContext(container)
+
+        var first = Amux_AcpEvent()
+        first.event = .output(makeOutput(text: "Hel", isComplete: false))
+        vm._testApplyAcp(first, sequence: 1, runtimeID: "rt-1",
+                         agentBucketKey: "agent-1", modelContext: ctx)
+        var second = Amux_AcpEvent()
+        second.event = .output(makeOutput(text: "lo", isComplete: false))
+        vm._testApplyAcp(second, sequence: 2, runtimeID: "rt-1",
+                         agentBucketKey: "agent-1", modelContext: ctx)
+
+        // Flush interval is 100ms; poll up to 1s to keep CI tolerant.
+        for _ in 0..<20 where vm.streamingTextByAgent["agent-1"] != "Hello" {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(vm.streamingTextByAgent["agent-1"] == "Hello")
     }
 
     /// A complete output must NOT hit the fast path — the finalised entry
