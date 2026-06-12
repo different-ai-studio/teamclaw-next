@@ -1,10 +1,6 @@
 import { existsSync, readFileSync } from 'fs'
+import { createRequire } from 'node:module'
 import path from 'path'
-import {
-  resolveBrandTheme,
-  generateBrandThemeCss,
-  extractRootTokenNames,
-} from '../../scripts/lib/brand-theme.js'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -50,6 +46,14 @@ const baseConfig = readJSON(path.join(rootDir, 'build.config.json'))
 const envConfig = buildEnv ? readJSON(path.join(rootDir, `build.config.${buildEnv}.json`)) : null
 const localConfig = readJSON(path.join(rootDir, 'build.config.local.json'))
 const buildConfig = deepMerge(baseConfig || {}, envConfig, localConfig)
+
+const nodeRequire = createRequire(import.meta.url)
+const { resolveBrandTheme, generateBrandThemeCss, extractRootTokenNames } =
+  nodeRequire(path.join(rootDir, 'scripts/lib/brand-theme.js')) as {
+    resolveBrandTheme: (buildConfig: unknown, repoRoot: string) => { palette: string; tokens: Record<string, string> } | null
+    generateBrandThemeCss: (palette: string, tokens: Record<string, string>, allowed: Set<string>) => string
+    extractRootTokenNames: (css: string) => Set<string>
+  }
 
 // Derive shortName if not explicitly set
 if (!(buildConfig as any).app?.shortName) {
