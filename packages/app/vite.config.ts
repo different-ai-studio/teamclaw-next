@@ -1,5 +1,10 @@
 import { existsSync, readFileSync } from 'fs'
 import path from 'path'
+import {
+  resolveBrandTheme,
+  generateBrandThemeCss,
+  extractRootTokenNames,
+} from '../../scripts/lib/brand-theme.js'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -60,6 +65,19 @@ if (!sn || sn.length > 20 || !/^[a-z0-9]+$/.test(sn)) {
   throw new Error(`app.shortName must be 1-20 chars, [a-z0-9] only, got: '${sn}'`)
 }
 
+// --- Per-brand theme palette: generate a :root[data-palette="<brand>"] block ---
+let brandThemeStyle = ''
+const brandTheme = resolveBrandTheme(buildConfig as any, rootDir)
+if (brandTheme) {
+  const globalsCss = readFileSync(
+    path.resolve(__dirname, 'src/styles/globals.css'),
+    'utf-8'
+  )
+  const allowed = extractRootTokenNames(globalsCss)
+  const block = generateBrandThemeCss(brandTheme.palette, brandTheme.tokens, allowed)
+  brandThemeStyle = `<style id="brand-theme">${block}</style>`
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
@@ -73,6 +91,7 @@ export default defineConfig({
         return html
           .replace(/__APP_SHORT_NAME__/g, sn as string)
           .replace(/__PALETTE__/g, palette)
+          .replace(/<!--__BRAND_THEME__-->/g, brandThemeStyle)
       },
     },
     // Bundle analysis: run with ANALYZE=true pnpm build
