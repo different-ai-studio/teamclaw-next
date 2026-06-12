@@ -143,41 +143,14 @@ async function attempt(entry: OutboxEntry): Promise<void> {
     });
     store.markCloudPersisted(entry.messageId);
 
-    if (entry.mentionActorIds.length > 0) {
-      const participants = await getBackend().sessionMembers.listParticipants(
-        entry.sessionId,
-      );
-      const agentActorIds = entry.mentionActorIds.filter((id) => {
-        const row = participants.find((p) => p.id === id);
-        return row ? isAgentActorType(row.actor_type) : false;
-      });
-      if (agentActorIds.length > 0) {
-        const workspaceIdHint =
-          entry.workspaceIdHint?.trim() ||
-          (await resolveSessionWorkspaceHintForRuntimeStart({
-            teamId: entry.teamId,
-            localWorkspacePath: useWorkspaceStore.getState().workspacePath,
-            sessionId: entry.sessionId,
-            agentActorIds,
-          }));
-        sessionFlowLog("outbox_sender.runtime_ensure.begin", {
-          messageId: entry.messageId,
-          sessionId: entry.sessionId,
-          teamId: entry.teamId,
-          agentActorIds,
-          workspaceIdHint: workspaceIdHint || null,
-        });
-        await ensureAgentRuntimesForSession({
-          sessionId: entry.sessionId,
-          teamId: entry.teamId,
-          agentActorIds,
-          modelId: entry.model ?? undefined,
-          workspaceIdHint: workspaceIdHint || undefined,
-          reason: "outbox_send",
-        });
-      }
-    }
-
+    // Fan out to OTHER members FIRST. Publishing the live event both delivers
+    // the message to everyone in real time AND is what wakes an online daemon
+    // (the daemon subscribes to this topic). This MUST happen before — and
+    // independently of — ensuring the mentioned agent's runtime below. When the
+    // mentioned daemon is offline/errored, ensuring its runtime throws or blocks
+    // for 10-20s; doing that first (as the code previously did) skipped or
+    // delayed this publish, so other members could not see the message in real
+    // time until the next message happened to arrive on the topic.
     const topic = `amux/${entry.teamId}/session/${entry.sessionId}/live`;
     sessionFlowLog("outbox_sender.mqtt_publish.begin", {
       messageId: entry.messageId,
@@ -217,6 +190,56 @@ async function attempt(entry: OutboxEntry): Promise<void> {
       // for other clients to hydrate them later. Agent-mentioned messages must
       // reach the live topic because that is what wakes the daemon runtime.
       console.warn("[outbox] MQTT publish failed (best-effort):", err);
+    }
+
+    // Belt-and-suspenders cold-start: ensure the mentioned agent's runtime is up
+    // (adds it as a participant + explicit runtimeStart RPC for a daemon that is
+    // online but has no runtime for this session yet). Best-effort and
+    // NON-BLOCKING on purpose: the live publish above already fanned the message
+    // out to members and woke any online daemon, so an unreachable or slow
+    // daemon here must never fail this message, delay marking it delivered, or
+    // stall the outbox worker. Failures surface through ensureAgentRuntimes' own
+    // toasts; we only log here.
+    if (entry.mentionActorIds.length > 0) {
+      void (async () => {
+        const participants = await getBackend().sessionMembers.listParticipants(
+          entry.sessionId,
+        );
+        const agentActorIds = entry.mentionActorIds.filter((id) => {
+          const row = participants.find((p) => p.id === id);
+          return row ? isAgentActorType(row.actor_type) : false;
+        });
+        if (agentActorIds.length === 0) return;
+        const workspaceIdHint =
+          entry.workspaceIdHint?.trim() ||
+          (await resolveSessionWorkspaceHintForRuntimeStart({
+            teamId: entry.teamId,
+            localWorkspacePath: useWorkspaceStore.getState().workspacePath,
+            sessionId: entry.sessionId,
+            agentActorIds,
+          }));
+        sessionFlowLog("outbox_sender.runtime_ensure.begin", {
+          messageId: entry.messageId,
+          sessionId: entry.sessionId,
+          teamId: entry.teamId,
+          agentActorIds,
+          workspaceIdHint: workspaceIdHint || null,
+        });
+        await ensureAgentRuntimesForSession({
+          sessionId: entry.sessionId,
+          teamId: entry.teamId,
+          agentActorIds,
+          modelId: entry.model ?? undefined,
+          workspaceIdHint: workspaceIdHint || undefined,
+          reason: "outbox_send",
+        });
+      })().catch((err) => {
+        sessionFlowError("outbox_sender.runtime_ensure.failed", err, {
+          messageId: entry.messageId,
+          sessionId: entry.sessionId,
+          teamId: entry.teamId,
+        });
+      });
     }
 
     await store.updateState(entry.messageId, {
