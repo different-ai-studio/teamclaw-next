@@ -1348,6 +1348,9 @@ mod spawn_path_tests {
     use super::{enriched_spawn_path, PATH_SEP};
     use std::path::Path;
 
+    // Unix-specific: asserts the homebrew / ~/.local candidate dirs and the
+    // `:` separator, which only apply on the non-windows branch.
+    #[cfg(not(windows))]
     #[test]
     fn appends_homebrew_and_user_local_to_minimal_path() {
         // launchd hands amuxd this minimal PATH, which omits Homebrew and
@@ -1372,6 +1375,7 @@ mod spawn_path_tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn dedupes_existing_entries() {
         let path = enriched_spawn_path(
@@ -1385,6 +1389,7 @@ mod spawn_path_tests {
         assert_eq!(count, 1, "duplicate homebrew entry: {path}");
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn handles_missing_existing_path() {
         let path = enriched_spawn_path(None, Some(Path::new("/home/u")));
