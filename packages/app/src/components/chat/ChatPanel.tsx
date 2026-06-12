@@ -201,23 +201,24 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
   // them vanish the moment the turn finished. The bubble itself suppresses
   // the outputText after finalize so the persisted AGENT_REPLY ChatMessage
   // doesn't render the reply twice.
-  const v2StreamsByKey = useV2StreamingStore(s => s.byKey);
-  const v2StreamsArchived = useV2StreamingStore(s => s.archived);
+  const v2ActiveSessionRevision = useV2StreamingStore((s) =>
+    activeSessionId ? (s.revisionBySession[activeSessionId] ?? 0) : 0,
+  );
   const persistedSessionPlan = useV2StreamingStore((s) =>
     selectPersistedPlanForSession(s, activeSessionId),
   );
-  const v2Streams = React.useMemo(
-    () => {
-      const current = Object.values(v2StreamsByKey).filter(
-        e => e.sessionId === activeSessionId,
-      );
-      const archived = v2StreamsArchived.filter(
-        e => e.sessionId === activeSessionId,
-      );
-      return [...archived, ...current].sort((a, b) => a.lastUpdate - b.lastUpdate);
-    },
-    [v2StreamsByKey, v2StreamsArchived, activeSessionId],
-  );
+  const v2Streams = React.useMemo(() => {
+    const s = useV2StreamingStore.getState();
+    const current = Object.values(s.byKey).filter(
+      (e) => e.sessionId === activeSessionId,
+    );
+    const archived = s.archived.filter((e) => e.sessionId === activeSessionId);
+    return [...archived, ...current].sort((a, b) => a.lastUpdate - b.lastUpdate);
+    // v2ActiveSessionRevision is the change signal; byKey/archived are read via
+    // getState() to avoid re-subscribing to the whole store (perf). Do not add
+    // byKey/archived to deps — it reintroduces per-delta re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v2ActiveSessionRevision, activeSessionId]);
 
   // Plan entries from the active agent's stream surface in the TodoList dock
   // above the prompt input (v1 style) rather than inline in the message
@@ -280,10 +281,17 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
       : undefined
   );
   const isViewingChild = !!viewingChildSessionId && !isViewingArchived;
-  const streamByKey = useV2StreamingStore((s) => s.byKey);
   const acpPendingForTodo = React.useMemo(
-    () => collectAcpStreamingPermissions(activeSessionId, streamByKey),
-    [activeSessionId, streamByKey],
+    () =>
+      collectAcpStreamingPermissions(
+        activeSessionId,
+        useV2StreamingStore.getState().byKey,
+      ),
+    // v2ActiveSessionRevision is the change signal; byKey is read via getState()
+    // to avoid re-subscribing to the whole store (perf). Do not add byKey to
+    // deps — it reintroduces per-delta re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeSessionId, v2ActiveSessionRevision],
   );
   const showInlineTodo = React.useMemo(() => {
     if (isViewingArchived) return false;
@@ -1911,16 +1919,22 @@ export function ChatPanel({ compact = false }: ChatPanelProps) {
 
   // Keep inactive current-turn streams visible until releaseActorAfterPersist
   // moves artifacts into the persisted ChatMessage (see StreamingAgentBubble).
+  const v2DisplayRevision = useV2StreamingStore((s) =>
+    displaySessionId ? (s.revisionBySession[displaySessionId] ?? 0) : 0,
+  );
   const displayV2Streams = React.useMemo(() => {
     if (!displaySessionId) return [];
-    const current = Object.values(v2StreamsByKey).filter(
+    const s = useV2StreamingStore.getState();
+    const current = Object.values(s.byKey).filter(
       (e) => e.sessionId === displaySessionId,
     );
-    const archived = v2StreamsArchived.filter(
-      (e) => e.sessionId === displaySessionId,
-    );
+    const archived = s.archived.filter((e) => e.sessionId === displaySessionId);
     return [...archived, ...current].sort((a, b) => a.lastUpdate - b.lastUpdate);
-  }, [v2StreamsByKey, v2StreamsArchived, displaySessionId]);
+    // v2DisplayRevision is the change signal; byKey/archived are read via
+    // getState() to avoid re-subscribing to the whole store (perf). Do not add
+    // byKey/archived to deps — it reintroduces per-delta re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v2DisplayRevision, displaySessionId]);
 
   const lastTimelineDiagSigRef = React.useRef<string>("");
   React.useEffect(() => {

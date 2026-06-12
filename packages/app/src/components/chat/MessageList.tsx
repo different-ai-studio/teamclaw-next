@@ -66,39 +66,9 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
 
     // ── Store selectors ──────────────────────────────────────────────────
     const isLoading = useSessionStore((s) => s.isLoading);
-    const v2StreamScrollTrigger = useV2StreamingStore((s) => {
-      if (!activeSessionId) return 0;
-      let total = 0;
-      const bump = (sessionId: string, lastUpdate: number, size: number) => {
-        if (sessionId !== activeSessionId) return;
-        total += lastUpdate + size;
-      };
-      for (const entry of Object.values(s.byKey)) {
-        bump(
-          entry.sessionId,
-          entry.lastUpdate,
-          entry.outputText.length +
-            entry.thinkingText.length +
-            entry.parts.reduce(
-              (sum, part) => sum + (part.text || part.content || "").length,
-              0,
-            ),
-        );
-      }
-      for (const entry of s.archived) {
-        bump(
-          entry.sessionId,
-          entry.lastUpdate,
-          entry.outputText.length +
-            entry.thinkingText.length +
-            entry.parts.reduce(
-              (sum, part) => sum + (part.text || part.content || "").length,
-              0,
-            ),
-        );
-      }
-      return total;
-    });
+    const v2StreamScrollTrigger = useV2StreamingStore((s) =>
+      activeSessionId ? (s.revisionBySession[activeSessionId] ?? 0) : 0,
+    );
 
     const childStreamingScrollTrigger = useStreamingStore((s) => {
       const cs = s.childSessionStreaming;
