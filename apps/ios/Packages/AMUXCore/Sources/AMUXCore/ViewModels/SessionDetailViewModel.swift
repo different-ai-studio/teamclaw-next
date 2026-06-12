@@ -90,6 +90,19 @@ public final class SessionDetailViewModel {
     /// the @Observable fields above. Non-nil while a flush is scheduled;
     /// see `scheduleStreamingMirrorFlush()`.
     private var streamingMirrorFlushTask: Task<Void, Never>?
+    /// Agents with an in-flight cancel awaiting the daemon's
+    /// `statusChange:.idle` acknowledgment. Membership blocks duplicate
+    /// cancels; resolved by the idle event or the ack-timeout fallback.
+    public private(set) var interruptPendingAgents: Set<String> = []
+    /// Per-agent ack-timeout fallbacks armed by `interruptAgent`. The
+    /// daemon normally answers a cancel with `statusChange:.idle` within
+    /// a second; when that never arrives (broker drop, runtime wedge,
+    /// or an ACP host that ignores session/cancel — opencode does), the
+    /// timeout synthesizes the idle locally so the stream still settles
+    /// and the partial text still lands. The desktop client has no such
+    /// fallback and hangs forever — don't copy that.
+    private var interruptTimeoutTasks: [String: Task<Void, Never>] = [:]
+    private let interruptAckTimeout: TimeInterval = 8
     /// Backwards-compat shim for callers that haven't migrated to the
     /// per-agent map. True when ANY agent is streaming raw text. Most call
     /// sites should prefer `streamingAgentSet` for correct multi-agent
@@ -478,15 +491,28 @@ public final class SessionDetailViewModel {
     }
 
     /// Cancel a specific agent's currently-running ACP turn.
+    ///
+    /// Deliberately does NOT clear any streaming state here. The daemon
+    /// answers the cancel with `statusChange:.idle`, and the reducer's
+    /// idle path flushes the partial text into a completed entry for
+    /// exactly this bucket — clearing optimistically (the old behavior)
+    /// discarded everything the user had watched stream in AND wiped
+    /// concurrent agents' live buffers via the global markAgentDone().
+    /// An 8s ack-timeout synthesizes the idle locally if the daemon
+    /// never responds, so the card can't hang forever either.
     public func interruptAgent(_ agentActorID: String) {
+        guard !interruptPendingAgents.contains(agentActorID) else { return }
+        interruptPendingAgents.insert(agentActorID)
         Task {
             do {
                 try await sendCommand(agentActorID: agentActorID) {
                     $0.command = .cancel(Amux_AcpCancel())
                 }
-                markAgentDone()
+                armInterruptAckTimeout(for: agentActorID)
             } catch {
-                // sendCommand / cancelTask already surfaced the user-facing error.
+                // sendCommand already surfaced the user-facing error.
+                // Keep the stream live so the user can retry the stop.
+                interruptPendingAgents.remove(agentActorID)
             }
         }
     }
@@ -618,6 +644,11 @@ public final class SessionDetailViewModel {
         // trailing card. Reconcile here by retroactively rewriting the
         // raw stamps to the resolved actor_id.
         relabelRawRuntimeIDStampsToActorIDs()
+
+        // Reconnect replays that couldn't be routed before this roster
+        // loaded (actor_id bucket with no runtime_id mapping) get exactly
+        // one retry now that the mapping exists.
+        await retryPendingTurnReplays()
 
         // Overlay live MQTT-derived data from the SwiftData Runtime row.
         // Supabase agent_runtimes.current_model is only written on ACP
@@ -1299,13 +1330,11 @@ public final class SessionDetailViewModel {
     private var toolUseIndexByToolId: [String: Int] = [:]
     private var permissionIndexByRequestId: [String: Int] = [:]
     private var planUpdateIndexByAgent: [String: Int] = [:]
-    private var lastIncompleteOutputIndex: Int?
 
     private func rebuildIndexes() {
         toolUseIndexByToolId.removeAll(keepingCapacity: true)
         permissionIndexByRequestId.removeAll(keepingCapacity: true)
         planUpdateIndexByAgent.removeAll(keepingCapacity: true)
-        lastIncompleteOutputIndex = nil
         for (i, e) in events.enumerated() { registerIndex(event: e, at: i) }
     }
 
@@ -1317,8 +1346,6 @@ public final class SessionDetailViewModel {
             if let id = event.toolId { permissionIndexByRequestId[id] = idx }
         case "plan_update":
             planUpdateIndexByAgent[event.agentId] = idx
-        case "output":
-            if !event.isComplete { lastIncompleteOutputIndex = idx }
         default:
             break
         }
@@ -1345,8 +1372,6 @@ public final class SessionDetailViewModel {
             if planUpdateIndexByAgent[removed.agentId] == idx {
                 planUpdateIndexByAgent.removeValue(forKey: removed.agentId)
             }
-        case "output":
-            if lastIncompleteOutputIndex == idx { lastIncompleteOutputIndex = nil }
         default: break
         }
         // Shift indexes that pointed past the removed position. k is tiny
@@ -1362,7 +1387,6 @@ public final class SessionDetailViewModel {
         for (agent, v) in planUpdateIndexByAgent where v > idx {
             planUpdateIndexByAgent[agent] = v - 1
         }
-        if let l = lastIncompleteOutputIndex, l > idx { lastIncompleteOutputIndex = l - 1 }
     }
 
     /// Validated O(1) lookup. Returns nil (and clears the stale cache
@@ -1387,17 +1411,6 @@ public final class SessionDetailViewModel {
             return idx
         }
         permissionIndexByRequestId.removeValue(forKey: id)
-        return nil
-    }
-
-    private func incompleteOutputIndex() -> Int? {
-        if let idx = lastIncompleteOutputIndex,
-           idx < events.count,
-           events[idx].eventType == "output",
-           events[idx].isComplete == false {
-            return idx
-        }
-        lastIncompleteOutputIndex = nil
         return nil
     }
 
@@ -1521,33 +1534,12 @@ public final class SessionDetailViewModel {
             rehydrateTimelineStateFromEvents()
         }
 
-        // Resume streaming state if there's an incomplete output event (saved by stop()).
-        // Hydrate streamingText for an instant preview, then drop the synthetic
-        // event — keeping it would render the same bytes as both a bubble and
-        // the streaming text, and live deltas appended to streamingText would
-        // visibly duplicate the bubble content. The incremental sync below
-        // rebuilds streamingText from the daemon's raw deltas.
-        if let idx = incompleteOutputIndex() {
-            let lastOutput = events[idx]
-            // Resume keyed by whatever attribution the synthetic stop()-saved
-            // event carries. That id was stamped via bucketKey at flush time,
-            // so it's either the agent actor id or the runtime id — both
-            // remain valid keys for the streaming buffer dictionaries.
-            let agentID = lastOutput.senderActorID ?? eventScopeKey
-            streamingTextByAgent[agentID] = lastOutput.text ?? ""
-            if let model = lastOutput.model { streamingModelByAgent[agentID] = model }
-            if runtime?.isActive ?? false {
-                streamingAgentSet.insert(agentID)
-            }
-            modelContext.delete(lastOutput)
-            removeEvent(at: idx)
-        }
-
         recomputeGroups()
         hasLoadedInitialFeed = true
-        // Note: the inline incomplete-output hydration above (incompleteOutputIndex path)
-        // deletes the event from `events` before restoreStreamingAgentSetFromIncompleteOutput()
-        // runs, so the two paths never double-restore the same agent.
+        // Resume streaming state from any stop()-saved incomplete output
+        // rows — one per agent that was mid-stream. Handles every agent
+        // (multi-agent sessions persist one synthetic row each) and drops
+        // the synthetic rows once their bytes are back in the buffers.
         restoreStreamingAgentSetFromIncompleteOutput()
 
         // Single subscription path: session/{sid}/live. iOS only ever
@@ -1651,6 +1643,9 @@ public final class SessionDetailViewModel {
         task?.cancel(); task = nil
         spawningPollTask?.cancel(); spawningPollTask = nil
         streamingMirrorFlushTask?.cancel(); streamingMirrorFlushTask = nil
+        for (_, t) in interruptTimeoutTasks { t.cancel() }
+        interruptTimeoutTasks = [:]
+        interruptPendingAgents = []
         // Unsubscribe from extra runtime-state topics added for session agents
         // that aren't in ConnectedAgentsStore. SessionListViewModel manages its
         // own set; we only clean up the ones we added here.
@@ -1684,6 +1679,7 @@ public final class SessionDetailViewModel {
                 event.text = text
                 event.isComplete = false
                 event.model = streamingModelByAgent[agentID]
+                event.turnID = streamingTurnIDByAgent[agentID]
                 ctx.insert(event)
                 appendEvent(event)
                 seq += 1
@@ -1708,9 +1704,10 @@ public final class SessionDetailViewModel {
     /// an incomplete `output` row, without cancelling the MQTT task or
     /// mutating the in-memory streaming state. Wire to
     /// `scenePhase == .background`: if iOS reclaims the suspended
-    /// process, the next cold launch's `start()` → `incompleteOutputIndex()`
-    /// hydrate path picks the snapshot up and the user sees their
-    /// partial text instead of an empty bubble.
+    /// process, the next cold launch's `start()` →
+    /// `restoreStreamingAgentSetFromIncompleteOutput()` hydrate path picks
+    /// the snapshot up and the user sees their partial text instead of an
+    /// empty bubble.
     /// `discardBackgroundSnapshot()` removes it again on the common
     /// path where the process survived.
     public func flushStreamingForBackground() {
@@ -1733,6 +1730,7 @@ public final class SessionDetailViewModel {
             event.text = text
             event.isComplete = false
             event.model = streamingModelByAgent[agentID]
+            event.turnID = streamingTurnIDByAgent[agentID]
             ctx.insert(event)
             // Deliberately NOT appendEvent — keep this row out of
             // `events` so the live UI keeps rendering the single
@@ -1927,6 +1925,12 @@ public final class SessionDetailViewModel {
             if let turnID = timelineState.streamingTurnIDByAgent.removeValue(forKey: rawID) {
                 timelineState.streamingTurnIDByAgent[actorID] = turnID
             }
+            // Parked reconnect replays follow their bucket through the
+            // relabel, so retryPendingTurnReplays() resolves against the
+            // post-relabel key the streaming dictionaries now use.
+            if pendingTurnReplayBuckets.remove(rawID) != nil {
+                pendingTurnReplayBuckets.insert(actorID)
+            }
         }
 
         // Mirror reducer state onto the VM's @Observable fields so the
@@ -1975,13 +1979,13 @@ public final class SessionDetailViewModel {
 
         // Reducer is source of truth for entry mutations. Apply +
         // project. Side effects the reducer doesn't track (runtime
-        // status flip, markAgentDone heartbeat reset) are handled
-        // below.
+        // status flip, heartbeat reset) are handled below.
+        let bucket = bucketKey(forRuntimeID: runtimeID) ?? eventScopeKey
         let dirty = applyTimelineInput(
             .acp(AcpInput(
                 envelopeSequence: UInt64(sequence),
                 runtimeID: runtimeID ?? "",
-                agentBucketKey: bucketKey(forRuntimeID: runtimeID) ?? eventScopeKey,
+                agentBucketKey: bucket,
                 timestamp: .now,
                 turnID: turnID,
                 acpEvent: acp
@@ -1989,10 +1993,14 @@ public final class SessionDetailViewModel {
             modelContext: modelContext
         )
 
-        // Runtime status + heartbeat side effects.
+        // Runtime status + heartbeat side effects. Idle settles ONLY this
+        // bucket — the reducer just flushed its partial text and cleared
+        // its streaming slots; concurrent agents' live buffers stay
+        // untouched (the old global markAgentDone() wiped them, losing
+        // their streamed text mid-turn).
         if case .statusChange(let sc) = acp.event {
             runtime?.status = Int(sc.newStatus.rawValue)
-            if sc.newStatus == .idle { markAgentDone() }
+            if sc.newStatus == .idle { settleAgentTurn(bucket: bucket) }
         }
 
         // Hand-rolled raw tool_title_update parser. The reducer
@@ -2157,10 +2165,17 @@ public final class SessionDetailViewModel {
             guard !turnID.isEmpty else { continue }
             // `bucket` is the actor id post-resolve; the daemon's
             // RequestTurnHistory wants a runtime id. Map actor → runtime
-            // via the member sheet; fall back to treating bucket as a
-            // raw runtime id (covers the pre-memberSheet window).
-            let runtimeID = self.runtimeID(forAgentActorID: bucket) ?? bucket
-            guard !runtimeID.isEmpty else { continue }
+            // via the member sheet. When the mapping isn't available yet,
+            // do NOT send the bucket verbatim — the daemon answers an
+            // unknown runtime id with nothing and the active-stream card
+            // hangs forever. Park the bucket instead and retry once after
+            // `refreshMemberSheet` lands the roster.
+            guard let runtimeID = turnReplayRuntimeID(forBucket: bucket), !runtimeID.isEmpty else {
+                pendingTurnReplayBuckets.insert(bucket)
+                print("[RuntimeDetailVM] replay deferred for \(bucket)/\(turnID): runtime id not resolvable yet")
+                continue
+            }
+            pendingTurnReplayBuckets.remove(bucket)
             do {
                 try await self.requestTurnHistory(
                     modelContext: modelContext,
@@ -2169,6 +2184,59 @@ public final class SessionDetailViewModel {
                 )
             } catch {
                 print("[RuntimeDetailVM] replay turn history failed for \(bucket)/\(turnID): \(error)")
+            }
+        }
+    }
+
+    /// Buckets whose mid-stream turn replay couldn't be routed yet because
+    /// the actor_id → runtime_id mapping wasn't loaded. Retried once after
+    /// `refreshMemberSheet` completes (see `retryPendingTurnReplays`).
+    private var pendingTurnReplayBuckets: Set<String> = []
+
+    /// Resolve the daemon runtime id to use when replaying `bucket`'s
+    /// in-flight turn. Returns nil to mean "defer — don't send anything":
+    /// passing the bucket itself through is only valid in the
+    /// pre-memberSheet window where buckets ARE raw runtime ids. Once the
+    /// roster is loaded, an actor-id bucket without a bound runtime row
+    /// must wait instead of being sent verbatim as a runtime id.
+    private func turnReplayRuntimeID(forBucket bucket: String) -> String? {
+        if let rid = runtimeID(forAgentActorID: bucket), !rid.isEmpty { return rid }
+        // Roster not loaded yet — can't tell actor ids from raw runtime
+        // ids; defer until refreshMemberSheet lands.
+        if memberSheetAgents.isEmpty { return nil }
+        // Known agent actor id whose runtime row isn't bound yet
+        // (just-spawned / daemon offline) — defer rather than misroute.
+        if memberSheetAgents.contains(where: { $0.id == bucket }) { return nil }
+        // Roster is loaded and the bucket isn't an actor id in it: this is
+        // a raw runtime-id stamp from the pre-memberSheet window. Sending
+        // it as the runtime id is correct.
+        return bucket
+    }
+
+    /// One-shot retry for replays parked by
+    /// `replayStreamingTurnsAfterReconnect`. Runs after `refreshMemberSheet`
+    /// lands the roster — post-relabel, so parked bucket keys have already
+    /// been rewritten raw runtime id → actor id where applicable. Buckets
+    /// that still don't resolve keep the prior state (no send) but log;
+    /// each parked bucket gets exactly one retry so we never replay-loop.
+    private func retryPendingTurnReplays() async {
+        guard !pendingTurnReplayBuckets.isEmpty else { return }
+        let parked = pendingTurnReplayBuckets
+        pendingTurnReplayBuckets = []
+        guard let ctx = startModelContext else { return }
+        for bucket in parked {
+            // The stream may have settled (idle / interrupt) while we
+            // waited for the roster — nothing left to replay then.
+            guard streamingAgentSet.contains(bucket),
+                  let turnID = streamingTurnIDByAgent[bucket], !turnID.isEmpty else { continue }
+            guard let runtimeID = turnReplayRuntimeID(forBucket: bucket), !runtimeID.isEmpty else {
+                print("[RuntimeDetailVM] replay retry for \(bucket)/\(turnID) still unroutable; giving up")
+                continue
+            }
+            do {
+                try await requestTurnHistory(modelContext: ctx, turnID: turnID, agentID: runtimeID)
+            } catch {
+                print("[RuntimeDetailVM] replay retry failed for \(bucket)/\(turnID): \(error)")
             }
         }
     }
@@ -2389,7 +2457,13 @@ public final class SessionDetailViewModel {
 
     public func cancelTask() async throws {
         try await sendCommand { $0.command = .cancel(Amux_AcpCancel()) }
-        markAgentDone()
+        // Same wait-for-idle semantics as interruptAgent: the bound
+        // runtime's bucket settles when the daemon acknowledges, with
+        // the timeout as backstop. No optimistic global clear.
+        if let bucket = bucketKey(forRuntimeID: runtime?.runtimeId) {
+            interruptPendingAgents.insert(bucket)
+            armInterruptAckTimeout(for: bucket)
+        }
     }
 
     /// Flip isAgentWorking on and arm a long safety reset so a missed
@@ -2407,15 +2481,37 @@ public final class SessionDetailViewModel {
     private func markAgentWorking() {
         isAgentWorking = true
         recomputeGroups()
+        armAgentWorkingSafetyReset()
+    }
+
+    /// (Re)arm the 60s safety reset. Split from `markAgentWorking` so the
+    /// timeout handler can re-arm itself without flipping the flag.
+    private func armAgentWorkingSafetyReset() {
         agentWorkingResetTask?.cancel()
         agentWorkingResetTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(60))
             guard let self, !Task.isCancelled else { return }
             await MainActor.run {
-                self.isAgentWorking = false
-                self.recomputeGroups()
+                self.handleAgentWorkingSafetyTimeout()
             }
         }
+    }
+
+    /// Safety-timer expiry. Clearing `isAgentWorking` is only safe when no
+    /// stream is in flight: with a non-empty `streamingAgentSet`, 60 s of
+    /// event silence just means a long thinking / tool stretch, and the
+    /// old unconditional clear raced the real settle paths — the timer
+    /// wiped the flag mid-stream, then a late idle/event operated on
+    /// already-cleared state. Re-arm for another period instead; the real
+    /// `statusChange:.idle` (or the interrupt settle) owns the flag while
+    /// any agent is streaming.
+    private func handleAgentWorkingSafetyTimeout() {
+        guard streamingAgentSet.isEmpty else {
+            armAgentWorkingSafetyReset()
+            return
+        }
+        isAgentWorking = false
+        recomputeGroups()
     }
 
     private func markAgentDone() {
@@ -2431,6 +2527,69 @@ public final class SessionDetailViewModel {
         recomputeGroups()
         agentWorkingResetTask?.cancel()
         agentWorkingResetTask = nil
+    }
+
+    /// Per-agent turn settle on `statusChange:.idle`. By the time this
+    /// runs, the reducer has already flushed the bucket's partial text
+    /// into a completed entry and cleared its streaming slots (see
+    /// `ChatTimelineReducer` `.statusChange`), and `applyTimelineInput`
+    /// mirrored the result. Only the VM-level side effects the reducer
+    /// doesn't own happen here — and nothing global: other agents'
+    /// in-flight streams must survive one agent finishing.
+    private func settleAgentTurn(bucket: String) {
+        interruptTimeoutTasks[bucket]?.cancel()
+        interruptTimeoutTasks[bucket] = nil
+        interruptPendingAgents.remove(bucket)
+        // Single session-level "working" chip: idle from any runtime
+        // drops it; the next real work event from a still-running agent
+        // flips it back on (handleAcpEvent → markAgentWorking).
+        isAgentWorking = false
+        agentWorkingResetTask?.cancel()
+        agentWorkingResetTask = nil
+        recomputeGroups()
+    }
+
+    /// Arm the ack-timeout fallback for an in-flight cancel. Resolved
+    /// early (cancelled) when the daemon's real `statusChange:.idle`
+    /// arrives via `settleAgentTurn`.
+    private func armInterruptAckTimeout(for bucket: String) {
+        interruptTimeoutTasks[bucket]?.cancel()
+        interruptTimeoutTasks[bucket] = Task { [weak self, interruptAckTimeout] in
+            try? await Task.sleep(for: .seconds(interruptAckTimeout))
+            guard let self, !Task.isCancelled else { return }
+            self.forceSettleInterruptedAgent(bucket)
+        }
+    }
+
+    /// Timeout leg: the daemon never acknowledged the cancel. Synthesize
+    /// the `statusChange:.idle` locally and run it through the normal
+    /// reducer path, so the partial text lands as a completed entry
+    /// exactly as a real idle would — then settle the bucket.
+    private func forceSettleInterruptedAgent(_ bucket: String) {
+        interruptTimeoutTasks[bucket] = nil
+        guard interruptPendingAgents.contains(bucket) else { return }
+        guard let ctx = startModelContext else {
+            interruptPendingAgents.remove(bucket)
+            return
+        }
+        var sc = Amux_AcpStatusChange()
+        sc.newStatus = .idle
+        var acp = Amux_AcpEvent()
+        acp.event = .statusChange(sc)
+        let seq = UInt64(max(events.last?.sequence ?? 0, 0)) + 1
+        let dirty = applyTimelineInput(
+            .acp(AcpInput(
+                envelopeSequence: seq,
+                runtimeID: "",
+                agentBucketKey: bucket,
+                timestamp: .now,
+                turnID: streamingTurnIDByAgent[bucket],
+                acpEvent: acp
+            )),
+            modelContext: ctx
+        )
+        if dirty { try? ctx.save() }
+        settleAgentTurn(bucket: bucket)
     }
 
     // MARK: - Phase 4 reducer apply + project
@@ -2561,33 +2720,71 @@ public final class SessionDetailViewModel {
         timelineState.streamingTurnIDByAgent = [:]
     }
 
-    /// After a stop()/start() cycle (e.g. NavigationStack push/pop), check if
-    /// any persisted incomplete-output events exist in `events`. If so, the
-    /// agent was mid-stream when stop() flushed its buffer; restore the
-    /// streaming set so the active-stream card reappears immediately instead
-    /// of waiting for the next MQTT delta.
+    /// After a stop()/start() cycle (e.g. NavigationStack push/pop) or a
+    /// cold relaunch, check if any persisted incomplete-output events exist
+    /// in `events`. If so, agents were mid-stream when stop() (or the
+    /// background snapshot) flushed their buffers; restore the streaming
+    /// set so every agent's active-stream card reappears immediately
+    /// instead of waiting for the next MQTT delta. Multi-agent: stop()
+    /// persists one synthetic row per streaming agent — each agent's
+    /// NEWEST row wins (the old single-index path restored only the last
+    /// row overall, dropping every other agent's text and turn id).
     ///
-    /// IMPORTANT: output events in SwiftData are never marked isComplete=true.
-    /// Without the runtime-status guard below, every completed historical turn
-    /// would incorrectly re-trigger the loading card on re-entry into the view.
-    /// Only restore when the bound runtime is still actively running.
+    /// Runtime-status guard: skip restore only when the bound runtime is
+    /// known-settled (3=Idle 4=Error 5=Stopped) — a leftover row then
+    /// belongs to a finished turn and must not re-trigger the loading
+    /// card. `nil` status (collab-only session, runtime row not resolved
+    /// yet) means "unknown" and restores: the synthetic rows are
+    /// themselves evidence a stream was live moments ago, and a stale
+    /// restore is converged back down by the Supabase seed's
+    /// residual-streaming cleanup (reducer `.historyMessage`) and the
+    /// reconnect turn replay.
     private func restoreStreamingAgentSetFromIncompleteOutput() {
         // Runtime status ints: 1=Starting 2=Active 3=Idle 4=Error 5=Stopped.
-        // Only restore when the agent is still actively running (1 or 2).
-        guard let runtimeStatus = runtime?.status, runtimeStatus == 1 || runtimeStatus == 2 else { return }
+        if let runtimeStatus = runtime?.status, runtimeStatus != 1, runtimeStatus != 2 { return }
+
+        var rowsByAgent: [String: [AgentEvent]] = [:]
         for event in events where event.eventType == "output" && event.isComplete == false {
-            let agentID = event.senderActorID ?? eventScopeKey
             guard let text = event.text, !text.isEmpty else { continue }
+            rowsByAgent[event.senderActorID ?? eventScopeKey, default: []].append(event)
+        }
+        guard !rowsByAgent.isEmpty else { return }
+
+        for (agentID, rows) in rowsByAgent {
+            guard let latest = rows.max(by: {
+                ($0.sequence, $0.timestamp) < ($1.sequence, $1.timestamp)
+            }) else { continue }
+            let text = latest.text ?? ""
             streamingTextByAgent[agentID] = text
-            if let model = event.model { streamingModelByAgent[agentID] = model }
+            timelineState.streamingTextByAgent[agentID] = text
+            if let model = latest.model {
+                streamingModelByAgent[agentID] = model
+                timelineState.streamingModelByAgent[agentID] = model
+            }
+            if let turnID = latest.turnID, !turnID.isEmpty {
+                streamingTurnIDByAgent[agentID] = turnID
+                timelineState.streamingTurnIDByAgent[agentID] = turnID
+            }
             streamingAgentSet.insert(agentID)
             timelineState.streamingAgentSet.insert(agentID)
-            timelineState.streamingTextByAgent[agentID] = text
-            if let model = event.model { timelineState.streamingModelByAgent[agentID] = model }
+
+            // Drop the synthetic rows now that their bytes live in the
+            // streaming buffer. Keeping them would render the same text
+            // twice (bubble + active-stream card) and strand an orphan
+            // incomplete entry after the idle flush appends the completed
+            // one — the reducer's firstDelta synthetic absorption can't
+            // fire once the bucket is already in streamingAgentSet.
+            for row in rows {
+                if let idx = events.firstIndex(where: { $0 === row }) {
+                    removeEvent(at: idx)
+                }
+                let rowID = row.id
+                timelineState.entries.removeAll { $0.id == rowID }
+                startModelContext?.delete(row)
+            }
         }
-        if !streamingAgentSet.isEmpty {
-            recomputeGroups()
-        }
+        try? startModelContext?.save()
+        recomputeGroups()
     }
 
     public func grantPermission(
@@ -2755,13 +2952,15 @@ extension SessionDetailViewModel {
 
     /// Inject a streaming-buffer entry as if a live ACP output delta had
     /// landed under `bucket` before memberSheet finished loading.
-    public func _test_seedStreamingBuffer(bucket: String, text: String, model: String? = nil) {
+    public func _test_seedStreamingBuffer(bucket: String, text: String, model: String? = nil, turnID: String? = nil) {
         timelineState.streamingAgentSet.insert(bucket)
         timelineState.streamingTextByAgent[bucket] = text
         if let model { timelineState.streamingModelByAgent[bucket] = model }
+        if let turnID { timelineState.streamingTurnIDByAgent[bucket] = turnID }
         streamingAgentSet = timelineState.streamingAgentSet
         streamingTextByAgent = timelineState.streamingTextByAgent
         streamingModelByAgent = timelineState.streamingModelByAgent
+        streamingTurnIDByAgent = timelineState.streamingTurnIDByAgent
     }
 
     public func _test_markAgentDone() {
@@ -2770,6 +2969,28 @@ extension SessionDetailViewModel {
 
     public func _test_markAgentWorking() {
         markAgentWorking()
+    }
+
+    /// Run the 60s safety-timer expiry synchronously (no sleeping in tests).
+    public func _test_fireAgentWorkingSafetyTimeout() {
+        handleAgentWorkingSafetyTimeout()
+    }
+
+    public var _test_streamingTurnIDByAgent: [String: String] {
+        streamingTurnIDByAgent
+    }
+
+    public var _test_pendingTurnReplayBuckets: Set<String> {
+        pendingTurnReplayBuckets
+    }
+
+    public func _test_turnReplayRuntimeID(forBucket bucket: String) -> String? {
+        turnReplayRuntimeID(forBucket: bucket)
+    }
+
+    public func _test_replayStreamingTurnsAfterReconnect(modelContext: ModelContext) async {
+        startModelContext = modelContext
+        await replayStreamingTurnsAfterReconnect(modelContext: modelContext)
     }
 
     public func _test_makeInMemoryContainer() -> ModelContainer {
@@ -2794,6 +3015,7 @@ extension SessionDetailViewModel {
             event.text = text
             event.isComplete = false
             event.model = streamingModelByAgent[agentID]
+            event.turnID = streamingTurnIDByAgent[agentID]
             modelContext.insert(event)
             appendEvent(event)
             seq += 1
@@ -2871,6 +3093,30 @@ extension SessionDetailViewModel {
     @MainActor
     public func _testFlushStreamingMirror() {
         mirrorReducerStreamingState()
+    }
+
+    /// Direct test entry: run a full ACP event through `handleAcpEvent`
+    /// (reducer + VM side effects like per-agent idle settle) without a
+    /// live MQTT session. `runtimeID` doubles as the bucket key when it
+    /// isn't in `memberSheetAgents` (raw-id fallback in `bucketKey`).
+    @MainActor
+    public func _testHandleAcp(_ acp: Amux_AcpEvent,
+                               sequence: Int,
+                               runtimeID: String,
+                               modelContext: ModelContext) {
+        startModelContext = modelContext
+        _ = handleAcpEvent(acp, sequence: sequence, runtimeID: runtimeID,
+                           modelContext: modelContext)
+    }
+
+    /// Simulate an in-flight cancel (membership only, no MQTT publish)
+    /// and immediately run the ack-timeout leg, so tests can exercise
+    /// the force-settle path without sleeping through the timeout.
+    @MainActor
+    public func _testForceSettleInterrupt(bucket: String, modelContext: ModelContext) {
+        startModelContext = modelContext
+        interruptPendingAgents.insert(bucket)
+        forceSettleInterruptedAgent(bucket)
     }
 
     /// Direct test entry: build an AcpInput and run it through
