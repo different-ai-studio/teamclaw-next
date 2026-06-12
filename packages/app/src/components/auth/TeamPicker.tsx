@@ -7,16 +7,24 @@ import { useCurrentTeamStore } from "@/stores/current-team";
 
 interface TeamPickerProps {
   teams: MembershipTeam[];
-  /** Last active team, used to highlight the pre-selection. */
-  currentTeamId?: string | null;
+  /**
+   * The team the user last entered (persisted across logins). Gets a "Last
+   * used" badge and the pre-selection highlight. Null on first login (no
+   * history) — the first team is highlighted instead, without the badge.
+   */
+  lastUsedTeamId?: string | null;
   onDone: () => void;
 }
 
-export function TeamPicker({ teams, currentTeamId, onDone }: TeamPickerProps) {
+export function TeamPicker({ teams, lastUsedTeamId, onDone }: TeamPickerProps) {
   const { t } = useTranslation();
   const switchToTeam = useCurrentTeamStore((s) => s.switchToTeam);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Highlight the last-used team; on first login (no history) fall back to the
+  // first team so there's always a visible pre-selection.
+  const highlightId = lastUsedTeamId ?? teams[0]?.id ?? null;
 
   // Group by org, preserving first-seen order. Teams without an org name fall
   // into a single "ungrouped" bucket.
@@ -72,7 +80,8 @@ export function TeamPicker({ teams, currentTeamId, onDone }: TeamPickerProps) {
               </span>
               <div className="flex flex-col gap-2">
                 {orgTeams.map((team) => {
-                  const active = team.id === currentTeamId;
+                  const active = team.id === highlightId;
+                  const isLastUsed = team.id === lastUsedTeamId;
                   const switching = busyId === team.id;
                   return (
                     <button
@@ -85,8 +94,15 @@ export function TeamPicker({ teams, currentTeamId, onDone }: TeamPickerProps) {
                         active ? "border-coral" : "border-border",
                       )}
                     >
-                      <span className="min-w-0 truncate text-[13px] font-medium text-foreground">
-                        {team.name}
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="min-w-0 truncate text-[13px] font-medium text-foreground">
+                          {team.name}
+                        </span>
+                        {isLastUsed && (
+                          <span className="shrink-0 rounded-full bg-selected px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            {t("teamPicker.lastUsed", "Last used")}
+                          </span>
+                        )}
                       </span>
                       {switching ? (
                         <span className="flex shrink-0 items-center gap-1.5 text-[11.5px] text-muted-foreground">

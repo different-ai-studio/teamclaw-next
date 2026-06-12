@@ -157,13 +157,13 @@ function ChooseStep({
   );
 }
 
-function InviteStep({ onBack }: { onBack: () => void }) {
+function InviteStep({ onBack, onNeedLogin }: { onBack: () => void; onNeedLogin: () => void }) {
   const { t } = useTranslation();
-  const { claimInviteAfterAnonymousSignIn, loading, errorMessage } = useAuthStore();
+  const { setPendingInviteToken, errorMessage } = useAuthStore();
   const [raw, setRaw] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const submit = async (event: React.FormEvent) => {
+  const submit = (event: React.FormEvent) => {
     event.preventDefault();
     const token = parseInviteTokenInput(raw);
     if (!token) {
@@ -171,7 +171,10 @@ function InviteStep({ onBack }: { onBack: () => void }) {
       return;
     }
     setLocalError(null);
-    await claimInviteAfterAnonymousSignIn(token);
+    // Member invites require a real account: stash the token and send the user
+    // to sign in. The invite is claimed automatically once they're signed in.
+    setPendingInviteToken(token);
+    onNeedLogin();
   };
 
   return (
@@ -179,7 +182,7 @@ function InviteStep({ onBack }: { onBack: () => void }) {
       <form onSubmit={submit} className="rounded-[16px] border border-border bg-paper p-5">
         <h1 className="text-[18px] font-semibold">{t("auth.onboarding.inviteTitle", "Join the team")}</h1>
         <p className="mt-2 text-[13px] leading-6 text-muted-foreground">
-          {t("auth.onboarding.inviteDesc", "Paste an invite link or token. We create an anonymous session first, then claim the invite.")}
+          {t("auth.onboarding.inviteDesc", "Paste an invite link or token, then sign in to join. The invite is claimed once you're signed in.")}
         </p>
         <label className="mt-5 block space-y-2">
           <span className="text-[12px] font-medium text-ink-2">{t("auth.onboarding.inviteLabel", "Invite link or token")}</span>
@@ -188,8 +191,8 @@ function InviteStep({ onBack }: { onBack: () => void }) {
         {(localError || errorMessage) && (
           <p className="mt-3 text-[12px] text-destructive">{localError || errorMessage}</p>
         )}
-        <Button type="submit" disabled={loading || !raw.trim()} className="mt-5 h-10 w-full bg-coral text-paper">
-          {loading ? t("auth.onboarding.joining", "Joining…") : t("auth.onboarding.continue", "Continue")}
+        <Button type="submit" disabled={!raw.trim()} className="mt-5 h-10 w-full bg-coral text-paper">
+          {t("auth.onboarding.inviteContinueToSignIn", "Continue to sign in")}
         </Button>
       </form>
     </DetailFrame>
@@ -207,7 +210,7 @@ export function DesktopOnboarding() {
       </DetailFrame>
     );
   }
-  if (step === "invite") return <InviteStep onBack={() => setStep("choose")} />;
+  if (step === "invite") return <InviteStep onBack={() => setStep("choose")} onNeedLogin={() => setStep("login")} />;
 
   return (
     <ChooseStep

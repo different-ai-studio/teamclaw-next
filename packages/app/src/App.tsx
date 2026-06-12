@@ -2088,6 +2088,14 @@ function App() {
       for (const raw of urls) {
         const token = parseInviteDeeplink(raw);
         if (!token) continue;
+        // Member invites require a real account. If the user isn't signed in
+        // yet (or is still anonymous), stash the token and let sign-in +
+        // AuthGate's pending-invite effect claim it once they're authenticated.
+        const authState = useAuthStore.getState();
+        if (!authState.session || authState.session.user?.is_anonymous) {
+          authState.setPendingInviteToken(token);
+          continue;
+        }
         try {
           const claim = await claimInviteToken(token);
           await useCurrentTeamStore.getState().reloadAndSwitchTo(claim.teamId);

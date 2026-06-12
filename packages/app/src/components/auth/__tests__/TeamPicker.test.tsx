@@ -33,4 +33,14 @@ describe("TeamPicker", () => {
     await vi.waitFor(() => expect(switchToTeam).toHaveBeenCalledWith("t2"));
     await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
   });
+
+  it("badges the last-used team (zh-CN: 最后使用)", () => {
+    render(<TeamPicker teams={teams} lastUsedTeamId="t2" onDone={() => {}} />);
+    expect(screen.getByText("最后使用")).toBeInTheDocument();
+  });
+
+  it("shows no last-used badge on first login (no history)", () => {
+    render(<TeamPicker teams={teams} onDone={() => {}} />);
+    expect(screen.queryByText("最后使用")).not.toBeInTheDocument();
+  });
 });

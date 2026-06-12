@@ -7,7 +7,7 @@ const { authState, hasConfig, saveServerConfig, reload } = vi.hoisted(() => ({
     errorMessage: null as string | null,
     otpEmail: null as string | null,
     signInAnonymously: vi.fn(),
-    claimInviteAfterAnonymousSignIn: vi.fn(),
+    setPendingInviteToken: vi.fn(),
     sendOtp: vi.fn(),
     verifyOtp: vi.fn(),
     resetOtp: vi.fn(),
@@ -52,7 +52,7 @@ beforeEach(() => {
   authState.errorMessage = null;
   authState.otpEmail = null;
   authState.signInAnonymously.mockReset();
-  authState.claimInviteAfterAnonymousSignIn.mockReset();
+  authState.setPendingInviteToken.mockReset();
   authState.sendOtp.mockReset();
   authState.verifyOtp.mockReset();
   authState.resetOtp.mockReset();
@@ -96,16 +96,17 @@ describe("DesktopOnboarding", () => {
     expect(screen.getByText(/supabase config missing/i)).toBeInTheDocument();
   });
 
-  it("join team accepts a bare token and claims after anonymous sign-in", async () => {
-    authState.claimInviteAfterAnonymousSignIn.mockResolvedValueOnce({ teamId: "team-1" });
+  it("join team stashes a bare token and routes to sign-in", async () => {
     render(<DesktopOnboarding />);
 
     fireEvent.click(screen.getByRole("button", { name: /join the team/i }));
     fireEvent.change(screen.getByLabelText(/invite link/i), { target: { value: "tok-123" } });
-    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    fireEvent.click(screen.getByRole("button", { name: /continue to sign in/i }));
 
+    expect(authState.setPendingInviteToken).toHaveBeenCalledWith("tok-123");
+    // Member invites can't be claimed anonymously — the user is sent to sign in.
     await waitFor(() =>
-      expect(authState.claimInviteAfterAnonymousSignIn).toHaveBeenCalledWith("tok-123"),
+      expect(screen.getByRole("heading", { name: /sign in/i })).toBeInTheDocument(),
     );
   });
 

@@ -7,10 +7,12 @@ const { setLocalCacheTeamGateMock } = vi.hoisted(() => ({
 
 const { authState, currentTeamMock, backendMock } = vi.hoisted(() => ({
   authState: {
-    session: { user: { id: "user-1" } },
+    session: { user: { id: "user-1" } } as { user: { id: string; is_anonymous?: boolean } } | null,
     loading: false,
     authFlow: "idle" as "idle" | "invite",
     hydrate: vi.fn(),
+    pendingInviteToken: null as string | null,
+    claimPendingInvite: vi.fn(),
   },
   currentTeamMock: {
     reloadAndSwitchTo: vi.fn(),
@@ -32,15 +34,19 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-vi.mock("@/stores/auth-store", () => ({
-  useAuthStore: () => authState,
-}));
+vi.mock("@/stores/auth-store", () => {
+  const useAuthStore = (selector?: (s: typeof authState) => unknown) =>
+    selector ? selector(authState) : authState;
+  useAuthStore.getState = () => authState;
+  return { useAuthStore };
+});
 
 vi.mock("@/stores/current-team", () => ({
   useCurrentTeamStore: {
     getState: () => currentTeamMock,
   },
   setLocalCacheTeamGate: setLocalCacheTeamGateMock,
+  readCachedCurrentTeam: () => null,
 }));
 
 vi.mock("@/lib/backend", () => ({

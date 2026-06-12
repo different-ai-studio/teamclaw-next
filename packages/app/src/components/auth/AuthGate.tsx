@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuthStore } from "@/stores/auth-store";
-import { useCurrentTeamStore, setLocalCacheTeamGate } from "@/stores/current-team";
+import { useCurrentTeamStore, setLocalCacheTeamGate, readCachedCurrentTeam } from "@/stores/current-team";
 import { getBackend } from "@/lib/backend";
 import { isTauri, removeStartupSkeleton } from "@/lib/utils";
 import { devSkipDaemonOnboarding, devSkipSetup } from "@/lib/dev-onboarding-flags";
@@ -55,6 +55,10 @@ export function AuthGate({ children }: AuthGateProps) {
   // driven, not platform-specific).
   const [myTeams, setMyTeams] = useState<MembershipTeam[] | null>(null);
   const [teamChosen, setTeamChosen] = useState(false);
+  // The team this user last entered (persisted from a prior session). Captured
+  // before team-bootstrap can overwrite the cache, so the picker can badge it
+  // "Last used". Null on a genuinely-first login (no history).
+  const [lastUsedTeamId, setLastUsedTeamId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isTauri()) void listSetup();
@@ -65,6 +69,13 @@ export function AuthGate({ children }: AuthGateProps) {
   useEffect(() => {
     setTeamChosen(false);
     setMyTeams(null);
+    // Capture the genuine last-used team (persisted by a prior session) NOW,
+    // before the team-bootstrap effect below adopts a team and overwrites the
+    // cache. Guard on teamUserId so one user's cache never leaks into another's.
+    const cached = readCachedCurrentTeam();
+    setLastUsedTeamId(
+      cached && cached.teamUserId === session?.user?.id ? cached.team?.id ?? null : null,
+    );
   }, [session?.user?.id]);
 
   // After login + team-bootstrap ready, fetch "all my teams (across orgs)" to
@@ -104,6 +115,17 @@ export function AuthGate({ children }: AuthGateProps) {
   useEffect(() => {
     if (isTauri() && session && bootstrap === "ready") void refreshDaemonOnboarding()
   }, [session, bootstrap, refreshDaemonOnboarding]);
+
+  // Claim a stashed invite once the user signs in with a REAL (non-anonymous)
+  // account. Member invites can't be claimed anonymously (enforced server-side
+  // in claim_team_invite), so the onboarding stashes the token and routes the
+  // user through sign-in; this completes the join afterward.
+  const pendingInviteToken = useAuthStore((s) => s.pendingInviteToken);
+  useEffect(() => {
+    if (!session || session.user?.is_anonymous) return;
+    if (!pendingInviteToken) return;
+    void useAuthStore.getState().claimPendingInvite();
+  }, [session, pendingInviteToken]);
 
   // After auth: ensure the user belongs to at least one team. If not (fresh
   // signup, no invites), auto-create a temporary team so the UI lands
@@ -283,11 +305,10 @@ export function AuthGate({ children }: AuthGateProps) {
     }
     if (myTeams.length >= 2) {
       removeStartupSkeleton();
-      const currentId = useCurrentTeamStore.getState().team?.id ?? null;
       return (
         <TeamPicker
           teams={myTeams}
-          currentTeamId={currentId}
+          lastUsedTeamId={lastUsedTeamId}
           onDone={() => setTeamChosen(true)}
         />
       );
