@@ -252,6 +252,29 @@ fn build_supabase_session_script(storage_key: &str, session_json: &str) -> Strin
     )
 }
 
+/// Build a documentStart script that clears a stale supabase-js session from
+/// the page's localStorage exactly once per webview session, forcing a fresh
+/// authenticated login. Used by Web SSO: the webview shares a persistent data
+/// store, so a previous Betly session lingers in localStorage — and its refresh
+/// token was already rotated/consumed when TeamClaw adopted it, so reusing it
+/// fails with "refresh token not found". The sessionStorage flag ensures we only
+/// clear on the initial load, never wiping the session the user just signed into
+/// after a post-login redirect.
+fn build_clear_session_script(storage_key: &str) -> String {
+    let key_lit = serde_json::to_string(storage_key).unwrap_or_else(|_| "\"\"".to_string());
+    format!(
+        r#"(function(){{
+  try {{
+    if (!sessionStorage.getItem('__teamclaw_websso_cleared')) {{
+      sessionStorage.setItem('__teamclaw_websso_cleared', '1');
+      localStorage.removeItem({key});
+    }}
+  }} catch (_e) {{}}
+}})();"#,
+        key = key_lit,
+    )
+}
+
 /// Build a JS expression that returns the string value at `key` in
 /// localStorage (or null when absent). Used to harvest a webview's
 /// supabase-js session out of its own localStorage.
@@ -455,6 +478,7 @@ pub async fn webview_create(
     device_name: Option<String>,
     auth_storage_key: Option<String>,
     auth_session_json: Option<String>,
+    clear_storage_key: Option<String>,
 ) -> Result<(), String> {
     // If webview with this label already exists, just show and reposition it
     let exists = state
@@ -508,6 +532,17 @@ pub async fn webview_create(
                 && host_allows_session_injection(&parsed_url) =>
         {
             Some(build_supabase_session_script(key, session))
+        }
+        _ => None,
+    };
+
+    // Web SSO: clear any stale supabase-js session from this allowlisted Betly
+    // host at documentStart so the user must authenticate fresh (a lingering
+    // session's refresh token may already be consumed). Same host gate as the
+    // seed path — never touch a non-allowlisted page's storage.
+    let clear_inject_script = match clear_storage_key.as_deref() {
+        Some(key) if !key.is_empty() && host_allows_session_injection(&parsed_url) => {
+            Some(build_clear_session_script(key))
         }
         _ => None,
     };
@@ -573,6 +608,7 @@ pub async fn webview_create(
         let progress_label = label.clone();
         let identity = identity.clone();
         let auth_script = auth_inject_script.clone();
+        let clear_script = clear_inject_script.clone();
         webview_builder = webview_builder.on_page_load(move |webview, payload| {
             use tauri::Emitter;
             let progress = match payload.event() {
@@ -606,6 +642,15 @@ pub async fn webview_create(
                     add_document_start_script(&webview, script);
                 }
             }
+
+            // Web SSO: clear the stale session at documentStart (the script's own
+            // sessionStorage guard makes it a one-shot, so the post-login session
+            // isn't wiped on redirect).
+            if let Some(script) = &clear_script {
+                if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                    add_document_start_script(&webview, script);
+                }
+            }
         });
     }
 
@@ -621,6 +666,12 @@ pub async fn webview_create(
     // Seed the supabase session before the admin SPA's bundle runs, so
     // supabase-js picks up the logged-in TeamClaw session on init.
     if let Some(ref script) = auth_inject_script {
+        webview_builder = webview_builder.initialization_script(script);
+    }
+
+    // Web SSO: clear any stale session before the admin SPA's bundle runs so it
+    // boots logged-out and the user authenticates fresh.
+    if let Some(ref script) = clear_inject_script {
         webview_builder = webview_builder.initialization_script(script);
     }
 
@@ -1090,5 +1141,15 @@ mod tests {
     fn read_local_storage_js_escapes_the_key() {
         let js = build_read_local_storage_js("a\"b");
         assert!(js.contains("\"a\\\"b\""));
+    }
+
+    #[test]
+    fn clear_session_script_removes_key_once_via_session_flag() {
+        let js = build_clear_session_script("sb-test-supa-auth-token");
+        // Guarded by a one-shot sessionStorage flag so the post-login session
+        // isn't wiped on a redirect.
+        assert!(js.contains("__teamclaw_websso_cleared"));
+        assert!(js.contains("sessionStorage.getItem"));
+        assert!(js.contains("localStorage.removeItem(\"sb-test-supa-auth-token\")"));
     }
 }

@@ -100,6 +100,9 @@ export async function runWebSso(opts: RunWebSsoOptions = {}): Promise<string> {
       label: WEBSSO_LABEL,
       url: cfg.loginUrl,
       x, y, width: PANEL_W, height: PANEL_H,
+      // Force a fresh login: clear any stale Betly session lingering in the
+      // shared webview store, whose refresh token may already be consumed.
+      clearStorageKey: cfg.storageKey,
     });
 
     for (;;) {
