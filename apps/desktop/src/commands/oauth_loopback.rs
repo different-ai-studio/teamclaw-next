@@ -15,19 +15,26 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::State;
+use tauri::{Manager, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
-const SUCCESS_HTML: &str =
-    "<!doctype html><meta charset=utf-8><title>TeamClaw</title>\
-     <body style=\"font-family:system-ui;text-align:center;padding-top:18vh\">\
-     <h2>登录成功 / Signed in</h2><p>你可以关闭此页面返回 TeamClaw。<br>You can close this tab.</p></body>";
-const ERROR_HTML: &str =
-    "<!doctype html><meta charset=utf-8><title>TeamClaw</title>\
-     <body style=\"font-family:system-ui;text-align:center;padding-top:18vh\">\
-     <h2>登录失败 / Sign-in failed</h2><p>请返回 TeamClaw 重试。<br>Please return to TeamClaw and try again.</p></body>";
+fn success_html(brand: &str) -> String {
+    format!(
+        "<!doctype html><meta charset=utf-8><title>{brand}</title>\
+         <body style=\"font-family:system-ui;text-align:center;padding-top:18vh\">\
+         <h2>登录成功 / Signed in</h2><p>你可以关闭此页面返回 {brand}。<br>You can close this tab.</p></body>"
+    )
+}
+
+fn error_html(brand: &str) -> String {
+    format!(
+        "<!doctype html><meta charset=utf-8><title>{brand}</title>\
+         <body style=\"font-family:system-ui;text-align:center;padding-top:18vh\">\
+         <h2>登录失败 / Sign-in failed</h2><p>请返回 {brand} 重试。<br>Please return to {brand} and try again.</p></body>"
+    )
+}
 
 #[derive(Default)]
 pub struct OAuthLoopbackState {
@@ -50,6 +57,7 @@ pub struct LoopbackCode {
 
 #[tauri::command]
 pub async fn oauth_loopback_start(
+    app: tauri::AppHandle,
     state: State<'_, OAuthLoopbackState>,
 ) -> Result<LoopbackStart, String> {
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -59,9 +67,10 @@ pub async fn oauth_loopback_start(
         .local_addr()
         .map_err(|e| format!("oauth_addr_failed: {e}"))?
         .port();
+    let brand = crate::branding::brand_name(app.config().product_name.as_deref());
     let (tx, rx) = oneshot::channel::<Result<String, String>>();
     let handle = tokio::spawn(async move {
-        let _ = tx.send(accept_one(listener).await);
+        let _ = tx.send(accept_one(listener, brand).await);
     });
     // Replace any in-flight listener (e.g. a prior cancelled attempt) and abort
     // its task so we don't leak a parked accept() / bound port across retries.
@@ -119,7 +128,7 @@ pub async fn oauth_loopback_cancel(state: State<'_, OAuthLoopbackState>) -> Resu
     Ok(())
 }
 
-async fn accept_one(listener: TcpListener) -> Result<String, String> {
+async fn accept_one(listener: TcpListener, brand: String) -> Result<String, String> {
     let (mut socket, _) = listener
         .accept()
         .await
@@ -138,8 +147,8 @@ async fn accept_one(listener: TcpListener) -> Result<String, String> {
     let result = parse_callback_target(target);
 
     let (status, body) = match &result {
-        Ok(_) => ("200 OK", SUCCESS_HTML),
-        Err(_) => ("400 Bad Request", ERROR_HTML),
+        Ok(_) => ("200 OK", success_html(&brand)),
+        Err(_) => ("400 Bad Request", error_html(&brand)),
     };
     let resp = format!(
         "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -256,5 +265,24 @@ mod tests {
             Ok(Ok(_)) => "resolved",
         };
         assert_eq!(mapped, "oauth_cancelled");
+    }
+}
+
+#[cfg(test)]
+mod brand_html_tests {
+    use super::{error_html, success_html};
+
+    #[test]
+    fn success_html_includes_brand_name() {
+        let html = success_html("Acme");
+        assert!(html.contains("Acme"));
+        assert!(!html.contains("TeamClaw"));
+    }
+
+    #[test]
+    fn error_html_includes_brand_name() {
+        let html = error_html("Acme");
+        assert!(html.contains("Acme"));
+        assert!(!html.contains("TeamClaw"));
     }
 }
