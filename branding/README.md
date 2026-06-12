@@ -36,3 +36,35 @@ BUILD_ENV=acme pnpm tauri:dev        # 本地预览
 - 品牌构建会**就地覆盖**已提交的图标 / `public/logo*.png` / `tauri.conf.json`,
   工作区会变脏。CI/OEM 流程应 checkout → 应用品牌 → 构建 → 丢弃改动。
 - 纯前端 `pnpm dev`(不经 Tauri)不会触发图标生成,显示的是当前已提交的 logo。
+
+## 品牌主题配色(可选,仅亮色)
+
+在 `branding/<brand>/theme.json` 手写一份要覆盖的配色 token,并把对应
+`build.config.<brand>.json` 的 `app.palette` 设成品牌文件夹名:
+
+```jsonc
+// branding/acme/theme.json — 只写要覆盖的 token,其余继承默认主题
+{
+  "tokens": {
+    "--primary": "#0f6e62",
+    "--system-accent": "#16998a",
+    "--coral": "#16998a",
+    "--background": "#f2f0ea",
+    "--foreground": "#20242a"
+  }
+}
+```
+
+```jsonc
+// build.config.acme.json
+{ "app": { "name": "Acme", "shortName": "acme",
+           "logo": "branding/acme/logo.png", "palette": "acme" } }
+```
+
+构建时 `vite.config.ts` 会生成 `:root[data-palette="acme"]{…}` 注入 `index.html`,
+靠特异性压过 `.dark`(因此**仅亮色**,和内置 `teal` 一致)。
+
+- **合法 token** = `packages/app/src/styles/globals.css` 顶层 `:root{}` 里声明的
+  那些 `--xxx`;写了不存在的 token 名会**直接构建失败**(防打字静默失效)。
+- 不填 `theme.json`(或 `palette` 为 `default`/`teal`)→ 不生成,产物零差异。
+- token 值不得包含 `;`、`{`、`}`、`<`(防破坏 / 注入 CSS),否则构建失败。
