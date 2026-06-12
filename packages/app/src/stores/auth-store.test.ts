@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+vi.mock("@/lib/auth/web-sso", () => ({
+  runWebSso: vi.fn(),
+  cancelWebSso: vi.fn(),
+}));
+
+import { runWebSso, cancelWebSso } from "@/lib/auth/web-sso";
+
 const authMock = {
   getSession: vi.fn(),
   onAuthStateChange: vi.fn(),
@@ -12,6 +19,7 @@ const authMock = {
   claimInvite: vi.fn(),
   sendUpgradeEmailOtp: vi.fn(),
   verifyUpgradeEmailOtp: vi.fn(),
+  adoptSession: vi.fn(),
 };
 const backendMock = {
   auth: authMock,
@@ -332,5 +340,34 @@ describe("auth-store", () => {
     expect(useAuthStore.getState().pendingInviteToken).toBe("expired");
     expect(useAuthStore.getState().authFlow).toBe("idle");
     expect(useAuthStore.getState().errorMessage).toBe("Invite expired");
+  });
+});
+
+describe("signInWithWebSso", () => {
+  it("adopts the harvested refresh token and sets the session", async () => {
+    (runWebSso as ReturnType<typeof vi.fn>).mockResolvedValue("RT");
+    const adopted = { accessToken: "AT", refreshToken: "RT", user: { id: "u1" } };
+    authMock.adoptSession.mockResolvedValue(adopted);
+    const ok = await useAuthStore.getState().signInWithWebSso();
+    expect(ok).toBe(true);
+    expect(authMock.adoptSession).toHaveBeenCalledWith("RT");
+    expect(useAuthStore.getState().session?.access_token).toBe("AT");
+    expect(useAuthStore.getState().webSsoPending).toBe(false);
+  });
+
+  it("resets pending without an error message when cancelled", async () => {
+    (runWebSso as ReturnType<typeof vi.fn>).mockRejectedValue(
+      Object.assign(new Error("cancelled"), { code: "websso_cancelled" }),
+    );
+    const ok = await useAuthStore.getState().signInWithWebSso();
+    expect(ok).toBe(false);
+    expect(useAuthStore.getState().webSsoPending).toBe(false);
+    expect(useAuthStore.getState().errorMessage).toBeNull();
+  });
+
+  it("cancelWebSso delegates to the lib", () => {
+    useAuthStore.setState({ webSsoPending: true });
+    useAuthStore.getState().cancelWebSso();
+    expect(cancelWebSso).toHaveBeenCalled();
   });
 });

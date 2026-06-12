@@ -12,7 +12,7 @@ vi.mock("@/lib/build-config", async (importOriginal) => {
       ...actual.buildConfig,
       features: {
         ...(actual.buildConfig.features as Record<string, unknown>),
-        auth: { google: true, wechat: true },
+        auth: { google: true, wechat: true, webSSO: true },
       },
     },
   };
@@ -32,6 +32,12 @@ describe("OAuthButtons", () => {
     expect(screen.getByText("使用 Google 登录")).toBeTruthy();
   });
 
+  it("renders 快捷登录 button when features.auth.webSSO is on", () => {
+    isTauriMock.mockReturnValue(true);
+    render(<OAuthButtons />);
+    expect(screen.getByText("快捷登录")).toBeTruthy();
+  });
+
   it("renders nothing on web (non-Tauri)", () => {
     isTauriMock.mockReturnValue(false);
     const { container } = render(<OAuthButtons />);
@@ -49,5 +55,18 @@ describe("OAuthButtons", () => {
     const cancel = screen.getByText("取消并换一种方式");
     fireEvent.click(cancel);
     expect(cancelOAuth).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows webSSO waiting message + cancel while webSsoPending is true", () => {
+    isTauriMock.mockReturnValue(true);
+    const cancelWebSso = vi.fn();
+    act(() => useAuthStore.setState({ webSsoPending: true, cancelWebSso }));
+    render(<OAuthButtons />);
+    // Provider buttons replaced by webSSO waiting affordance.
+    expect(screen.queryByText("使用 Google 登录")).toBeNull();
+    expect(screen.getByText("在窗口里登录完成后回到这里。")).toBeTruthy();
+    const cancel = screen.getByText("取消并换一种方式");
+    fireEvent.click(cancel);
+    expect(cancelWebSso).toHaveBeenCalledTimes(1);
   });
 });

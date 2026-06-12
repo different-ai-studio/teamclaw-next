@@ -1,7 +1,7 @@
 // Thin HTTP client for TeamClaw's FC auth proxy endpoints (/v1/auth/*).
 // Returns / consumes the raw GoTrue session shape.
 
-import { AuthError, type OtpType, type Session } from "./types";
+import { AuthError, type AuthUser, type OtpType, type Session } from "./types";
 import {
   configureSessionStore,
   getSession,
@@ -56,6 +56,37 @@ function safeJson(raw: string): unknown {
   }
 }
 
+// Decode a JWT payload (base64url) without verifying — used only to recover the
+// caller's identity claims, never to trust authorization.
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const part = token.split(".")[1];
+    if (!part) return null;
+    const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64.length % 4 ? "=".repeat(4 - (b64.length % 4)) : "";
+    const parsed = JSON.parse(atob(b64 + pad));
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Build the user object from a GoTrue access token's claims. GoTrue access
+// tokens carry sub/email/role/is_anonymous/{app,user}_metadata, which is enough
+// to populate AuthUser when the refresh response itself omits the user.
+function userFromAccessToken(token: string): AuthUser | null {
+  const p = decodeJwtPayload(token);
+  if (!p || typeof p.sub !== "string") return null;
+  return {
+    id: p.sub,
+    email: typeof p.email === "string" ? p.email : null,
+    is_anonymous: typeof p.is_anonymous === "boolean" ? p.is_anonymous : false,
+    ...(p.user_metadata && typeof p.user_metadata === "object"
+      ? { user_metadata: p.user_metadata as Record<string, unknown> }
+      : {}),
+  };
+}
+
 function normalizeRefreshSession(data: unknown, current: Session | null): Session {
   if (!data || typeof data !== "object") return data as Session;
   const row = data as Partial<Session> & {
@@ -66,19 +97,24 @@ function normalizeRefreshSession(data: unknown, current: Session | null): Sessio
   if (typeof row.access_token === "string" && typeof row.refresh_token === "string") {
     return row as Session;
   }
-  if (
-    typeof row.accessToken === "string" &&
-    typeof row.refreshToken === "string" &&
-    typeof row.expiresAt === "number" &&
-    current?.user
-  ) {
-    return {
-      ...current,
-      access_token: row.accessToken,
-      refresh_token: row.refreshToken,
-      expires_at: row.expiresAt,
-      token_type: current.token_type ?? "bearer",
-    };
+  // FC /v1/auth/refresh returns camelCase {accessToken, refreshToken, expiresAt}
+  // and NO user. Rebuild the snake_case session, preserving the live user when
+  // refreshing an existing session, or — when establishing a session from a bare
+  // refresh (e.g. Web SSO adopt, current === null) — derive the user from the
+  // access token's own claims. Without a user, AuthGate sees no session and
+  // bounces back to the login screen.
+  if (typeof row.accessToken === "string" && typeof row.refreshToken === "string") {
+    const user = current?.user ?? userFromAccessToken(row.accessToken);
+    if (user) {
+      return {
+        ...(current ?? {}),
+        access_token: row.accessToken,
+        refresh_token: row.refreshToken,
+        expires_at: typeof row.expiresAt === "number" ? row.expiresAt : current?.expires_at ?? null,
+        token_type: current?.token_type ?? "bearer",
+        user,
+      } as Session;
+    }
   }
   return row as Session;
 }

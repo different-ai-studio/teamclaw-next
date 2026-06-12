@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { cancelDesktopOAuth, type OAuthProvider } from "@/lib/auth";
+import { cancelWebSso as libCancelWebSso, runWebSso } from "@/lib/auth/web-sso";
 import {
   BACKEND_CONFIG_MISSING_MESSAGE,
   getBackend,
@@ -32,6 +33,10 @@ interface AuthState {
   // Drives a cancel affordance so a broken provider page doesn't leave every
   // sign-in button disabled until the long loopback timeout.
   oauthPending: OAuthProvider | null;
+  /** True while the Web SSO webview is open and being polled. */
+  webSsoPending: boolean;
+  signInWithWebSso: () => Promise<boolean>;
+  cancelWebSso: () => void;
   errorMessage: string | null;
   otpEmail: string | null;
   otpPhone: string | null;
@@ -128,6 +133,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   upgradeLoading: false,
   authFlow: "idle",
   oauthPending: null,
+  webSsoPending: false,
   errorMessage: null,
   otpEmail: null,
   otpPhone: null,
@@ -262,6 +268,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Fire-and-forget: the loopback abort makes the in-flight signInWithOAuth
     // promise reject with oauth_cancelled, whose catch block resets the state.
     void cancelDesktopOAuth();
+  },
+  signInWithWebSso: async () => {
+    if (!hasBackendConfig()) {
+      set({ loading: false, errorMessage: BACKEND_CONFIG_MISSING_MESSAGE });
+      return false;
+    }
+    set({ loading: true, authFlow: "idle", errorMessage: null, webSsoPending: true });
+    try {
+      const refreshToken = await runWebSso();
+      const session = await getBackend().auth.adoptSession(refreshToken);
+      set({ session: storeSession(session), loading: false, otpEmail: null, webSsoPending: false });
+    } catch (error) {
+      const cancelled =
+        error instanceof Error && (error as { code?: string }).code === "websso_cancelled";
+      set({
+        loading: false,
+        webSsoPending: false,
+        errorMessage: cancelled ? null : errorMessageFor(error),
+      });
+      return false;
+    }
+    return true;
+  },
+  cancelWebSso: () => {
+    if (!get().webSsoPending) return;
+    libCancelWebSso();
   },
   claimInvite: async (token) => {
     if (!hasBackendConfig()) {

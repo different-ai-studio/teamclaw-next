@@ -252,6 +252,37 @@ fn build_supabase_session_script(storage_key: &str, session_json: &str) -> Strin
     )
 }
 
+/// Build a documentStart script that clears a stale supabase-js session from
+/// the page's localStorage exactly once per webview session, forcing a fresh
+/// authenticated login. Used by Web SSO: the webview shares a persistent data
+/// store, so a previous Betly session lingers in localStorage — and its refresh
+/// token was already rotated/consumed when TeamClaw adopted it, so reusing it
+/// fails with "refresh token not found". The sessionStorage flag ensures we only
+/// clear on the initial load, never wiping the session the user just signed into
+/// after a post-login redirect.
+fn build_clear_session_script(storage_key: &str) -> String {
+    let key_lit = serde_json::to_string(storage_key).unwrap_or_else(|_| "\"\"".to_string());
+    format!(
+        r#"(function(){{
+  try {{
+    if (!sessionStorage.getItem('__teamclaw_websso_cleared')) {{
+      sessionStorage.setItem('__teamclaw_websso_cleared', '1');
+      localStorage.removeItem({key});
+    }}
+  }} catch (_e) {{}}
+}})();"#,
+        key = key_lit,
+    )
+}
+
+/// Build a JS expression that returns the string value at `key` in
+/// localStorage (or null when absent). Used to harvest a webview's
+/// supabase-js session out of its own localStorage.
+fn build_read_local_storage_js(key: &str) -> String {
+    let key_lit = serde_json::to_string(key).unwrap_or_else(|_| "\"\"".to_string());
+    format!("(function(){{ try {{ return localStorage.getItem({key}); }} catch (_e) {{ return null; }} }})()", key = key_lit)
+}
+
 #[cfg(target_os = "macos")]
 fn add_document_start_script<R: Runtime>(webview: &tauri::Webview<R>, script: &str) {
     let script = script.to_string();
@@ -447,6 +478,7 @@ pub async fn webview_create(
     device_name: Option<String>,
     auth_storage_key: Option<String>,
     auth_session_json: Option<String>,
+    clear_storage_key: Option<String>,
 ) -> Result<(), String> {
     // If webview with this label already exists, just show and reposition it
     let exists = state
@@ -500,6 +532,17 @@ pub async fn webview_create(
                 && host_allows_session_injection(&parsed_url) =>
         {
             Some(build_supabase_session_script(key, session))
+        }
+        _ => None,
+    };
+
+    // Web SSO: clear any stale supabase-js session from this allowlisted Betly
+    // host at documentStart so the user must authenticate fresh (a lingering
+    // session's refresh token may already be consumed). Same host gate as the
+    // seed path — never touch a non-allowlisted page's storage.
+    let clear_inject_script = match clear_storage_key.as_deref() {
+        Some(key) if !key.is_empty() && host_allows_session_injection(&parsed_url) => {
+            Some(build_clear_session_script(key))
         }
         _ => None,
     };
@@ -565,6 +608,7 @@ pub async fn webview_create(
         let progress_label = label.clone();
         let identity = identity.clone();
         let auth_script = auth_inject_script.clone();
+        let clear_script = clear_inject_script.clone();
         webview_builder = webview_builder.on_page_load(move |webview, payload| {
             use tauri::Emitter;
             let progress = match payload.event() {
@@ -598,6 +642,15 @@ pub async fn webview_create(
                     add_document_start_script(&webview, script);
                 }
             }
+
+            // Web SSO: clear the stale session at documentStart (the script's own
+            // sessionStorage guard makes it a one-shot, so the post-login session
+            // isn't wiped on redirect).
+            if let Some(script) = &clear_script {
+                if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                    add_document_start_script(&webview, script);
+                }
+            }
         });
     }
 
@@ -613,6 +666,12 @@ pub async fn webview_create(
     // Seed the supabase session before the admin SPA's bundle runs, so
     // supabase-js picks up the logged-in TeamClaw session on init.
     if let Some(ref script) = auth_inject_script {
+        webview_builder = webview_builder.initialization_script(script);
+    }
+
+    // Web SSO: clear any stale session before the admin SPA's bundle runs so it
+    // boots logged-out and the user authenticates fresh.
+    if let Some(ref script) = clear_inject_script {
         webview_builder = webview_builder.initialization_script(script);
     }
 
@@ -832,6 +891,139 @@ pub async fn webview_get_title(app: tauri::AppHandle, label: String) -> Result<S
     }
 }
 
+/// Read a string value out of a child webview's localStorage.
+///
+/// Child webviews loading external URLs have no `__TAURI_INTERNALS__`, so we
+/// read directly from the native WKWebView via evaluateJavaScript with a
+/// completion handler (macOS: `WKWebView evaluateJavaScript`; Windows:
+/// `ICoreWebView2::ExecuteScript`). Returns `Ok(None)` when the key is absent /
+/// value is JS null, or on any read error. A no-op (`None`) on other platforms.
+///
+/// Defense in depth: only ever reads from an allowlisted Betly admin host (the
+/// same allowlist as the forward session injection). This makes token-harvest
+/// safety structural rather than dependent on the caller passing a trusted
+/// label — a careless future caller can't exfil an arbitrary `wv-*` tab's
+/// localStorage.
+#[tauri::command]
+pub async fn webview_read_local_storage(
+    app: tauri::AppHandle,
+    label: String,
+    key: String,
+) -> Result<Option<String>, String> {
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "Webview not found".to_string())?;
+
+    // Only harvest from allowlisted Betly admin hosts. Any other origin → no read.
+    match webview.url() {
+        Ok(url) if host_allows_session_injection(&url) => {}
+        _ => return Ok(None),
+    }
+
+    let js = build_read_local_storage_js(&key);
+
+    let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
+    webview
+        .with_webview(move |wv| {
+            #[cfg(target_os = "macos")]
+            {
+                use block2::RcBlock;
+                use objc2::msg_send;
+                use objc2::runtime::AnyObject;
+                use std::ffi::CString;
+
+                unsafe {
+                    let wk_webview: *mut AnyObject = wv.inner().cast();
+                    let Ok(src) = CString::new(js.clone()) else {
+                        let _ = tx.send(None);
+                        return;
+                    };
+                    let ns_src: *mut AnyObject =
+                        msg_send![objc2::class!(NSString), stringWithUTF8String: src.as_ptr()];
+
+                    // completion: (id result, NSError *error) -> void
+                    let handler =
+                        RcBlock::new(move |result: *mut AnyObject, _err: *mut AnyObject| {
+                            if result.is_null() {
+                                let _ = tx.send(None);
+                                return;
+                            }
+                            let is_string: bool =
+                                msg_send![result, isKindOfClass: objc2::class!(NSString)];
+                            if !is_string {
+                                let _ = tx.send(None);
+                                return;
+                            }
+                            let utf8: *const std::ffi::c_char = msg_send![result, UTF8String];
+                            if utf8.is_null() {
+                                let _ = tx.send(None);
+                                return;
+                            }
+                            let s = std::ffi::CStr::from_ptr(utf8).to_string_lossy().to_string();
+                            let _ = tx.send(Some(s));
+                        });
+
+                    let _: () = msg_send![
+                        wk_webview,
+                        evaluateJavaScript: ns_src,
+                        completionHandler: &*handler
+                    ];
+                }
+            }
+            #[cfg(target_os = "windows")]
+            {
+                use webview2_com::ExecuteScriptCompletedHandler;
+                use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2;
+                use windows::core::{HSTRING, PCWSTR};
+
+                // The completion handler fires asynchronously on the UI thread;
+                // bridge its result back over the channel like the macOS path.
+                let tx_done = tx.clone();
+                let controller = wv.controller();
+                let script = HSTRING::from(js.as_str());
+                let started = unsafe {
+                    controller.CoreWebView2().and_then(|core: ICoreWebView2| {
+                        core.ExecuteScript(
+                            PCWSTR(script.as_ptr()),
+                            &ExecuteScriptCompletedHandler::create(Box::new(
+                                move |_err, result_json: String| {
+                                    // ExecuteScript returns the JS value JSON-encoded:
+                                    // a string arrives as "\"...\"" and JS null as
+                                    // "null". Unwrap one JSON layer so we return the
+                                    // same raw stored string the macOS path does
+                                    // (None for null / non-string / parse failure).
+                                    let value = serde_json::from_str::<Option<String>>(
+                                        &result_json,
+                                    )
+                                    .ok()
+                                    .flatten();
+                                    let _ = tx.send(value);
+                                    Ok(())
+                                },
+                            )),
+                        )
+                    })
+                };
+                // If ExecuteScript couldn't even start, the handler never runs —
+                // unblock the receiver now instead of waiting out the timeout.
+                if started.is_err() {
+                    let _ = tx_done.send(None);
+                }
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+            {
+                let _ = (wv, &js);
+                let _ = tx.send(None);
+            }
+        })
+        .map_err(|e| e.to_string())?;
+
+    match rx.recv_timeout(std::time::Duration::from_secs(3)) {
+        Ok(value) => Ok(value),
+        Err(_) => Ok(None),
+    }
+}
+
 /// Get the favicon URL for a child webview.
 /// Derives from the webview's current URL origin — no JS eval needed
 /// since child webviews don't have __TAURI_INTERNALS__.
@@ -937,5 +1129,27 @@ mod tests {
         assert!(EXTERNAL_WEBVIEW_INIT_SCRIPT.contains("__TEAMCLAW_SAFE_NOTIFICATION__"));
         assert!(EXTERNAL_WEBVIEW_INIT_SCRIPT.contains("function SafeNotification"));
         assert!(EXTERNAL_WEBVIEW_INIT_SCRIPT.contains("set: function(next)"));
+    }
+
+    #[test]
+    fn read_local_storage_js_reads_the_given_key() {
+        let js = build_read_local_storage_js("sb-test-supa-auth-token");
+        assert!(js.contains("localStorage.getItem(\"sb-test-supa-auth-token\")"));
+    }
+
+    #[test]
+    fn read_local_storage_js_escapes_the_key() {
+        let js = build_read_local_storage_js("a\"b");
+        assert!(js.contains("\"a\\\"b\""));
+    }
+
+    #[test]
+    fn clear_session_script_removes_key_once_via_session_flag() {
+        let js = build_clear_session_script("sb-test-supa-auth-token");
+        // Guarded by a one-shot sessionStorage flag so the post-login session
+        // isn't wiped on a redirect.
+        assert!(js.contains("__teamclaw_websso_cleared"));
+        assert!(js.contains("sessionStorage.getItem"));
+        assert!(js.contains("localStorage.removeItem(\"sb-test-supa-auth-token\")"));
     }
 }
