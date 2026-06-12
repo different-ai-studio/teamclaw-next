@@ -49,6 +49,8 @@ export interface BuildConfig {
       google?: boolean
       wechat?: boolean
       phone?: boolean
+      /** "快捷登录" — harvest a shared session from the Betly admin webview. Off by default. */
+      webSSO?: boolean
     }
     /** Browsable team-share sidebar (Skills / MCP / Env / Knowledge). Off by default. */
     teamShareBrowser?: boolean
@@ -96,7 +98,7 @@ const fallback: BuildConfig = {
     lockLlmConfig: false,
   },
   app: { name: 'TeamClaw', shortName: 'teamclaw' },
-  features: { teamMode: true, updater: true, channels: { ...allChannelsEnabled }, auth: { google: false, wechat: false, phone: false }, teamShareBrowser: false },
+  features: { teamMode: true, updater: true, channels: { ...allChannelsEnabled }, auth: { google: false, wechat: false, phone: false, webSSO: false }, teamShareBrowser: false },
   defaults: { locale: 'zh-CN', theme: 'system' },
 }
 
