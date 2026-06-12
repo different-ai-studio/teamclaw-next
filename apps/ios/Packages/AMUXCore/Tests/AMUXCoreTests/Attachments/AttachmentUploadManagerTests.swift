@@ -19,9 +19,7 @@ final class AttachmentUploadManagerTests: XCTestCase {
         // tests exercise record creation / state transitions / size + file
         // guards, not a real upload round-trip.
         let configuration = CloudAPIConfiguration(
-            baseURL: URL(string: "https://test.cloud.example")!,
-            supabaseURL: URL(string: "https://test.supabase.co")!,
-            supabaseAnonKey: "test-key"
+            baseURL: URL(string: "https://test.cloud.example")!
         )
         let client = CloudAPIClient(
             configuration: configuration,

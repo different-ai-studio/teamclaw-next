@@ -1,6 +1,4 @@
 {
-  "supabaseUrl": "https://srhaytajyfrniuvnkfpd.supabase.co",
-  "supabaseAnonKey": "sb_publishable_CJavqYCusEBD7cIebhH5tQ_K_I9AXpE",
   "cloudApiUrl": "https://belayo-test-api.ucar.cc",
   "mqttHost": "mqtt.service.ucar.cc",
   "mqttPort": 1883,

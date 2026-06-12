@@ -394,9 +394,7 @@ struct CloudAPIRepositoryTests {
 
     private func configuration() -> CloudAPIConfiguration {
         CloudAPIConfiguration(
-            baseURL: URL(string: "https://fc.example.com")!,
-            supabaseURL: URL(string: "https://project.supabase.co")!,
-            supabaseAnonKey: "anon"
+            baseURL: URL(string: "https://fc.example.com")!
         )
     }
 

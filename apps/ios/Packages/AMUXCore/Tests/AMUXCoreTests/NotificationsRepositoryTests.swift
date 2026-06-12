@@ -165,9 +165,7 @@ struct NotificationsRepositoryTests {
     private func makeClient(send: @escaping CloudAPISend) -> CloudAPIClient {
         CloudAPIClient(
             configuration: CloudAPIConfiguration(
-                baseURL: URL(string: "https://fc.example.com")!,
-                supabaseURL: URL(string: "https://project.supabase.co")!,
-                supabaseAnonKey: "anon"
+                baseURL: URL(string: "https://fc.example.com")!
             ),
             accessToken: { "access-token" },
             send: send
