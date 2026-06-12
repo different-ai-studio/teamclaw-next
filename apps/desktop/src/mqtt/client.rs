@@ -66,19 +66,15 @@ pub async fn run_event_loop(bus: Arc<super::MqttBusInner>, app: tauri::AppHandle
     // ~10x during streaming. Payload bytes are base64 (a serde_json number
     // array would otherwise ~4x the size). Lives for this generation: when
     // run_event_loop returns, env_tx drops and the forwarder exits.
-    let (env_tx, mut env_rx) =
-        tokio::sync::mpsc::unbounded_channel::<(String, Vec<u8>)>();
+    let (env_tx, mut env_rx) = tokio::sync::mpsc::unbounded_channel::<(String, Vec<u8>)>();
     {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             use base64::Engine as _;
             while let Some(first) = env_rx.recv().await {
                 let mut batch = vec![first];
-                let deadline =
-                    tokio::time::Instant::now() + Duration::from_millis(8);
-                while let Ok(Some(next)) =
-                    tokio::time::timeout_at(deadline, env_rx.recv()).await
-                {
+                let deadline = tokio::time::Instant::now() + Duration::from_millis(8);
+                while let Ok(Some(next)) = tokio::time::timeout_at(deadline, env_rx.recv()).await {
                     batch.push(next);
                 }
                 let payload: Vec<serde_json::Value> = batch
