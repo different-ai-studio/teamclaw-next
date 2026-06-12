@@ -40,6 +40,7 @@
 use tauri::Manager;
 use tauri_plugin_aptabase::EventTracker;
 
+mod branding;
 pub mod commands;
 mod local_cache;
 pub mod mqtt;
@@ -576,7 +577,7 @@ pub fn run() {
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("TeamClaw")
+                .tooltip(branding::brand_name(app.config().product_name.as_deref()))
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_tray_icon_event(|tray: &tauri::tray::TrayIcon, event: TrayIconEvent| {
