@@ -847,6 +847,12 @@ pub async fn webview_get_title(app: tauri::AppHandle, label: String) -> Result<S
 /// completion handler. Returns `Ok(None)` when the key is absent / value is
 /// JS null, or on any read error. macOS-only; a no-op (`None`) elsewhere until
 /// a WebView2 implementation is added.
+///
+/// Defense in depth: only ever reads from an allowlisted Betly admin host (the
+/// same allowlist as the forward session injection). This makes token-harvest
+/// safety structural rather than dependent on the caller passing a trusted
+/// label — a careless future caller can't exfil an arbitrary `wv-*` tab's
+/// localStorage.
 #[tauri::command]
 pub async fn webview_read_local_storage(
     app: tauri::AppHandle,
@@ -856,6 +862,13 @@ pub async fn webview_read_local_storage(
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "Webview not found".to_string())?;
+
+    // Only harvest from allowlisted Betly admin hosts. Any other origin → no read.
+    match webview.url() {
+        Ok(url) if host_allows_session_injection(&url) => {}
+        _ => return Ok(None),
+    }
+
     let js = build_read_local_storage_js(&key);
 
     let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
