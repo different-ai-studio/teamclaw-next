@@ -1,0 +1,8 @@
+{
+  "app": {
+    "name": "Belayo",
+    "shortName": "belayo",
+    "logo": "branding/belayo/logo.png",
+    "palette": "belayo"
+  }
+}
