@@ -236,7 +236,7 @@ function streamEntryMatchesScope(
   return true;
 }
 
-function stripStreamError(entry: AgentStreamEntry): AgentStreamEntry | null {
+function stripStreamError<T extends AgentStreamEntry>(entry: T): T | null {
   if (!entry.errorMessage) return entry;
   if (isErrorOnlyStreamEntry(entry)) return null;
   return { ...entry, errorMessage: null, errorDetails: null };
@@ -1388,7 +1388,11 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     });
 
     if (!changed) return;
-    set({ byKey: nextByKey, archived: nextArchived });
+    set({
+      byKey: nextByKey,
+      archived: nextArchived,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
+    });
   },
 
   releaseActorAfterPersist: (sessionId, actorId, opts) => {
