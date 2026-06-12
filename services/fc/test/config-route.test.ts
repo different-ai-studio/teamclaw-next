@@ -127,3 +127,28 @@ test("buildBootstrapConfig omits webSso when login url is missing", () => {
     },
   );
 });
+
+test("GET /v1/config/public returns webSso WITHOUT auth (login-time config)", async () => {
+  await withEnv(
+    {
+      MQTT_BROKER_URL: "mqtts://secret.example.com:8883",
+      WEBSSO_LOGIN_URL: "https://testadmin.ucar.cc/sign-in",
+      WEBSSO_STORAGE_KEY: "sb-test-supa-auth-token",
+    },
+    async () => {
+      const response = await handleBusinessApiRequest(
+        { httpMethod: "GET", path: "/v1/config/public", headers: {} },
+        { createRepository: () => ({}), createAuthRepository: () => ({}) },
+      );
+      assert.equal(response.statusCode, 200);
+      const body = JSON.parse(response.body);
+      // webSso is present; the sensitive mqtt block is NEVER in the public config.
+      assert.deepEqual(body, {
+        webSso: {
+          loginUrl: "https://testadmin.ucar.cc/sign-in",
+          storageKey: "sb-test-supa-auth-token",
+        },
+      });
+    },
+  );
+});

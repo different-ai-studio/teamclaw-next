@@ -45,8 +45,22 @@ export function buildBootstrapConfig() {
   return config;
 }
 
+// Non-sensitive config that clients need BEFORE they have a session — currently
+// just the Web SSO 快捷登录 target, which is a login method (the authed bootstrap
+// above runs only post-sign-in, too late for the login screen). No bearer; never
+// includes the MQTT broker credentials.
+export function buildPublicConfig() {
+  const config: any = {};
+  const webSso = buildWebSsoConfig();
+  if (webSso) config.webSso = webSso;
+  return config;
+}
+
 export function registerConfig(router) {
   router.get("/v1/config/bootstrap", async () => {
     return { body: buildBootstrapConfig() };
+  });
+  router.get("/v1/config/public", { auth: "none" }, async () => {
+    return { body: buildPublicConfig() };
   });
 }
