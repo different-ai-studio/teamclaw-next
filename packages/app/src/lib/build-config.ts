@@ -44,6 +44,12 @@ export interface BuildConfig {
      *  PNG (≥512px, ideally 1024×1024). When set, the prebuild step regenerates
      *  the OS icon set and the in-app logo from it. Omitted → keep committed assets. */
     logo?: string
+    /** Build-time white-label: OS bundle identifier (reverse-DNS, e.g.
+     *  "com.acme.app"). Omitted → keep the default com.teamclaw.app. */
+    identifier?: string
+    /** Build-time white-label: deep-link URL scheme (e.g. "acme" →
+     *  acme://invite?token=…). Omitted → "teamclaw". */
+    scheme?: string
   }
   features: {
     teamMode: boolean
@@ -134,6 +140,7 @@ function deriveShortName(name: string): string {
 }
 
 export const appShortName: string = buildConfig.app.shortName ?? deriveShortName(buildConfig.app.name)
+export const appScheme: string = buildConfig.app.scheme ?? 'teamclaw'
 export const DEFAULT_WORKSPACE_PATH = `~/${buildConfig.app.name}`
 export const TEAMCLAW_DIR = `.${appShortName}`
 export const TEAM_REPO_DIR = `${appShortName}-team`

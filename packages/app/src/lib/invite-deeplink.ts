@@ -1,9 +1,10 @@
 import { getBackend } from '@/lib/backend'
+import { appScheme } from '@/lib/build-config'
 
 // `create_team_invite` RPC returns deeplinks with the `amux://` scheme (shared
-// with iOS). The desktop app accepts both `amux://` and `teamclaw://` so users
-// can paste either, and rewrites to `teamclaw://` for display.
-const INVITE_SCHEMES = new Set(['teamclaw:', 'amux:'])
+// with iOS). The desktop app accepts the build's configured scheme as well as
+// `teamclaw://` and `amux://` for back-compat.
+const INVITE_SCHEMES = new Set([`${appScheme}:`, 'teamclaw:', 'amux:'])
 const INVITE_HOST = 'invite'
 
 export function parseInviteDeeplink(raw: string): string | null {
@@ -25,10 +26,6 @@ export function parseInviteTokenInput(raw: string): string | null {
   if (fromDeeplink) return fromDeeplink
   if (trimmed.includes('://')) return null
   return trimmed
-}
-
-export function rewriteAsTeamclawDeeplink(raw: string): string {
-  return raw.replace(/^amux:/, 'teamclaw:')
 }
 
 export interface ClaimResult {

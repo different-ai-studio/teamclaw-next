@@ -43,6 +43,7 @@ vi.mock("@/lib/version", () => ({
 
 vi.mock("@/lib/build-config", () => ({
   buildConfig: { app: { name: "TeamClaw" } },
+  appScheme: 'teamclaw',
 }));
 
 import { DesktopOnboarding } from "../DesktopOnboarding";

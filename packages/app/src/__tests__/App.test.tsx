@@ -86,6 +86,7 @@ vi.mock('@/lib/utils', () => ({
 }))
 vi.mock('@/lib/build-config', () => ({
   appShortName: 'teamclaw',
+  appScheme: 'teamclaw',
   TEAM_REPO_DIR: 'teamclaw-team',
   buildConfig: {
     app: { name: 'TeamClaw' },
