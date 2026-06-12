@@ -16,6 +16,7 @@
 //! a runtime in for what is effectively a serial request/response loop.
 
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
@@ -203,9 +204,18 @@ fn handle_tool_call(
 /// Connect to `amuxd.sock`, write a single line, read a single line back.
 /// Read timeout is bounded so a stalled daemon can't hang the agent.
 fn sock_roundtrip(sock_path: &Path, line: &str) -> std::io::Result<String> {
-    let mut stream = UnixStream::connect(sock_path)?;
-    stream.set_read_timeout(Some(Duration::from_secs(30)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(10)))?;
+    #[cfg(unix)]
+    let mut stream = {
+        let s = UnixStream::connect(sock_path)?;
+        s.set_read_timeout(Some(Duration::from_secs(30)))?;
+        s.set_write_timeout(Some(Duration::from_secs(10)))?;
+        s
+    };
+    // Windows: byte-mode pipe client. File-based pipe handles have no
+    // read/write timeouts; the daemon always answers a roundtrip command
+    // with one line (or closes), which bounds the blocking read in practice.
+    #[cfg(windows)]
+    let mut stream = crate::cli::process::connect_control(sock_path)?;
     stream.write_all(line.as_bytes())?;
     if !line.ends_with('\n') {
         stream.write_all(b"\n")?;
