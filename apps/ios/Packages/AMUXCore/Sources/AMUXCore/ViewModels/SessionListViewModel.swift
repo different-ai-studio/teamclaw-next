@@ -291,6 +291,34 @@ public final class SessionListViewModel {
         }
     }
 
+    /// Flags the session unread again — optimistic local flip for instant
+    /// row feedback, then the server rewind so other devices agree. Unlike
+    /// `markSessionViewed` the remote write is awaited: a failed rewind
+    /// must roll the local flag back, otherwise the red dot would silently
+    /// vanish on the next `applyUnreadFlags` reconcile anyway.
+    @MainActor
+    public func markSessionUnread(
+        sessionId: String,
+        sessionsRepo: SessionsRepository?,
+        modelContext: ModelContext
+    ) async {
+        let sid = sessionId
+        let descriptor = FetchDescriptor<Session>(predicate: #Predicate { $0.sessionId == sid })
+        guard let session = try? modelContext.fetch(descriptor).first, !session.hasUnread else { return }
+        session.hasUnread = true
+        try? modelContext.save()
+        reloadSessions(modelContext: modelContext)
+
+        guard let repo = sessionsRepo else { return }
+        do {
+            try await repo.markSessionUnread(sessionId: sid)
+        } catch {
+            session.hasUnread = false
+            try? modelContext.save()
+            reloadSessions(modelContext: modelContext)
+        }
+    }
+
     /// Clears the unread badge for the given runtime in the same ModelContext
     /// that syncRuntime uses, so the session list row updates immediately.
     public func markAsRead(runtimeId: String) {

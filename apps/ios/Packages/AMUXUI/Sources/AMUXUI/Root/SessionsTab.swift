@@ -20,6 +20,10 @@ public struct SessionsTab: View {
     let messagesRepository: (any MessagesRepository)?
     let workspacesRepository: (any WorkspaceRepository)?
     let sessionsRepository: (any SessionRepository)?
+    /// The unread-domain repository (list/flags/mark-viewed/mark-unread);
+    /// distinct from `sessionsRepository` above, which is the
+    /// create/participants `SessionRepository`.
+    let sessionsListRepository: (any SessionsRepository)?
     let teamRepository: (any TeamRepository)?
     let actorRepository: (any ActorRepository)?
     var onReconnect: (() -> Void)?
@@ -55,6 +59,7 @@ public struct SessionsTab: View {
                 messagesRepository: (any MessagesRepository)? = nil,
                 workspacesRepository: (any WorkspaceRepository)? = nil,
                 sessionsRepository: (any SessionRepository)? = nil,
+                sessionsListRepository: (any SessionsRepository)? = nil,
                 teamRepository: (any TeamRepository)? = nil,
                 actorRepository: (any ActorRepository)? = nil,
                 onReconnect: (() -> Void)? = nil,
@@ -76,6 +81,7 @@ public struct SessionsTab: View {
         self.messagesRepository = messagesRepository
         self.workspacesRepository = workspacesRepository
         self.sessionsRepository = sessionsRepository
+        self.sessionsListRepository = sessionsListRepository
         self.teamRepository = teamRepository
         self.actorRepository = actorRepository
         self.onReconnect = onReconnect
@@ -100,7 +106,8 @@ public struct SessionsTab: View {
                     currentActorID: currentActorID,
                     noAccessibleAgent: connectedAgentsStore?.agents.isEmpty == true,
                     onInviteFirstAgent: actorStore == nil ? nil : { showInvite = true },
-                    notificationPrefsStore: notificationPrefsStore
+                    notificationPrefsStore: notificationPrefsStore,
+                    sessionsListRepository: sessionsListRepository
                 )
                 .navigationTitle("Sessions")
                 .navigationBarTitleDisplayMode(.large)

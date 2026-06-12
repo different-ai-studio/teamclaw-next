@@ -30,6 +30,10 @@ struct SessionListContent: View {
     /// Per-session mute state + toggle. Nil hides the mute affordances
     /// (e.g. before the team runtime is built).
     let notificationPrefsStore: NotificationPrefsStore?
+    /// Backs the "Mark as unread" swipe action. Nil hides the action —
+    /// without the server rewind the next unread reconcile would clear the
+    /// local flag again, so a purely-local flip would just flicker.
+    let sessionsListRepository: (any SessionsRepository)?
 
     @Environment(\.modelContext) private var modelContext
 
@@ -269,6 +273,27 @@ struct SessionListContent: View {
                       systemImage: session.isPinned ? "pin.slash.fill" : "pin.fill")
             }
             .tint(Color.amux.basalt)
+        }
+        // Leading swipe = read-state, mirroring Mail/iMessage muscle memory.
+        // Only offered while the session reads as "read" — flipping an
+        // already-unread row would be a no-op that just hides the dot's
+        // provenance. Opening the session still clears it via the existing
+        // mark-viewed path in SessionDetailViewModel.start().
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            if sessionsListRepository != nil && !session.hasUnread {
+                Button {
+                    Task {
+                        await viewModel.markSessionUnread(
+                            sessionId: session.sessionId,
+                            sessionsRepo: sessionsListRepository,
+                            modelContext: modelContext
+                        )
+                    }
+                } label: {
+                    Label("Mark as unread", systemImage: "envelope.badge")
+                }
+                .tint(Color.amux.cinnabar)
+            }
         }
     }
 

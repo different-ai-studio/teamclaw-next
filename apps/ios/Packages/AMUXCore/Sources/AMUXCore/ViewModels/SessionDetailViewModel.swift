@@ -2466,6 +2466,89 @@ public final class SessionDetailViewModel {
         }
     }
 
+    // MARK: - Edit / delete own persisted messages
+    //
+    // Remote-first on purpose: FC's PATCH/DELETE is the authority (it
+    // enforces sender-only semantics), so the local bubble only changes
+    // after the server accepted the mutation — a failed call leaves the
+    // feed untouched and surfaces through the same inline error banner
+    // as a failed send. Only events that carry a `supabaseMessageId`
+    // qualify, which the UI guarantees before offering the actions.
+
+    /// Rewrites the content of one of the current user's persisted
+    /// prompts, remote then local.
+    public func editUserMessage(supabaseMessageID: String, newContent: String) async {
+        guard let repo = messagesRepository else { return }
+        let content = newContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else { return }
+        do {
+            try await repo.patch(messageID: supabaseMessageID, content: content)
+        } catch {
+            surfaceSendError(error)
+            return
+        }
+        guard let ctx = startModelContext ?? syncModelContext else { return }
+        for idx in timelineState.entries.indices
+        where timelineState.entries[idx].supabaseMessageID == supabaseMessageID {
+            timelineState.entries[idx].text = content
+        }
+        projectTimelineStateMutation(modelContext: ctx)
+        updateSessionMessageCache(messageID: supabaseMessageID, content: content, modelContext: ctx)
+    }
+
+    /// Permanently removes one of the current user's persisted prompts,
+    /// remote then local.
+    public func deleteUserMessage(supabaseMessageID: String) async {
+        guard let repo = messagesRepository else { return }
+        do {
+            try await repo.delete(messageID: supabaseMessageID)
+        } catch {
+            surfaceSendError(error)
+            return
+        }
+        guard let ctx = startModelContext ?? syncModelContext else { return }
+        // Dropping the entry from reducer state is enough — the sync layer
+        // deletes any AgentEvent row whose id fell out of state.entries,
+        // so there is no separate SwiftData bookkeeping to keep in step.
+        timelineState.entries.removeAll { $0.supabaseMessageID == supabaseMessageID }
+        projectTimelineStateMutation(modelContext: ctx)
+        updateSessionMessageCache(messageID: supabaseMessageID, content: nil, modelContext: ctx)
+    }
+
+    /// Shared tail for the direct `timelineState.entries` mutations above.
+    /// They bypass the reducer (there is no TimelineInput for "the user
+    /// rewrote history"), so the projection + recompute that
+    /// `applyTimelineInput`'s `.entriesChanged` arm performs has to be
+    /// invoked manually here.
+    private func projectTimelineStateMutation(modelContext: ModelContext) {
+        let dirty = TimelineSwiftDataSync.sync(
+            state: timelineState,
+            into: &events,
+            agentId: eventScopeKey,
+            modelContext: modelContext
+        )
+        if dirty {
+            sortEventsForDisplay()
+            recomputeGroups()
+        }
+    }
+
+    /// Keeps the `SessionMessage` mirror (session-list previews, sender
+    /// clusters) consistent with a remote edit/delete. `content == nil`
+    /// means the row was deleted. Missing row is fine — the cache only
+    /// holds messages that arrived over the live stream on this device.
+    private func updateSessionMessageCache(messageID: String, content: String?, modelContext: ModelContext) {
+        let mid = messageID
+        let descriptor = FetchDescriptor<SessionMessage>(predicate: #Predicate { $0.messageId == mid })
+        guard let row = try? modelContext.fetch(descriptor).first else { return }
+        if let content {
+            row.content = content
+        } else {
+            modelContext.delete(row)
+        }
+        try? modelContext.save()
+    }
+
     /// Flip isAgentWorking on and arm a long safety reset so a missed
     /// `statusChange:.idle` event doesn't leave the chip stuck in stop.
     /// Also rebuilds `feedItems` so the active-stream "Agent loading"

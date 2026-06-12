@@ -80,6 +80,7 @@ public struct RootTabView: View {
                             messagesRepository: teamRuntime?.messagesRepo,
                             workspacesRepository: teamRuntime?.workspacesRepo,
                             sessionsRepository: teamRuntime?.sessionRepo,
+                            sessionsListRepository: teamRuntime?.sessionsRepo,
                             teamRepository: teamRuntime?.teamRepo,
                             actorRepository: teamRuntime?.actorRepo,
                             onReconnect: onReconnect,

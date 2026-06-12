@@ -32,6 +32,11 @@ public protocol SessionsRepository: Sendable {
     /// `lastReadMessageId`. Server upserts `session_read_markers` so other
     /// devices' next `fetchUnreadFlags` reflects the read.
     func markSessionViewed(sessionId: String, lastReadMessageId: String?) async throws
+    /// Inverse of `markSessionViewed`: rewinds the actor's read marker so
+    /// the session surfaces as unread again on every device's next
+    /// `fetchUnreadFlags`. The actor is resolved server-side from the
+    /// bearer token — no body.
+    func markSessionUnread(sessionId: String) async throws
 }
 
 
@@ -121,6 +126,13 @@ public struct MessageInsertInput: Equatable, Sendable {
 public protocol MessagesRepository: Sendable {
     func listForSession(sessionID: String) async throws -> [MessageRecord]
     func insert(_ input: MessageInsertInput) async throws
+    /// Rewrites a persisted message's content. FC enforces sender-only
+    /// semantics, so callers only offer this for the current actor's own
+    /// rows — a 403 here is a programming error, not a user race.
+    func patch(messageID: String, content: String) async throws
+    /// Permanently removes a persisted message (FC returns 204).
+    /// Same sender-only contract as `patch`.
+    func delete(messageID: String) async throws
 }
 
 

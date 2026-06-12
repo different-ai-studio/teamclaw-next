@@ -35,6 +35,12 @@ public struct EventBubbleView: View {
     /// Replaces the per-row @Query(CachedActor) so ~100 bubbles don't
     /// each register a SwiftData observation.
     let actorMap: CachedActorMap
+    /// Context-menu hooks for the user's own persisted prompts. The parent
+    /// decides eligibility (own message + supabaseMessageId present) and
+    /// passes nil otherwise, so the bubble never has to reason about
+    /// identity or persistence state itself.
+    let onEdit: (() -> Void)?
+    let onDelete: (() -> Void)?
 
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var fullscreenImageContext: FullscreenImageContext?
@@ -44,7 +50,9 @@ public struct EventBubbleView: View {
                 onDeny: ((String, String?) -> Void)? = nil,
                 onRetryOutbox: ((String) -> Void)? = nil,
                 showsAssistantHeader: Bool = true,
-                actorMap: CachedActorMap = .empty) {
+                actorMap: CachedActorMap = .empty,
+                onEdit: (() -> Void)? = nil,
+                onDelete: (() -> Void)? = nil) {
         self.event = event
         self.runtime = runtime
         self.onGrant = onGrant
@@ -52,6 +60,8 @@ public struct EventBubbleView: View {
         self.onRetryOutbox = onRetryOutbox
         self.showsAssistantHeader = showsAssistantHeader
         self.actorMap = actorMap
+        self.onEdit = onEdit
+        self.onDelete = onDelete
     }
 
     /// True when this event was produced by an actor other than the
@@ -204,6 +214,23 @@ public struct EventBubbleView: View {
                                              interactive: false)
                                 .contextMenu {
                                     MessageContextMenu(text: event.text ?? "")
+                                    if onEdit != nil || onDelete != nil {
+                                        Divider()
+                                    }
+                                    if let onEdit {
+                                        Button {
+                                            onEdit()
+                                        } label: {
+                                            Label("Edit", systemImage: "pencil")
+                                        }
+                                    }
+                                    if let onDelete {
+                                        Button(role: .destructive) {
+                                            onDelete()
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
                                 }
                         }
                     }
