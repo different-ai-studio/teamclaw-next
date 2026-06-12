@@ -6,9 +6,7 @@ import XCTest
 // (non-Sendable) XCTestCase `self` — which Swift 6 strict concurrency rejects.
 private func config() -> CloudAPIConfiguration {
     CloudAPIConfiguration(
-        baseURL: URL(string: "https://cloud.example")!,
-        supabaseURL: URL(string: "https://sb.example")!,
-        supabaseAnonKey: "anon"
+        baseURL: URL(string: "https://cloud.example")!
     )
 }
 

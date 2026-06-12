@@ -7,13 +7,9 @@ public enum BackendProviderKind: String, Sendable {
 
 public struct CloudAPIConfiguration: Equatable, Sendable {
     public let baseURL: URL
-    public let supabaseURL: URL
-    public let supabaseAnonKey: String
 
-    public init(baseURL: URL, supabaseURL: URL, supabaseAnonKey: String) {
+    public init(baseURL: URL) {
         self.baseURL = baseURL
-        self.supabaseURL = supabaseURL
-        self.supabaseAnonKey = supabaseAnonKey
     }
 }
 
@@ -45,15 +41,10 @@ public enum CloudAPIConfigurationStore {
     public static func configuration(in defaults: UserDefaults = .standard) -> CloudAPIConfiguration? {
         guard backendKind(in: defaults) == .cloudAPI,
               let rawCloudURL = storedCloudAPIURL(in: defaults),
-              let cloudURL = URL(string: rawCloudURL),
-              let supabaseURL = URL(string: SupabaseServerStore.storedURL(in: defaults) ?? SharedDefaults.services.supabaseUrl) else {
+              let cloudURL = URL(string: rawCloudURL) else {
             return nil
         }
 
-        return CloudAPIConfiguration(
-            baseURL: cloudURL,
-            supabaseURL: supabaseURL,
-            supabaseAnonKey: SupabaseServerStore.storedKey(in: defaults) ?? SharedDefaults.services.supabaseAnonKey
-        )
+        return CloudAPIConfiguration(baseURL: cloudURL)
     }
 }
