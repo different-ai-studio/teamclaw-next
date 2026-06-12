@@ -51,6 +51,8 @@ resources:
         MQTT_USERNAME: ${env('MQTT_USERNAME')}
         MQTT_PASSWORD: ${env('MQTT_PASSWORD')}
         MQTT_USE_TLS: ${env('MQTT_USE_TLS', '')}
+        WEBSSO_LOGIN_URL: ${env('WEBSSO_LOGIN_URL', '')}
+        WEBSSO_STORAGE_KEY: ${env('WEBSSO_STORAGE_KEY', '')}
         DATABASE_URL: ${env('DATABASE_URL', '')}
         BACKEND_KIND: ${env('BACKEND_KIND', 'supabase')}
         AUTH_SECRET: ${env('AUTH_SECRET', '')}

@@ -9,6 +9,10 @@ export interface ServerConfig {
   mqttUseTls?: boolean;
   mqttUsername?: string;
   mqttPassword?: string;
+  // Web SSO 快捷登录 target, delivered by /v1/config/bootstrap (like MQTT) so
+  // the Betly admin sign-in URL + supabase-js storage key are not hardcoded.
+  webSsoLoginUrl?: string;
+  webSsoStorageKey?: string;
 }
 
 // The Cloud API URL is owned entirely by the frontend build config
@@ -58,18 +62,23 @@ function envConfig(): ServerConfig {
     mqttUseTls,
     mqttUsername: import.meta.env.VITE_MQTT_USERNAME,
     mqttPassword: import.meta.env.VITE_MQTT_PASSWORD,
+    webSsoLoginUrl: import.meta.env.VITE_WEBSSO_LOGIN_URL,
+    webSsoStorageKey: import.meta.env.VITE_WEBSSO_STORAGE_KEY,
   };
 }
 
-// Only the bootstrap-delivered MQTT broker config is persisted. cloudApiUrl and
-// backendKind are intentionally dropped — they are never a runtime override.
-function normalizeMqttConfig(config: ServerConfig): ServerConfig {
+// Only the bootstrap-delivered config (MQTT broker + Web SSO target) is
+// persisted. cloudApiUrl and backendKind are intentionally dropped — they are
+// never a runtime override.
+function normalizeCachedConfig(config: ServerConfig): ServerConfig {
   return {
     mqttHost: config.mqttHost?.trim() || undefined,
     mqttPort: config.mqttPort,
     mqttUseTls: config.mqttUseTls,
     mqttUsername: config.mqttUsername?.trim() || undefined,
     mqttPassword: config.mqttPassword?.trim() || undefined,
+    webSsoLoginUrl: config.webSsoLoginUrl?.trim() || undefined,
+    webSsoStorageKey: config.webSsoStorageKey?.trim() || undefined,
   };
 }
 
@@ -78,7 +87,7 @@ function hasOwn(config: ServerConfig, key: keyof ServerConfig): boolean {
 }
 
 function resolve(rawSaved: ServerConfig): ServerConfig {
-  const saved = normalizeMqttConfig(rawSaved);
+  const saved = normalizeCachedConfig(rawSaved);
   const env = envConfig();
   return {
     backendKind: "cloud_api",
@@ -90,6 +99,9 @@ function resolve(rawSaved: ServerConfig): ServerConfig {
     mqttUseTls: saved.mqttUseTls ?? env.mqttUseTls,
     mqttUsername: hasOwn(rawSaved, "mqttUsername") ? saved.mqttUsername : env.mqttUsername,
     mqttPassword: hasOwn(rawSaved, "mqttPassword") ? saved.mqttPassword : env.mqttPassword,
+    // Web SSO target: bootstrap cache wins, dev env var as fallback.
+    webSsoLoginUrl: saved.webSsoLoginUrl ?? env.webSsoLoginUrl,
+    webSsoStorageKey: saved.webSsoStorageKey ?? env.webSsoStorageKey,
   };
 }
 
@@ -102,7 +114,7 @@ export async function getSavedServerConfig(): Promise<ServerConfig> {
 }
 
 export async function saveServerConfig(config: ServerConfig): Promise<ServerConfig> {
-  const normalized = normalizeMqttConfig(config);
+  const normalized = normalizeCachedConfig(config);
   writeLocalConfig(normalized);
   return { backendKind: "cloud_api", ...normalized };
 }

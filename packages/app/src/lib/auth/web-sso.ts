@@ -5,6 +5,7 @@
 // against TeamClaw's Cloud API. This is the reverse of betly-auth-inject.ts.
 
 import { buildConfig } from "@/lib/build-config";
+import { fetchPublicConfig } from "@/lib/bootstrap";
 import { getEffectiveServerConfigSync } from "@/lib/server-config";
 import { invoke } from "@tauri-apps/api/core";
 import { AuthError } from "@/lib/auth/types";
@@ -12,40 +13,34 @@ import { AuthError } from "@/lib/auth/types";
 export interface SsoConfig {
   /** Full sign-in URL to load in the webview. */
   loginUrl: string;
-  /** Admin host (also the injection allowlist host). */
+  /** Admin host — passed to the native commands so read/clear only act here. */
   host: string;
   /** supabase-js localStorage key to read the session from. */
   storageKey: string;
 }
 
-// env → admin host + supabase-js storage key. Mirrors PR #477's host→key map.
-const PROD: SsoConfig = {
-  loginUrl: "https://admin.mx5.cn/sign-in",
-  host: "admin.mx5.cn",
-  storageKey: "sb-supa-auth-token",
-};
-const TEST: SsoConfig = {
-  loginUrl: "https://testadmin.ucar.cc/sign-in",
-  host: "testadmin.ucar.cc",
-  storageKey: "sb-test-supa-auth-token",
-};
-
 /**
- * Resolve the SSO target for the current build/environment, or null when the
- * feature is off or the environment can't be determined. Prod == cloud.ucar.cc;
- * any other cloudApiUrl is treated as the test environment.
+ * Resolve the SSO target, or null when the feature is off or not configured.
+ * The login URL + storage key are NOT hardcoded: they are delivered by the
+ * Cloud API via `/v1/config/bootstrap` (cached in server-config, like the MQTT
+ * broker). The build flag `features.auth.webSSO` is the per-build kill switch;
+ * the host is derived from the login URL and is the only host the native
+ * read/clear commands are allowed to touch.
  */
 export function ssoConfig(): SsoConfig | null {
   if (!buildConfig.features.auth?.webSSO) return null;
-  const cloudApiUrl = getEffectiveServerConfigSync().cloudApiUrl;
-  if (!cloudApiUrl) return null;
+  const cfg = getEffectiveServerConfigSync();
+  const loginUrl = cfg.webSsoLoginUrl;
+  const storageKey = cfg.webSsoStorageKey;
+  if (!loginUrl || !storageKey) return null;
   let host: string;
   try {
-    host = new URL(cloudApiUrl).host;
+    host = new URL(loginUrl).host;
   } catch {
     return null;
   }
-  return host === "cloud.ucar.cc" ? PROD : TEST;
+  if (!host) return null;
+  return { loginUrl, host, storageKey };
 }
 
 // ---------------------------------------------------------------------------
@@ -82,7 +77,13 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
  * AuthError with code websso_cancelled | websso_timeout | websso_failed.
  */
 export async function runWebSso(opts: RunWebSsoOptions = {}): Promise<string> {
-  const cfg = ssoConfig();
+  let cfg = ssoConfig();
+  if (!cfg) {
+    // Login-time feature: the FC-delivered target may not be cached yet (no
+    // session has run the authed bootstrap). Fetch the public config on demand.
+    await fetchPublicConfig();
+    cfg = ssoConfig();
+  }
   if (!cfg) throw new AuthError("Web SSO is not available.", 0, "websso_failed");
 
   const controller = new AbortController();
@@ -112,6 +113,8 @@ export async function runWebSso(opts: RunWebSsoOptions = {}): Promise<string> {
       const raw = await invoke<string | null>("webview_read_local_storage", {
         label: WEBSSO_LABEL,
         key: cfg.storageKey,
+        // Only read when the webview is actually on the FC-declared host.
+        expectedHost: cfg.host,
       });
       const refreshToken = raw ? parseRefreshToken(raw) : null;
       if (refreshToken) return refreshToken;

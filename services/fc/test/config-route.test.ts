@@ -30,6 +30,7 @@ test("buildBootstrapConfig returns mqtt block when env is set", () => {
       MQTT_USERNAME: "user-1",
       MQTT_PASSWORD: "secret",
       MQTT_USE_TLS: "true",
+      WEBSSO_LOGIN_URL: undefined,
     },
     () => {
       const cfg = buildBootstrapConfig();
@@ -76,6 +77,7 @@ test("GET /v1/config/bootstrap returns env-derived mqtt config to authed callers
       MQTT_USERNAME: undefined,
       MQTT_PASSWORD: undefined,
       MQTT_USE_TLS: undefined,
+      WEBSSO_LOGIN_URL: undefined,
     },
     async () => {
       const response = await handleBusinessApiRequest(
@@ -90,6 +92,62 @@ test("GET /v1/config/bootstrap returns env-derived mqtt config to authed callers
       const body = JSON.parse(response.body);
       assert.deepEqual(body, {
         mqtt: { url: "wss://mqtt.example.com:8884" },
+      });
+    },
+  );
+});
+
+test("buildBootstrapConfig returns webSso block when env is set", () => {
+  withEnv(
+    {
+      MQTT_BROKER_URL: undefined,
+      WEBSSO_LOGIN_URL: "https://testadmin.ucar.cc/sign-in",
+      WEBSSO_STORAGE_KEY: "sb-test-supa-auth-token",
+    },
+    () => {
+      assert.deepEqual(buildBootstrapConfig(), {
+        webSso: {
+          loginUrl: "https://testadmin.ucar.cc/sign-in",
+          storageKey: "sb-test-supa-auth-token",
+        },
+      });
+    },
+  );
+});
+
+test("buildBootstrapConfig omits webSso when login url is missing", () => {
+  withEnv(
+    {
+      MQTT_BROKER_URL: undefined,
+      WEBSSO_LOGIN_URL: undefined,
+      WEBSSO_STORAGE_KEY: "sb-test-supa-auth-token",
+    },
+    () => {
+      assert.deepEqual(buildBootstrapConfig(), {});
+    },
+  );
+});
+
+test("GET /v1/config/public returns webSso WITHOUT auth (login-time config)", async () => {
+  await withEnv(
+    {
+      MQTT_BROKER_URL: "mqtts://secret.example.com:8883",
+      WEBSSO_LOGIN_URL: "https://testadmin.ucar.cc/sign-in",
+      WEBSSO_STORAGE_KEY: "sb-test-supa-auth-token",
+    },
+    async () => {
+      const response = await handleBusinessApiRequest(
+        { httpMethod: "GET", path: "/v1/config/public", headers: {} },
+        { createRepository: () => ({}), createAuthRepository: () => ({}) },
+      );
+      assert.equal(response.statusCode, 200);
+      const body = JSON.parse(response.body);
+      // webSso is present; the sensitive mqtt block is NEVER in the public config.
+      assert.deepEqual(body, {
+        webSso: {
+          loginUrl: "https://testadmin.ucar.cc/sign-in",
+          storageKey: "sb-test-supa-auth-token",
+        },
       });
     },
   );
