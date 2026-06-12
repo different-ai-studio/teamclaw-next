@@ -13,7 +13,9 @@ vi.mock('@/lib/utils', () => ({
 }))
 
 vi.mock('@/packages/ai/message', () => ({
-  ClickableImage: () => null,
+  ClickableImage: ({ src, alt }: { src: string; alt?: string }) => (
+    <img src={src} alt={alt ?? 'image'} />
+  ),
   LocalImage: () => null,
   resolveImagePath: (path: string) => path,
 }))
@@ -62,5 +64,21 @@ describe('UserMessageWithMentions', () => {
     render(<UserMessageWithMentions content="/{role:apcc-issue-operator}" />)
 
     expect(screen.getByText('apcc-issue-operator')).toBeTruthy()
+  })
+
+  it('renders uploaded image attachments from (url: ...) markers', () => {
+    render(
+      <UserMessageWithMentions content="[Image: screenshot.png] (url: https://cdn.example.test/screenshot.png)" />,
+    )
+
+    expect(screen.queryByText(/\(url:/)).toBeNull()
+    expect(document.querySelector('img[src="https://cdn.example.test/screenshot.png"]')).toBeTruthy()
+  })
+
+  it('hides broken image url markers without rendering raw undefined text', () => {
+    render(<UserMessageWithMentions content="[Image: screenshot.png] (url: undefined)" />)
+
+    expect(screen.queryByText(/\(url:/)).toBeNull()
+    expect(document.querySelector('img')).toBeNull()
   })
 })

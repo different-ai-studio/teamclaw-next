@@ -146,7 +146,7 @@ export function UserMessageWithMentions({
     let lastIndex = 0;
     // Match @{filepath}, unified /{type:name}, legacy /<role> and /[command], [Role: ...], [File: ...], [Skill: ...], [Command: ...], [Attachment: ...], and other formats
     const combinedRegex =
-      /@\{([^}]+)\}|\/\{([^}]+)\}|\/<([a-z0-9]+(?:-[a-z0-9]+)*)>|\/\[([^\]]+)\]|\[Mentioned: ([^\]]+)\]|\[Role: ([^\]]+)\]|\[File: ([^\]]+)\](?:\n```[\s\S]*?```)?|\[Skill: ([^\]]+)\]|\[Command: ([^\]]+)\]|\[Directory: ([^\]]+)\]\s*|\[Image: ([^\]]+)\](?:\n([^\n]*))?|\[Attachment: ([^\]]+)\]\s*\(([^)]*)\)/g;
+      /@\{([^}]+)\}|\/\{([^}]+)\}|\/<([a-z0-9]+(?:-[a-z0-9]+)*)>|\/\[([^\]]+)\]|\[Mentioned: ([^\]]+)\]|\[Role: ([^\]]+)\]|\[File: ([^\]]+)\](?:\n```[\s\S]*?```)?|\[Skill: ([^\]]+)\]|\[Command: ([^\]]+)\]|\[Directory: ([^\]]+)\]\s*|\[Image: ([^\]]+)\](?:\n([^\n]*)|\s*\(url:\s*([^)]*)\))?|\[Attachment: ([^\]]+)\]\s*\(([^)]*)\)/g;
 
     let match;
     while ((match = combinedRegex.exec(displayContent)) !== null) {
@@ -185,16 +185,28 @@ export function UserMessageWithMentions({
       } else if (match[10]) {
         result.push({ type: "directory", content: match[10] });
       } else if (match[11]) {
-        const dataUrl = match[12] && match[12].startsWith("data:") ? match[12] : undefined;
-        result.push({ type: "image", content: match[11], dataUrl });
-      } else if (match[13]) {
+        const inlineDataUrl =
+          match[12] && match[12].startsWith("data:") ? match[12] : undefined;
+        const remoteUrl = match[13]?.trim();
+        const remoteImageUrl =
+          remoteUrl &&
+          remoteUrl !== "undefined" &&
+          (remoteUrl.startsWith("http://") || remoteUrl.startsWith("https://"))
+            ? remoteUrl
+            : undefined;
+        result.push({
+          type: "image",
+          content: match[11],
+          dataUrl: inlineDataUrl ?? remoteImageUrl,
+        });
+      } else if (match[14]) {
         // Parse the parenthesised info: may contain path:..., size:...
-        const info = match[14] ?? "";
+        const info = match[15] ?? "";
         const pathMatch = info.match(/path:\s*([^,)]+)/);
         const sizeMatch = info.match(/size:\s*([^,)]+)/);
         const fullPath = pathMatch ? pathMatch[1].trim() : undefined;
         const size = sizeMatch ? sizeMatch[1].trim() : (!pathMatch && info.trim() ? info.trim() : undefined);
-        result.push({ type: "attachment", content: match[13], size, fullPath });
+        result.push({ type: "attachment", content: match[14], size, fullPath });
       }
 
       lastIndex = match.index + match[0].length;
