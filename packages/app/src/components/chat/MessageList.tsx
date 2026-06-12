@@ -15,10 +15,15 @@ import { DEFAULT_INPUT_AREA_HEIGHT, SAFE_BOTTOM_SPACING } from "./layout-constan
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// Chat messages can reflow heavily when the right-side panel opens/closes.
-// The current virtualized path occasionally keeps stale row heights and causes
-// overlap, so we keep the stable non-virtualized path for normal conversations.
-const VIRTUAL_MSG_THRESHOLD = Number.MAX_SAFE_INTEGER;
+// Virtualize long threads (>200 messages). PR #34 disabled this because the
+// virtualized path kept stale row heights on sidebar/width changes → overlap;
+// that is now handled by per-row measureElement (dynamic heights) plus the
+// messageAreaWidth remeasure effect below, so we re-enable it above the
+// threshold while keeping the simpler non-virtualized path for normal threads.
+// NOTE: this re-enablement needs a visual smoke test (open a >200-message
+// session, toggle the sidebar / resize the window, confirm no row overlap)
+// before shipping — see the task's owed manual verification.
+const VIRTUAL_MSG_THRESHOLD = 200;
 const INITIAL_VISIBLE_MESSAGE_COUNT = 80;
 const LOAD_EARLIER_MESSAGE_COUNT = 60;
 
