@@ -844,9 +844,9 @@ pub async fn webview_get_title(app: tauri::AppHandle, label: String) -> Result<S
 ///
 /// Child webviews loading external URLs have no `__TAURI_INTERNALS__`, so we
 /// read directly from the native WKWebView via evaluateJavaScript with a
-/// completion handler. Returns `Ok(None)` when the key is absent / value is
-/// JS null, or on any read error. macOS-only; a no-op (`None`) elsewhere until
-/// a WebView2 implementation is added.
+/// completion handler (macOS: `WKWebView evaluateJavaScript`; Windows:
+/// `ICoreWebView2::ExecuteScript`). Returns `Ok(None)` when the key is absent /
+/// value is JS null, or on any read error. A no-op (`None`) on other platforms.
 ///
 /// Defense in depth: only ever reads from an allowlisted Betly admin host (the
 /// same allowlist as the forward session injection). This makes token-harvest
@@ -919,7 +919,47 @@ pub async fn webview_read_local_storage(
                     ];
                 }
             }
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(target_os = "windows")]
+            {
+                use webview2_com::ExecuteScriptCompletedHandler;
+                use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2;
+                use windows::core::{HSTRING, PCWSTR};
+
+                // The completion handler fires asynchronously on the UI thread;
+                // bridge its result back over the channel like the macOS path.
+                let tx_done = tx.clone();
+                let controller = wv.controller();
+                let script = HSTRING::from(js.as_str());
+                let started = unsafe {
+                    controller.CoreWebView2().and_then(|core: ICoreWebView2| {
+                        core.ExecuteScript(
+                            PCWSTR(script.as_ptr()),
+                            &ExecuteScriptCompletedHandler::create(Box::new(
+                                move |_err, result_json: String| {
+                                    // ExecuteScript returns the JS value JSON-encoded:
+                                    // a string arrives as "\"...\"" and JS null as
+                                    // "null". Unwrap one JSON layer so we return the
+                                    // same raw stored string the macOS path does
+                                    // (None for null / non-string / parse failure).
+                                    let value = serde_json::from_str::<Option<String>>(
+                                        &result_json,
+                                    )
+                                    .ok()
+                                    .flatten();
+                                    let _ = tx.send(value);
+                                    Ok(())
+                                },
+                            )),
+                        )
+                    })
+                };
+                // If ExecuteScript couldn't even start, the handler never runs —
+                // unblock the receiver now instead of waiting out the timeout.
+                if started.is_err() {
+                    let _ = tx_done.send(None);
+                }
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
             {
                 let _ = (wv, &js);
                 let _ = tx.send(None);
