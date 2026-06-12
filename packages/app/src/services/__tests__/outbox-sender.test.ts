@@ -140,15 +140,91 @@ describe('outbox sender', () => {
       mention_actor_ids: ['agent-1'],
       display_mention_actor_ids: ['agent-1'],
     })
-    expect(ensureAgentRuntimesForSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionId: 'sess-1',
-        teamId: 'team-1',
-        agentActorIds: ['agent-1'],
-        workspaceIdHint: 'ws-from-enqueue',
-        reason: 'outbox_send',
-      }),
+    // Runtime ensure now runs after the live publish as a best-effort,
+    // non-blocking cold-start, so wait for it rather than asserting synchronously.
+    await vi.waitFor(() => {
+      expect(ensureAgentRuntimesForSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'sess-1',
+          teamId: 'team-1',
+          agentActorIds: ['agent-1'],
+          workspaceIdHint: 'ws-from-enqueue',
+          reason: 'outbox_send',
+        }),
+      )
+    })
+  })
+
+  it('fans out to members even when the mentioned daemon runtime cannot be ensured', async () => {
+    // Daemon offline / errored: ensuring its runtime rejects. Broadcasting the
+    // human's message to OTHER members must NOT depend on that — otherwise an
+    // offline daemon silently swallows real-time delivery to everyone else.
+    const { ensureAgentRuntimesForSession } = await import('@/lib/teamclaw/ensure-agent-runtime')
+    vi.mocked(ensureAgentRuntimesForSession).mockRejectedValueOnce(
+      new Error('daemon offline'),
     )
+
+    const { useOutboxStore } = await import('@/stores/outbox-store')
+    const { startOutboxSender } = await import('../outbox-sender')
+
+    await useOutboxStore.getState().enqueue({
+      messageId: 'msg-offline-daemon',
+      teamId: 'team-1',
+      sessionId: 'session-1',
+      senderActorId: 'member-1',
+      content: '@Agent are you there',
+      model: null,
+      mentionActorIds: ['agent-1'],
+      attachmentUrls: [],
+    })
+
+    startOutboxSender()
+
+    // The live event must reach the session topic so other members see it.
+    await vi.waitFor(() => {
+      expect(mocks.mqttPublish).toHaveBeenCalled()
+    })
+
+    // And the message is considered delivered — an unreachable daemon does not
+    // mark the human's message as failed/stuck.
+    await vi.waitFor(() => {
+      const entry = useOutboxStore.getState().byId['msg-offline-daemon']
+      expect(entry.state).toBe('delivered')
+      expect(entry.lastError).toBeNull()
+    })
+  })
+
+  it('publishes the live event before ensuring the agent runtime', async () => {
+    const order: string[] = []
+    mocks.mqttPublish.mockImplementation(async () => {
+      order.push('publish')
+    })
+    const { ensureAgentRuntimesForSession } = await import('@/lib/teamclaw/ensure-agent-runtime')
+    vi.mocked(ensureAgentRuntimesForSession).mockImplementation(async () => {
+      order.push('ensure')
+    })
+
+    const { useOutboxStore } = await import('@/stores/outbox-store')
+    const { startOutboxSender } = await import('../outbox-sender')
+
+    await useOutboxStore.getState().enqueue({
+      messageId: 'msg-order',
+      teamId: 'team-1',
+      sessionId: 'session-1',
+      senderActorId: 'member-1',
+      content: '@Agent hi',
+      model: null,
+      mentionActorIds: ['agent-1'],
+      attachmentUrls: [],
+    })
+
+    startOutboxSender()
+
+    await vi.waitFor(() => {
+      expect(order).toContain('publish')
+      expect(order).toContain('ensure')
+    })
+    expect(order.indexOf('publish')).toBeLessThan(order.indexOf('ensure'))
   })
 
   it('retries agent-mentioned messages when MQTT publish fails', async () => {
