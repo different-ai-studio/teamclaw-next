@@ -14,6 +14,7 @@
     "name": "TeamClaw",
     "shortName": "teamclaw",
     "palette": "default",
+    "logo": "branding/acme/logo.png",
     "updater": {
       "endpoints": [
         "__OSS_BASE_URL__/releases/latest.json",

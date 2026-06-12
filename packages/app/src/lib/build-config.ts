@@ -40,6 +40,10 @@ export interface BuildConfig {
      *  "teal" → anodized-teal build flavor (see styles/globals.css). Applied
      *  as data-palette on <html> at first paint. */
     palette?: string
+    /** Build-time white-label: path (relative to repo root) to a square source
+     *  PNG (≥512px, ideally 1024×1024). When set, the prebuild step regenerates
+     *  the OS icon set and the in-app logo from it. Omitted → keep committed assets. */
+    logo?: string
   }
   features: {
     teamMode: boolean
