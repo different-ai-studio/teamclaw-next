@@ -995,11 +995,10 @@ pub async fn webview_read_local_storage(
                                     // "null". Unwrap one JSON layer so we return the
                                     // same raw stored string the macOS path does
                                     // (None for null / non-string / parse failure).
-                                    let value = serde_json::from_str::<Option<String>>(
-                                        &result_json,
-                                    )
-                                    .ok()
-                                    .flatten();
+                                    let value =
+                                        serde_json::from_str::<Option<String>>(&result_json)
+                                            .ok()
+                                            .flatten();
                                     let _ = tx.send(value);
                                     Ok(())
                                 },
