@@ -159,20 +159,71 @@ pub fn uninstall_service() -> anyhow::Result<()> {
 }
 
 #[cfg(target_os = "windows")]
+fn schtasks_task_exists() -> bool {
+    std::process::Command::new("schtasks")
+        .args(["/Query", "/TN", "amuxd"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Start amuxd in the background when login scheduled-task registration is
+/// unavailable (common on built-in Administrator accounts or locked-down
+/// Task Scheduler policy).
+#[cfg(target_os = "windows")]
+fn start_daemon_detached(exe: &Path) -> anyhow::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+    if let Ok(Some((pid, path))) = crate::cli::process::read_pidfile_for_service() {
+        if crate::cli::process::pid_is_alive(pid) {
+            return Ok(());
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    std::process::Command::new(exe)
+        .arg("start")
+        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!("spawn amuxd start: {e}"))
+}
+
+#[cfg(target_os = "windows")]
 pub fn install_service() -> anyhow::Result<()> {
     let exe = amuxd_exe_path();
     anyhow::ensure!(exe.exists(), "amuxd binary not found at {}", exe.display());
+
+    if schtasks_task_exists() {
+        let _ = std::process::Command::new("schtasks")
+            .args(["/Run", "/TN", "amuxd"])
+            .status();
+        start_daemon_detached(&exe)?;
+        return Ok(());
+    }
+
     // schtasks /TR wants a bare command line; quote only the exe path (it may
     // contain spaces), not the whole "<exe> start" string.
-    let status = std::process::Command::new("schtasks")
+    let created = std::process::Command::new("schtasks")
         .args(["/Create", "/F", "/SC", "ONLOGON", "/TN", "amuxd", "/TR"])
         .arg(format!("\"{}\" start", exe.display()))
-        .status()?;
-    anyhow::ensure!(status.success(), "schtasks /Create failed");
-    let _ = std::process::Command::new("schtasks")
-        .args(["/Run", "/TN", "amuxd"])
-        .status();
-    Ok(())
+        .status()?
+        .success();
+
+    if created {
+        let _ = std::process::Command::new("schtasks")
+            .args(["/Run", "/TN", "amuxd"])
+            .status();
+        start_daemon_detached(&exe)?;
+        return Ok(());
+    }
+
+    eprintln!(
+        "warning: could not register amuxd login task (schtasks denied); starting daemon directly"
+    );
+    start_daemon_detached(&exe)
 }
 
 #[cfg(target_os = "windows")]
