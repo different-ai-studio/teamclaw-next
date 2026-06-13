@@ -64,9 +64,6 @@
     "node": ">=20.0.0"
   },
   "pnpm": {
-    "neverBuiltDependencies": [
-      "msw"
-    ],
     "overrides": {
       "metro": "0.82.5",
       "metro-config": "0.82.5",
