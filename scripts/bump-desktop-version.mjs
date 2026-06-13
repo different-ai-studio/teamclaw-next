@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Bump the desktop release version in all three canonical sources.
+ * Bump the desktop release version in all four canonical sources.
  * Usage: node scripts/bump-desktop-version.mjs <version>
  * Example: node scripts/bump-desktop-version.mjs 0.2.1
  */
@@ -44,6 +44,16 @@ const targets = [
       data.version = version;
       return `${JSON.stringify(data, null, 2)}\n`;
     },
+  },
+  {
+    label: 'apps/daemon/Cargo.toml',
+    path: path.join(root, 'apps/daemon/Cargo.toml'),
+    read: (raw) => {
+      const match = raw.match(/^version\s*=\s*"([^"]+)"/m);
+      if (!match) throw new Error('version field not found in Cargo.toml');
+      return match[1];
+    },
+    write: (raw, version) => raw.replace(/^version\s*=\s*"[^"]+"/m, `version = "${version}"`),
   },
 ];
 

@@ -4,19 +4,20 @@ TeamClaw 桌面端通过 **Git tag 触发 GitHub Actions**，自动构建 macOS 
 
 ## 版本号来源
 
-以下三处必须保持一致（可用脚本校验 / 批量 bump）：
+以下四处必须保持一致（可用脚本校验 / 批量 bump）：
 
 | 文件 | 字段 |
 |------|------|
 | `package.json` | `version` |
 | `apps/desktop/Cargo.toml` | `version` |
 | `apps/desktop/tauri.conf.json` | `version` |
+| `apps/daemon/Cargo.toml` | `version`（随 Desktop 打包的 `amuxd` sidecar） |
 
 ```bash
 # 查看是否一致
 pnpm release:check
 
-# 批量 bump（会先检查当前三处一致）
+# 批量 bump（会先检查当前四处一致）
 pnpm release:bump 0.2.1
 
 # 发布前门禁
@@ -35,7 +36,7 @@ pnpm release:preflight
 
 ```bash
 pnpm release:bump 0.2.1
-git add package.json apps/desktop/Cargo.toml apps/desktop/tauri.conf.json
+git add package.json apps/desktop/Cargo.toml apps/desktop/tauri.conf.json apps/daemon/Cargo.toml
 git commit -m "chore(desktop): bump version to 0.2.1"
 # 通过 PR 合入 main，不要直接推 main
 ```

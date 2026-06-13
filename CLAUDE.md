@@ -142,10 +142,10 @@ iroh-based P2P mode has been removed.
 
 ## Versioning & Release
 
-**Version numbers** — Desktop version must match across `package.json`, `apps/desktop/Cargo.toml`, `apps/desktop/tauri.conf.json`.
+**Version numbers** — Desktop version must match across `package.json`, `apps/desktop/Cargo.toml`, `apps/desktop/tauri.conf.json`, and `apps/daemon/Cargo.toml` (bundled `amuxd` sidecar).
 
 **Release process:**
-1. Bump desktop version in all 3 files
+1. Bump desktop version in all 4 files
 2. Commit, push to main
 3. `git tag v<desktop-version> && git push origin v<desktop-version>`
 4. Tag push triggers `release.yml` (macOS desktop)

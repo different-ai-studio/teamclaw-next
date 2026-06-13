@@ -1,6 +1,6 @@
 {
   "name": "teamclaw",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "TeamClaw - AI Agent Desktop Platform",
   "scripts": {
@@ -21,7 +21,7 @@
     "tauri:dev:win": "node scripts/update-tauri-config.js && node scripts/tauri-cli.js dev -- --no-default-features",
     "rust:check": "node scripts/rust-cli.js check --manifest-path apps/desktop/Cargo.toml",
     "rust:build": "node scripts/rust-cli.js build --manifest-path apps/desktop/Cargo.toml",
-    "daemon:run": "scripts/run-daemon.sh",
+    "daemon:run": "node scripts/run-daemon.js",
     "daemon:ctl": "scripts/amuxdctl.sh",
     "reset:local": "scripts/reset-local-state.sh",
     "daemon:build": "cargo build -p amuxd",
@@ -64,6 +64,9 @@
     "node": ">=20.0.0"
   },
   "pnpm": {
+    "neverBuiltDependencies": [
+      "msw"
+    ],
     "overrides": {
       "metro": "0.82.5",
       "metro-config": "0.82.5",
