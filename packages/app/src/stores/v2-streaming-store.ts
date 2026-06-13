@@ -64,6 +64,10 @@ export interface PersistedSessionPlan {
 
 interface State {
   byKey: Record<string, AgentStreamEntry>;
+  /** Monotonic per-session counter, bumped on every mutation that can change
+   * what the chat thread renders. Lets MessageList/ChatPanel subscribe O(1)
+   * instead of traversing byKey per delta. */
+  revisionBySession: Record<string, number>;
   /** Prior-turn entries archived when the next turn starts. We keep these so
    * thinking + tool_calls from earlier turns stay visible in the UI — the
    * daemon doesn't persist non-AgentReply kinds, so the bubble is the only
@@ -78,6 +82,8 @@ interface State {
   isInterruptedFlushPending: (sessionId: string, actorId: string) => boolean;
   appendOutput: (sessionId: string, actorId: string, delta: string) => void;
   appendThinking: (sessionId: string, actorId: string, delta: string) => void;
+  appendOutputBatch: (sessionId: string, actorId: string, deltas: string[]) => void;
+  appendThinkingBatch: (sessionId: string, actorId: string, deltas: string[]) => void;
   pushToolUse: (
     sessionId: string,
     actorId: string,
@@ -230,7 +236,7 @@ function streamEntryMatchesScope(
   return true;
 }
 
-function stripStreamError(entry: AgentStreamEntry): AgentStreamEntry | null {
+function stripStreamError<T extends AgentStreamEntry>(entry: T): T | null {
   if (!entry.errorMessage) return entry;
   if (isErrorOnlyStreamEntry(entry)) return null;
   return { ...entry, errorMessage: null, errorDetails: null };
@@ -250,6 +256,13 @@ export function persistedPartsCoverLiveArtifacts(partsJson: string | undefined):
   } catch {
     return false;
   }
+}
+
+function bumpRevision(
+  revisions: Record<string, number>,
+  sessionId: string,
+): Record<string, number> {
+  return { ...revisions, [sessionId]: (revisions[sessionId] ?? 0) + 1 };
 }
 
 function appendOverlappingChunk(existing: string, chunk: string): string {
@@ -660,6 +673,7 @@ function prepareMutation(state: State, sessionId: string, actorId: string): Muta
 
 export const useV2StreamingStore = create<State>((set, get) => ({
   byKey: {},
+  revisionBySession: {},
   archived: [],
   persistedPlansBySession: {},
   interruptedFlushPending: {},
@@ -699,6 +713,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         },
       },
       archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
   },
 
@@ -718,6 +733,67 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         },
       },
       archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
+    });
+  },
+
+  appendOutputBatch: (sessionId, actorId, deltas) => {
+    if (deltas.length === 0) return;
+    const state = get();
+    const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
+    let outputText = entry.outputText;
+    let parts = entryParts(entry);
+    let changed = false;
+    for (const delta of deltas) {
+      if (!delta) continue;
+      outputText = appendOverlappingChunk(outputText, delta);
+      parts = appendOutputToParts(parts, delta);
+      changed = true;
+    }
+    if (!changed) return;
+    set({
+      byKey: {
+        ...state.byKey,
+        [k(sessionId, actorId)]: {
+          ...entry,
+          outputText,
+          parts,
+          lastUpdate: Date.now(),
+          active: true,
+        },
+      },
+      archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
+    });
+  },
+
+  appendThinkingBatch: (sessionId, actorId, deltas) => {
+    if (deltas.length === 0) return;
+    const state = get();
+    const { entry, toArchive } = prepareMutation(state, sessionId, actorId);
+    let thinkingText = entry.thinkingText;
+    let parts = entryParts(entry);
+    let changed = false;
+    for (const delta of deltas) {
+      if (!delta) continue;
+      thinkingText = appendOverlappingChunk(thinkingText, delta);
+      parts = appendReasoningPart(parts, delta);
+      changed = true;
+    }
+    if (!changed) return;
+    set({
+      byKey: {
+        ...state.byKey,
+        [k(sessionId, actorId)]: {
+          ...entry,
+          thinkingText,
+          parts,
+          lastUpdate: Date.now(),
+          active: true,
+        },
+      },
+      archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
   },
 
@@ -752,6 +828,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           },
         },
         archived: toArchive ? [...state.archived, toArchive] : state.archived,
+        revisionBySession: bumpRevision(state.revisionBySession, sessionId),
       });
       return;
     }
@@ -787,6 +864,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         },
       },
       archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
   },
 
@@ -823,6 +901,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
             lastUpdate: Date.now(),
           },
         },
+        revisionBySession: bumpRevision(state.revisionBySession, sessionId),
       });
       logStreamToolDiag("completeToolUse", {
         sessionId,
@@ -860,7 +939,10 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         toolCalls,
         parts,
       };
-      set({ archived });
+      set({
+        archived,
+        revisionBySession: bumpRevision(state.revisionBySession, sessionId),
+      });
       logInterruptMsgDiag("stream.completeToolUse.archived", {
         sessionId,
         actorId,
@@ -898,6 +980,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
             active: true,
           },
         },
+        revisionBySession: bumpRevision(state.revisionBySession, sessionId),
       });
       logStreamToolDiag("completeToolUse", {
         sessionId,
@@ -924,6 +1007,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           lastUpdate: Date.now(),
         },
       },
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
     logStreamToolDiag("completeToolUse", {
       sessionId,
@@ -962,6 +1046,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         },
       },
       archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
       persistedPlansBySession: persistSessionPlan(
         state.persistedPlansBySession,
         sessionId,
@@ -986,6 +1071,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         },
       },
       archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
   },
 
@@ -1003,24 +1089,28 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         },
       },
       archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
   },
 
   clearPermissionRequest: (sessionId, actorId) => {
     const key = k(sessionId, actorId);
-    const existing = get().byKey[key];
+    const state = get();
+    const existing = state.byKey[key];
     if (!existing) return;
     set({
       byKey: {
-        ...get().byKey,
+        ...state.byKey,
         [key]: { ...existing, pendingPermission: null },
       },
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
   },
 
   replaceParts: (sessionId, actorId, parts) => {
     const key = k(sessionId, actorId);
-    const existing = get().byKey[key];
+    const state = get();
+    const existing = state.byKey[key];
     if (!existing) return;
     const revivedParts = parts.map(reviveToolCallPart);
     const enrichedToolCalls = revivedParts
@@ -1045,7 +1135,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     });
     set({
       byKey: {
-        ...get().byKey,
+        ...state.byKey,
         [key]: {
           ...existing,
           parts: syncedParts,
@@ -1053,6 +1143,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           lastUpdate: Date.now(),
         },
       },
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
   },
 
@@ -1073,6 +1164,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         },
       },
       archived: toArchive ? [...state.archived, toArchive] : state.archived,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
   },
 
@@ -1081,11 +1173,12 @@ export const useV2StreamingStore = create<State>((set, get) => ({
    * multi-segment transcript from cumulative message.created bodies. */
   finalize: (sessionId, actorId, finalText) => {
     const key = k(sessionId, actorId);
-    const existing = get().byKey[key];
+    const state = get();
+    const existing = state.byKey[key];
     if (!existing) {
       set({
         byKey: {
-          ...get().byKey,
+          ...state.byKey,
           [key]: {
             ...emptyEntry(sessionId, actorId),
             outputText: finalText ?? "",
@@ -1093,6 +1186,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
             active: false,
           },
         },
+        revisionBySession: bumpRevision(state.revisionBySession, sessionId),
       });
       return;
     }
@@ -1107,7 +1201,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     if (!trimmedFinal) {
       set({
         byKey: {
-          ...get().byKey,
+          ...state.byKey,
           [key]: {
             ...existing,
             outputText: joinTextPartsFromParts(parts) || existing.outputText,
@@ -1116,6 +1210,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
             active: false,
           },
         },
+        revisionBySession: bumpRevision(state.revisionBySession, sessionId),
       });
       return;
     }
@@ -1137,7 +1232,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     const outputText = joinTextPartsFromParts(parts) || trimmedFinal || existing.outputText;
     set({
       byKey: {
-        ...get().byKey,
+        ...state.byKey,
         [key]: {
           ...existing,
           outputText,
@@ -1146,12 +1241,14 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           active: false,
         },
       },
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
   },
 
   finishSessionActor: (sessionId, actorId, opts) => {
     const key = k(sessionId, actorId);
-    const existing = get().byKey[key];
+    const state = get();
+    const existing = state.byKey[key];
     if (!existing) {
       logStreamToolDiag("finishSessionActor.skip", {
         sessionId,
@@ -1165,7 +1262,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     const toolCalls = finishUnresolvedTools(existing.toolCalls);
     set({
       byKey: {
-        ...get().byKey,
+        ...state.byKey,
         [key]: {
           ...existing,
           toolCalls,
@@ -1174,6 +1271,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
           active: false,
         },
       },
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
     logStreamToolDiag("finishSessionActor", {
       sessionId,
@@ -1186,18 +1284,20 @@ export const useV2StreamingStore = create<State>((set, get) => ({
   },
 
   markActorStreamActive: (sessionId, actorId) => {
+    const state = get();
     const key = k(sessionId, actorId);
-    const existing = get().byKey[key];
+    const existing = state.byKey[key];
     if (!existing || existing.active) return;
     set({
       byKey: {
-        ...get().byKey,
+        ...state.byKey,
         [key]: {
           ...existing,
           active: true,
           lastUpdate: Date.now(),
         },
       },
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
   },
 
@@ -1249,6 +1349,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
         toArchive && !isErrorOnlyStreamEntry(toArchive)
           ? [...state.archived, toArchive]
           : state.archived,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
       interruptedFlushPending,
     });
   },
@@ -1287,7 +1388,11 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     });
 
     if (!changed) return;
-    set({ byKey: nextByKey, archived: nextArchived });
+    set({
+      byKey: nextByKey,
+      archived: nextArchived,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
+    });
   },
 
   releaseActorAfterPersist: (sessionId, actorId, opts) => {
@@ -1377,6 +1482,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
       byKey: next,
       archived,
       persistedPlansBySession,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
   },
 
@@ -1384,16 +1490,20 @@ export const useV2StreamingStore = create<State>((set, get) => ({
     const trimmed = streamId.trim();
     if (!trimmed) return;
     const key = k(sessionId, actorId);
-    const existing = get().byKey[key];
+    const state = get();
+    const existing = state.byKey[key];
     if (!existing || existing.streamId !== trimmed) return;
-    const next = { ...get().byKey };
+    const next = { ...state.byKey };
     delete next[key];
     logInterruptMsgDiag("stream.detachForPersist", {
       sessionId,
       actorId,
       streamId: trimmed,
     });
-    set({ byKey: next });
+    set({
+      byKey: next,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
+    });
   },
 
   clearActor: (sessionId, actorId, opts) => {
@@ -1429,6 +1539,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
       byKey: next,
       archived,
       persistedPlansBySession,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
   },
 
@@ -1444,6 +1555,7 @@ export const useV2StreamingStore = create<State>((set, get) => ({
       byKey: next,
       archived: state.archived.filter((e) => e.sessionId !== sessionId),
       persistedPlansBySession,
+      revisionBySession: bumpRevision(state.revisionBySession, sessionId),
     });
   },
 }));

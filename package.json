@@ -37,7 +37,7 @@
     "test": "pnpm test:unit",
     "test:all": "pnpm test:unit && pnpm expo:test",
     "test:unit": "pnpm --filter @teamclaw/app test:unit",
-    "test:scripts": "node --test \"scripts/lib/**/*.test.js\"",
+    "test:scripts": "node --test scripts/lib/*.test.js",
     "test:smoke": "vitest run --config vitest.config.v2-e2e.ts tests/v2-e2e/pr",
     "test:e2e": "pnpm test:e2e:v2:pr",
     "test:e2e:v2:pr": "vitest run --config vitest.config.v2-e2e.ts tests/v2-e2e/pr",
@@ -64,9 +64,6 @@
     "node": ">=20.0.0"
   },
   "pnpm": {
-    "neverBuiltDependencies": [
-      "msw"
-    ],
     "overrides": {
       "metro": "0.82.5",
       "metro-config": "0.82.5",

@@ -1,34 +1,13 @@
 //! HTTP integration tests for workspace provider auth (Phase 1 catalog + Phase 2 OAuth).
 
-#[path = "../src/backend/mod.rs"]
-mod backend;
-#[path = "../src/config/mod.rs"]
-mod config;
-#[path = "../src/error.rs"]
-mod error;
-#[path = "../src/http/mod.rs"]
-mod http;
-#[path = "../src/opencode_settings/mod.rs"]
-mod opencode_settings;
-#[path = "../src/proto.rs"]
-mod proto;
-#[path = "../src/provider_config.rs"]
-mod provider_config;
-#[path = "../src/runtime/mod.rs"]
-mod runtime;
-#[path = "../src/team_link.rs"]
-mod team_link;
-#[path = "../src/team_shared_env.rs"]
-mod team_shared_env;
-#[path = "../src/team_shared_git.rs"]
-mod team_shared_git;
+include!("support/crate_modules.rs");
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use config::{HttpConfig, OpenCodeCompatStore};
-use http::runtime_adapter::RuntimeManagerAdapter;
+use crate::http::runtime_adapter::RuntimeManagerAdapter;
 use reqwest::Client;
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -40,7 +19,7 @@ fn ws_id(path: &std::path::Path) -> String {
 }
 
 struct TestApp {
-    _handle: http::HttpHandle,
+    _handle: crate::http::HttpHandle,
     client: Client,
     base: String,
     session_token: String,
@@ -65,13 +44,16 @@ async fn test_app_with_workspace_store(
     let runtime = RuntimeManagerAdapter::new(manager, 256, None);
     let workspace_control: Arc<dyn config::WorkspaceControlStore> =
         Arc::new(OpenCodeCompatStore::new());
-    let handle = http::spawn(
+    let handle = crate::http::spawn(
         cfg,
-        http::server::metadata("actor".into(), "test"),
+        crate::http::server::metadata("actor".into(), "test"),
         runtime,
         Some(workspace_control),
         None,
         opencode_settings,
+        test_sync_dispatcher(),
+        None,
+        None,
     )
     .await
     .expect("spawn http server");

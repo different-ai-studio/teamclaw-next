@@ -61,6 +61,49 @@ describe("mqtt-bridge", () => {
     listenMock.mockImplementation(async (_event, _cb) => () => {});
     const unlisten = await listenForEnvelopes(() => {});
     expect(typeof unlisten).toBe("function");
-    expect(listenMock).toHaveBeenCalledWith("mqtt:envelope", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("mqtt:envelopes", expect.any(Function));
+  });
+
+  it("listenForEnvelopes decodes base64 batch into Uint8Array per envelope", async () => {
+    let captured: (msg: { payload: { topic: string; b64: string }[] }) => void = () => {};
+    listenMock.mockImplementation(async (_event, cb) => {
+      captured = cb;
+      return () => {};
+    });
+    const received: { topic: string; bytes: Uint8Array }[] = [];
+    await listenForEnvelopes((env) => received.push(env));
+    // base64 of bytes [1,2,3] is "AQID"; [255] is "/w=="
+    captured({
+      payload: [
+        { topic: "a", b64: "AQID" },
+        { topic: "b", b64: "/w==" },
+      ],
+    });
+    expect(received).toHaveLength(2);
+    expect(received[0].topic).toBe("a");
+    expect(Array.from(received[0].bytes)).toEqual([1, 2, 3]);
+    expect(received[1].topic).toBe("b");
+    expect(Array.from(received[1].bytes)).toEqual([255]);
+  });
+
+  it("listenForEnvelopes skips bad b64 and still delivers valid envelopes", async () => {
+    let captured: (msg: { payload: { topic: string; b64: string }[] }) => void = () => {};
+    listenMock.mockImplementation(async (_event, cb) => {
+      captured = cb;
+      return () => {};
+    });
+    const received: { topic: string; bytes: Uint8Array }[] = [];
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await listenForEnvelopes((env) => received.push(env));
+    captured({
+      payload: [
+        { topic: "bad", b64: "!!!not-base64!!!" },
+        { topic: "ok", b64: "AQID" },
+      ],
+    });
+    expect(received).toHaveLength(1);
+    expect(received[0].topic).toBe("ok");
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });

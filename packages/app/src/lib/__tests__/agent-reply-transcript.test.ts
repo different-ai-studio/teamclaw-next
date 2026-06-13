@@ -55,4 +55,15 @@ describe("agent reply transcript", () => {
     expect(stripPriorTranscriptTextPrefix(parts, " J")).toBe(" J");
     expect(stripPriorTranscriptTextPrefix(parts, " page")).toBe(" page");
   });
+
+  it("merges daemon final tail when QoS0 dropped post-tool stream text", () => {
+    const intro = "Intro before tools.";
+    const final = "Answer after tools.";
+    const parts = [
+      { type: "text", text: intro },
+      { type: "tool-call", toolCall: { id: "t1" } },
+    ] as never;
+    const pending = [{ messageId: "m1", content: final }] as never;
+    expect(deriveAgentReplyContent(parts, pending)).toBe(`${intro}\n\n${final}`);
+  });
 });

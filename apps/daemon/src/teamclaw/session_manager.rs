@@ -1204,12 +1204,11 @@ impl SessionManager {
             ..Default::default()
         };
 
-        // 1. Local TOML
-        if let Err(e) = self.persist_message(session_id, &proto_msg).await {
-            warn!(?e, session_id, "persist_message failed");
-        }
-
-        // 2. session/{sid}/live as `message.created`.
+        // 1. session/{sid}/live as `message.created` FIRST. File IO (the TOML
+        //    write below) must not delay peers/clients seeing the finalized
+        //    reply — a slow disk / AV scan stalling persist would otherwise
+        //    hold up the live publish. Both are independent and best-effort
+        //    (each only warns on failure; neither feeds the other).
         //    Multi-daemon sessions (peer daemon B's runtimes need to see
         //    daemon A's agent reply as silent context) require AgentReply
         //    to land on the live channel. iOS no longer renders these as
@@ -1226,6 +1225,11 @@ impl SessionManager {
             .await
         {
             warn!(?e, session_id, "publish_message failed");
+        }
+
+        // 2. Local TOML (durable history; not on the live path).
+        if let Err(e) = self.persist_message(session_id, &proto_msg).await {
+            warn!(?e, session_id, "persist_message failed");
         }
 
         // 3. Backend (final replies only — see TurnAggregator::cloud_persistent)

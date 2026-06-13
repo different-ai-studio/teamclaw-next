@@ -95,6 +95,11 @@ import {
 } from "@/lib/session-list-preview";
 import { executeAgentTurnFlush } from "@/lib/agent-turn-flush";
 import {
+  bufferStreamDelta,
+  flushStreamDeltasFor,
+  flushAllStreamDeltas,
+} from "@/lib/stream-delta-buffer";
+import {
   cloneStreamEntrySnapshot,
   resolveStreamEntryForPersist,
   syncStreamingToolOutputsFromLocalCache,
@@ -813,6 +818,8 @@ function AppContent() {
     actorId: string,
     trigger: string,
   ): boolean {
+    // Snapshots live byKey state below for persist — drain buffered text first.
+    flushStreamDeltasFor(sessionId, actorId);
     const streamKey = agentStreamKey(sessionId, actorId);
     if (flushTurnAgentReplyInFlightRef.current[streamKey]) {
       logInterruptMsgDiag("flush.interrupted.skip.inFlight", {
@@ -896,6 +903,9 @@ function AppContent() {
     actorId: string,
     trigger = "unknown",
   ): boolean {
+    // Reads live byKey stream state below — drain buffered text deltas so the
+    // persisted reply includes every arrived chunk (guards the interrupt race).
+    flushStreamDeltasFor(sessionId, actorId);
     const streamKey = agentStreamKey(sessionId, actorId);
     if (flushTurnAgentReplyInFlightRef.current[streamKey]) {
       logInterruptMsgDiag("flush.skip.inFlight", { sessionId, actorId, trigger });
@@ -1141,6 +1151,9 @@ function AppContent() {
 
           // Case 1: final message.created
           if (decoded.message) {
+            // This branch reads/finalizes ordered stream state below — drain
+            // any buffered text deltas so finalize/persist see all arrived text.
+            flushAllStreamDeltas();
             const msg = decoded.message;
             const senderActorId = msg.senderActorId;
             const streamingStore = useV2StreamingStore.getState();
@@ -1325,13 +1338,20 @@ function AppContent() {
             if (!actorId) return;
             const event = decoded.acpEvent.event;
 
+            // Non-text events read/mutate ordered stream state — drain any
+            // buffered text deltas for this stream first so parts ordering
+            // matches arrival order.
+            if (event?.case !== "output" && event?.case !== "thinking") {
+              flushStreamDeltasFor(sid, actorId);
+            }
+
             // acp.event detail already logged in the live:* line above.
             if (event?.case === "output") {
               const text = (event.value as { text?: string })?.text ?? "";
-              useV2StreamingStore.getState().appendOutput(sid, actorId, text);
+              bufferStreamDelta("output", sid, actorId, text);
             } else if (event?.case === "thinking") {
               const text = (event.value as { text?: string })?.text ?? "";
-              useV2StreamingStore.getState().appendThinking(sid, actorId, text);
+              bufferStreamDelta("thinking", sid, actorId, text);
             } else if (event?.case === "toolUse") {
               const tu = normalizeToolUseEvent(event.value);
               useV2StreamingStore.getState().pushToolUse(sid, actorId, {

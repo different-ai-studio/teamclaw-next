@@ -10,13 +10,15 @@ export function usePendingPermissionsQueue() {
   const sessionPermissionMode = useSessionPermissionMode(activeSessionId);
   const sessions = useSessionStore((s) => s.sessions);
   const pendingPermissions = useSessionStore((s) => s.pendingPermissions);
-  const streamByKey = useV2StreamingStore((s) => s.byKey);
+  const streamRevision = useV2StreamingStore((s) =>
+    activeSessionId ? (s.revisionBySession[activeSessionId] ?? 0) : 0,
+  );
   const [dismissedIds, setDismissedIds] = React.useState<string[]>([]);
 
-  const acpStreamingPermissions = React.useMemo(
-    () => collectAcpStreamingPermissions(activeSessionId, streamByKey),
-    [activeSessionId, streamByKey],
-  );
+  const acpStreamingPermissions = React.useMemo(() => {
+    const streamByKey = useV2StreamingStore.getState().byKey;
+    return collectAcpStreamingPermissions(activeSessionId, streamByKey);
+  }, [activeSessionId, streamRevision]);
 
   const baseVisiblePermissions = React.useMemo(
     () =>

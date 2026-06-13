@@ -1,32 +1,11 @@
-#[path = "../src/backend/mod.rs"]
-mod backend;
-#[path = "../src/config/mod.rs"]
-mod config;
-#[path = "../src/error.rs"]
-mod error;
-#[path = "../src/http/mod.rs"]
-mod http;
-#[path = "../src/opencode_settings/mod.rs"]
-mod opencode_settings;
-#[path = "../src/proto.rs"]
-mod proto;
-#[path = "../src/provider_config.rs"]
-mod provider_config;
-#[path = "../src/runtime/mod.rs"]
-mod runtime;
-#[path = "../src/team_link.rs"]
-mod team_link;
-#[path = "../src/team_shared_env.rs"]
-mod team_shared_env;
-#[path = "../src/team_shared_git.rs"]
-mod team_shared_git;
+include!("support/crate_modules.rs");
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use config::HttpConfig;
-use http::events::SessionEvent;
-use http::runtime_adapter::RuntimeManagerAdapter;
+use crate::http::events::SessionEvent;
+use crate::http::runtime_adapter::RuntimeManagerAdapter;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
@@ -49,7 +28,7 @@ struct SessionDetails {
 }
 
 struct TestApp {
-    _handle: http::HttpHandle,
+    _handle: crate::http::HttpHandle,
     client: Client,
     base: String,
     session_token: String,
@@ -191,11 +170,14 @@ async fn test_app_with_runtime_adapter() -> TestApp {
         None,
     )));
     let runtime = RuntimeManagerAdapter::new(manager.clone(), 256, None);
-    let handle = http::spawn(
+    let handle = crate::http::spawn(
         cfg,
-        http::server::metadata("actor".into(), "test"),
+        crate::http::server::metadata("actor".into(), "test"),
         runtime,
         None,
+        None,
+        None,
+        test_sync_dispatcher(),
         None,
         None,
     )

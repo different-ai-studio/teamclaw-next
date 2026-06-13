@@ -70,7 +70,7 @@ describe("useChatStickToBottom", () => {
     expect(el.scrollTop).toBe(200);
   });
 
-  it("scrollToBottomIfAtBottom still follows when near bottom", () => {
+  it("scrollToBottomIfAtBottom still follows when near bottom", async () => {
     const scrollRef = React.createRef<HTMLDivElement>();
     const el = mockScrollEl({
       scrollHeight: 1000,
@@ -84,6 +84,15 @@ describe("useChatStickToBottom", () => {
     act(() => {
       result.current.onScroll();
       result.current.scrollToBottomIfAtBottom();
+    });
+
+    // scrollContainerToBottom is now rAF-coalesced (one scroll per frame), so
+    // the actual scroll lands on the next animation frame. Flush it before
+    // asserting the deferred scroll position.
+    await act(async () => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
     });
 
     expect(el.scrollTop).toBe(600);

@@ -1704,7 +1704,7 @@ impl DaemonServer {
                         for runtime_id in evicted_runtime_ids {
                             self.publish_runtime_stopped(&runtime_id).await;
                         }
-                        for (agent_id, acp_event) in agent_events {
+                        for (agent_id, acp_event) in coalesce_text_events(agent_events) {
                             self.forward_agent_event(&agent_id, acp_event).await;
                         }
                     }
@@ -5730,6 +5730,46 @@ fn not_yet_implemented(
     }
 }
 
+/// Merge runs of consecutive Output (resp. Thinking) events from the SAME
+/// agent within one 50ms drain batch into a single event. The drain loop in
+/// `run()` already collects these together, so merging adds zero latency
+/// while cutting MQTT publish count (one QoS round-trip + ~220B envelope
+/// overhead saved per eliminated packet) during fast streaming.
+///
+/// Boundaries that STOP a merge: different agent, different event kind,
+/// any non-text event, or an Output already marked `is_complete` (a finalized
+/// reply must not absorb the next turn's first delta). Non-text events
+/// (tool_use, status_change, …) pass through untouched, preserving order.
+fn coalesce_text_events(events: Vec<(String, amux::AcpEvent)>) -> Vec<(String, amux::AcpEvent)> {
+    let mut out: Vec<(String, amux::AcpEvent)> = Vec::with_capacity(events.len());
+    for (agent_id, ev) in events {
+        if let Some((last_id, last_ev)) = out.last_mut() {
+            if *last_id == agent_id {
+                match (&mut last_ev.event, &ev.event) {
+                    (
+                        Some(amux::acp_event::Event::Output(prev)),
+                        Some(amux::acp_event::Event::Output(next)),
+                    ) if !prev.is_complete => {
+                        prev.text.push_str(&next.text);
+                        prev.is_complete = next.is_complete;
+                        continue;
+                    }
+                    (
+                        Some(amux::acp_event::Event::Thinking(prev)),
+                        Some(amux::acp_event::Event::Thinking(next)),
+                    ) => {
+                        prev.text.push_str(&next.text);
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        out.push((agent_id, ev));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -7138,5 +7178,129 @@ mod tests {
         assert!(ts.server.workspaces.workspaces.is_empty());
         assert!(mock.state().default_workspace_ids.is_empty());
         assert!(!ts.server.workspaces_path.exists());
+    }
+
+    #[test]
+    fn coalesce_merges_adjacent_output_runs() {
+        let ev = |text: &str| amux::AcpEvent {
+            event: Some(amux::acp_event::Event::Output(amux::AcpOutput {
+                text: text.to_string(),
+                is_complete: false,
+            })),
+            model: String::new(),
+        };
+        let merged = coalesce_text_events(vec![
+            ("a".into(), ev("Hel")),
+            ("a".into(), ev("lo")),
+            ("a".into(), ev(" world")),
+        ]);
+        assert_eq!(merged.len(), 1);
+        match &merged[0].1.event {
+            Some(amux::acp_event::Event::Output(o)) => assert_eq!(o.text, "Hello world"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn coalesce_respects_agent_and_kind_boundaries() {
+        let out = |text: &str| amux::AcpEvent {
+            event: Some(amux::acp_event::Event::Output(amux::AcpOutput {
+                text: text.to_string(),
+                is_complete: false,
+            })),
+            model: String::new(),
+        };
+        let think = |text: &str| amux::AcpEvent {
+            event: Some(amux::acp_event::Event::Thinking(amux::AcpThinking {
+                text: text.to_string(),
+            })),
+            model: String::new(),
+        };
+        // different agents never merge
+        let merged = coalesce_text_events(vec![("a".into(), out("x")), ("b".into(), out("y"))]);
+        assert_eq!(merged.len(), 2);
+        // thinking→output boundary preserved
+        let merged = coalesce_text_events(vec![
+            ("a".into(), think("t1")),
+            ("a".into(), think("t2")),
+            ("a".into(), out("o1")),
+        ]);
+        assert_eq!(merged.len(), 2);
+        match &merged[0].1.event {
+            Some(amux::acp_event::Event::Thinking(t)) => assert_eq!(t.text, "t1t2"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn coalesce_never_merges_past_is_complete() {
+        let out = |text: &str, complete: bool| amux::AcpEvent {
+            event: Some(amux::acp_event::Event::Output(amux::AcpOutput {
+                text: text.to_string(),
+                is_complete: complete,
+            })),
+            model: String::new(),
+        };
+        let merged = coalesce_text_events(vec![
+            ("a".into(), out("final", true)),
+            ("a".into(), out("next-turn", false)),
+        ]);
+        assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn coalesce_preserves_non_text_events() {
+        // tool_use and other non-text events pass through unmerged, order kept
+        let out = |text: &str| amux::AcpEvent {
+            event: Some(amux::acp_event::Event::Output(amux::AcpOutput {
+                text: text.to_string(),
+                is_complete: false,
+            })),
+            model: String::new(),
+        };
+        let status = amux::AcpEvent {
+            event: Some(amux::acp_event::Event::StatusChange(Default::default())),
+            model: String::new(),
+        };
+        let merged = coalesce_text_events(vec![
+            ("a".into(), out("x")),
+            ("a".into(), status.clone()),
+            ("a".into(), out("y")),
+        ]);
+        // x | status | y  → 3 (the two outputs are NOT adjacent)
+        assert_eq!(merged.len(), 3);
+    }
+
+    #[test]
+    fn coalesce_propagates_is_complete_and_splits_after() {
+        let out = |text: &str, complete: bool| amux::AcpEvent {
+            event: Some(amux::acp_event::Event::Output(amux::AcpOutput {
+                text: text.to_string(),
+                is_complete: complete,
+            })),
+            model: String::new(),
+        };
+        // a(false) + b(true) merge → "ab" complete; c(false) cannot merge into
+        // a completed output → separate event.
+        let merged = coalesce_text_events(vec![
+            ("a".into(), out("a", false)),
+            ("a".into(), out("b", true)),
+            ("a".into(), out("c", false)),
+        ]);
+        assert_eq!(merged.len(), 2);
+        match &merged[0].1.event {
+            Some(amux::acp_event::Event::Output(o)) => {
+                assert_eq!(o.text, "ab");
+                assert!(o.is_complete);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+        match &merged[1].1.event {
+            Some(amux::acp_event::Event::Output(o)) => {
+                assert_eq!(o.text, "c");
+                assert!(!o.is_complete);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
     }
 }

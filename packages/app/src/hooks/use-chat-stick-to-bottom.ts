@@ -23,6 +23,7 @@ export function useChatStickToBottom(
   scrollRef: React.RefObject<HTMLElement | null>,
 ) {
   const isAtBottomRef = React.useRef(true);
+  const scrollRafScheduledRef = React.useRef(false);
 
   const doScrollTo = React.useCallback((el: HTMLElement, top: number) => {
     if (typeof el.scrollTo === "function") {
@@ -32,10 +33,31 @@ export function useChatStickToBottom(
     }
   }, []);
 
+  /**
+   * Scroll the container to the absolute bottom, coalesced to at most one
+   * scroll per animation frame. During streaming the ResizeObserver can fire
+   * many times per frame; gating on rAF collapses those into a single scroll.
+   * Falls back to synchronous scroll where rAF is unavailable.
+   */
   const scrollContainerToBottom = React.useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    doScrollTo(el, el.scrollHeight - el.clientHeight);
+    const run = () => {
+      const el = scrollRef.current;
+      if (!el) return;
+      doScrollTo(el, el.scrollHeight - el.clientHeight);
+    };
+    if (typeof requestAnimationFrame !== "function") {
+      run();
+      return;
+    }
+    if (scrollRafScheduledRef.current) return;
+    scrollRafScheduledRef.current = true;
+    requestAnimationFrame(() => {
+      // Clear the gate before scrolling so the scroll callback itself never
+      // leaves a stale "scheduled" flag (a synchronous rAF mock would run the
+      // callback before any assignment of the returned id could complete).
+      scrollRafScheduledRef.current = false;
+      run();
+    });
   }, [scrollRef, doScrollTo]);
 
   /** Scroll to absolute bottom unconditionally, and flag as at-bottom. */

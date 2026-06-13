@@ -13,6 +13,7 @@ beforeEach(() => {
     archived: [],
     persistedPlansBySession: {},
     interruptedFlushPending: {},
+    revisionBySession: {},
   });
 });
 
@@ -775,5 +776,43 @@ describe("v2-streaming-store", () => {
       status: "failed",
       result: "failed",
     });
+  });
+});
+
+describe("revisionBySession", () => {
+  it("appendOutput bumps only its session's revision", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendOutput("s1", "a1", "hello");
+    expect(useV2StreamingStore.getState().revisionBySession["s1"]).toBe(1);
+    expect(useV2StreamingStore.getState().revisionBySession["s2"]).toBeUndefined();
+    store.appendOutput("s1", "a1", " world");
+    expect(useV2StreamingStore.getState().revisionBySession["s1"]).toBe(2);
+  });
+
+  it("tool / finalize / error mutations bump revision", () => {
+    const store = useV2StreamingStore.getState();
+    store.pushToolUse("s1", "a1", {
+      toolId: "t1", toolName: "bash", description: "", params: {},
+    });
+    store.setError("s1", "a1", "boom", "details");
+    store.finalize("s1", "a1", "final");
+    expect(useV2StreamingStore.getState().revisionBySession["s1"]).toBe(3);
+  });
+
+  it("clearStaleStreamErrors bumps revision when it removes stale errors", () => {
+    const store = useV2StreamingStore.getState();
+    store.setError("s1", "a1", "ACP prompt failed", "Authentication required");
+    store.finishSessionActor("s1", "a1");
+    expect(useV2StreamingStore.getState().revisionBySession["s1"]).toBe(2);
+
+    store.clearStaleStreamErrors("s1", "a1");
+    expect(useV2StreamingStore.getState().revisionBySession["s1"]).toBe(3);
+  });
+
+  it("appendOutputBatch bumps revision once for the whole batch", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendOutputBatch("s1", "a1", ["a", "b", "c"]);
+    expect(useV2StreamingStore.getState().revisionBySession["s1"]).toBe(1);
+    expect(useV2StreamingStore.getState().byKey["s1::a1"]?.outputText).toBe("abc");
   });
 });
