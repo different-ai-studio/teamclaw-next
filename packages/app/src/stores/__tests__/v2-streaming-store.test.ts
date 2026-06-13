@@ -798,4 +798,21 @@ describe("revisionBySession", () => {
     store.finalize("s1", "a1", "final");
     expect(useV2StreamingStore.getState().revisionBySession["s1"]).toBe(3);
   });
+
+  it("clearStaleStreamErrors bumps revision when it removes stale errors", () => {
+    const store = useV2StreamingStore.getState();
+    store.setError("s1", "a1", "ACP prompt failed", "Authentication required");
+    store.finishSessionActor("s1", "a1");
+    expect(useV2StreamingStore.getState().revisionBySession["s1"]).toBe(2);
+
+    store.clearStaleStreamErrors("s1", "a1");
+    expect(useV2StreamingStore.getState().revisionBySession["s1"]).toBe(3);
+  });
+
+  it("appendOutputBatch bumps revision once for the whole batch", () => {
+    const store = useV2StreamingStore.getState();
+    store.appendOutputBatch("s1", "a1", ["a", "b", "c"]);
+    expect(useV2StreamingStore.getState().revisionBySession["s1"]).toBe(1);
+    expect(useV2StreamingStore.getState().byKey["s1::a1"]?.outputText).toBe("abc");
+  });
 });

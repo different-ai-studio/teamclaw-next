@@ -30,12 +30,17 @@ export function bufferStreamDelta(
   const list = pending.get(key);
   if (list) list.push({ kind, delta });
   else pending.set(key, [{ kind, delta }]);
-  if (rafId === null && typeof requestAnimationFrame === "function") {
+  if (rafId !== null) return;
+  if (typeof requestAnimationFrame === "function") {
     rafId = requestAnimationFrame(() => {
       rafId = null;
       flushAllStreamDeltas();
     });
+    return;
   }
+  queueMicrotask(() => {
+    flushAllStreamDeltas();
+  });
 }
 
 function applyBuffered(
@@ -85,6 +90,9 @@ export function flushAllStreamDeltas(): void {
 }
 
 export function __resetStreamDeltaBufferForTests(): void {
+  if (rafId !== null && typeof cancelAnimationFrame === "function") {
+    cancelAnimationFrame(rafId);
+  }
   pending.clear();
   rafId = null;
 }

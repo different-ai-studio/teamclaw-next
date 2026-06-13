@@ -75,6 +75,24 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --manifest-path apps/desktop/Cargo.toml -- -D warnings
 
+  daemon-linux:
+    name: Daemon Unit Tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install protoc (for prost_build)
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+
+      - name: Run amuxd unit tests
+        run: cargo test -p amuxd --locked
+
   daemon-windows:
     name: Daemon (Windows)
     runs-on: windows-latest

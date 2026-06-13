@@ -23,7 +23,7 @@ import { DEFAULT_INPUT_AREA_HEIGHT, SAFE_BOTTOM_SPACING } from "./layout-constan
 // NOTE: this re-enablement needs a visual smoke test (open a >200-message
 // session, toggle the sidebar / resize the window, confirm no row overlap)
 // before shipping — see the task's owed manual verification.
-const VIRTUAL_MSG_THRESHOLD = 200;
+export const VIRTUAL_MSG_THRESHOLD = 200;
 const INITIAL_VISIBLE_MESSAGE_COUNT = 80;
 const LOAD_EARLIER_MESSAGE_COUNT = 60;
 

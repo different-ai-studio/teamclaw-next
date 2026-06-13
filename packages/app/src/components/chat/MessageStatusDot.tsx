@@ -29,14 +29,19 @@ export function MessageStatusDot({ messageId }: { messageId: string }) {
   const entry = useOutboxStore((s) => s.byId[messageId]);
   const retry = useOutboxStore((s) => s.retry);
   const cloudPersisted = useOutboxStore((s) => Boolean(s.cloudPersistedIds[messageId]));
-  const streamsByKey = useV2StreamingStore((s) => s.byKey);
-  const streamsArchived = useV2StreamingStore((s) => s.archived);
+  const sessionId = entry?.sessionId;
+  const streamRevision = useV2StreamingStore((s) =>
+    sessionId ? (s.revisionBySession[sessionId] ?? 0) : 0,
+  );
   const runtimeById = useRuntimeStateStore((s) => s.byRuntimeId);
   const { t } = useTranslation();
   if (!entry) return null;
 
   const deliveredTitle = t("chat.sendStatus.delivered", "Delivered");
   const inTransit = entry.state === "pending" || entry.state === "inFlight";
+  const { byKey: streamsByKey, archived: streamsArchived } =
+    useV2StreamingStore.getState();
+  void streamRevision;
   const agentTurnVisible =
     inTransit &&
     (sessionHasAgentStreamActivitySince(entry.sessionId, entry.createdAt, {

@@ -85,4 +85,25 @@ describe("mqtt-bridge", () => {
     expect(received[1].topic).toBe("b");
     expect(Array.from(received[1].bytes)).toEqual([255]);
   });
+
+  it("listenForEnvelopes skips bad b64 and still delivers valid envelopes", async () => {
+    let captured: (msg: { payload: { topic: string; b64: string }[] }) => void = () => {};
+    listenMock.mockImplementation(async (_event, cb) => {
+      captured = cb;
+      return () => {};
+    });
+    const received: { topic: string; bytes: Uint8Array }[] = [];
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await listenForEnvelopes((env) => received.push(env));
+    captured({
+      payload: [
+        { topic: "bad", b64: "!!!not-base64!!!" },
+        { topic: "ok", b64: "AQID" },
+      ],
+    });
+    expect(received).toHaveLength(1);
+    expect(received[0].topic).toBe("ok");
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
 });

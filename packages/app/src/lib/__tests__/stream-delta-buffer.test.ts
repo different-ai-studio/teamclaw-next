@@ -72,4 +72,29 @@ describe("stream-delta-buffer", () => {
     // unbatched fold: overlap("The over","The")="The overThe", then +" over"="The overThe over"
     expect(entry()?.outputText).toBe("The overThe over");
   });
+
+  it("flushStreamDeltasFor drains buffered text before a synchronous tool event", () => {
+    bufferStreamDelta("output", "s1", "a1", "before tool");
+    flushStreamDeltasFor("s1", "a1");
+    useV2StreamingStore.getState().pushToolUse("s1", "a1", {
+      toolId: "t1",
+      toolName: "bash",
+      description: "",
+      params: {},
+    });
+    const parts = entry()!.parts;
+    expect(parts[0].type).toBe("text");
+    expect(parts[1].type).toBe("tool-call");
+  });
+
+  it("flushes via microtask when requestAnimationFrame is unavailable", async () => {
+    vi.unstubAllGlobals();
+    vi.stubGlobal("requestAnimationFrame", undefined as unknown as typeof requestAnimationFrame);
+    __resetStreamDeltaBufferForTests();
+    useV2StreamingStore.setState({ byKey: {}, archived: [], revisionBySession: {} });
+    bufferStreamDelta("output", "s1", "a1", "hello");
+    expect(entry()).toBeUndefined();
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    expect(entry()?.outputText).toBe("hello");
+  });
 });

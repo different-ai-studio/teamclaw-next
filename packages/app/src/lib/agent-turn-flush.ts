@@ -2,7 +2,7 @@ import type { Message as TeamclawMessage } from "@/lib/proto/teamclaw_pb";
 import { logInterruptMsgDiag } from "@/lib/interrupt-msg-diag-core";
 import { summarizePersistRelease } from "@/lib/interrupt-msg-diag";
 import { bumpSessionListLastMessage } from "@/lib/session-list-preview";
-import { persistStreamingPartsForReply } from "@/lib/streaming-persist";
+import { persistStreamingPartsForReply, resolveStreamEntryForPersist } from "@/lib/streaming-persist";
 import { upsertMessagesBatch, type MessageRow } from "@/lib/local-cache";
 import { useSessionMessageStore } from "@/stores/session-message-store";
 import { useV2StreamingStore, type AgentStreamEntry } from "@/stores/v2-streaming-store";
@@ -145,18 +145,24 @@ export async function executeAgentTurnFlush(args: {
   // Drain any buffered text deltas so persisted parts include all arrived text.
   flushStreamDeltasFor(args.sessionId, args.actorId);
   args.beforePersist?.();
+  const live = useV2StreamingStore.getState().byKey[`${args.sessionId}::${args.actorId}`];
+  const streamEntryForPersist = resolveStreamEntryForPersist(
+    args.sessionId,
+    args.actorId,
+    live ?? args.streamEntrySnapshot,
+  );
   const enrichedReply = await persistStreamingPartsForReply(
     args.sessionId,
     args.actorId,
     args.reply,
     args.pendingReplies,
-    { streamEntrySnapshot: args.streamEntrySnapshot },
+    { streamEntrySnapshot: streamEntryForPersist },
   );
   args.afterEnriched?.(enrichedReply);
   commitFlushedAgentReply(args.sessionId, args.actorId, enrichedReply, {
     trigger: args.trigger,
     teamId: args.teamId,
-    streamEntrySnapshot: args.streamEntrySnapshot,
+    streamEntrySnapshot: streamEntryForPersist,
     persistedStage: args.persistedStage,
   });
 }

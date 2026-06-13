@@ -108,9 +108,33 @@ export function deriveAgentReplyContent(
 
   if (textParts.length === 1) {
     const partText = (textParts[0].text || textParts[0].content || "").trim();
-    return daemonFinal
-      ? pickCanonicalAgentReplyText(partText, daemonFinal)
-      : partText;
+    if (!daemonFinal) return partText;
+    const hasTools = parts.some((part) => part.type === "tool-call");
+    if (
+      hasTools &&
+      partText &&
+      !partText.includes(daemonFinal) &&
+      !daemonFinal.includes(partText) &&
+      !agentReplyTextsEquivalent(partText, daemonFinal)
+    ) {
+      return `${partText}\n\n${daemonFinal}`;
+    }
+    return pickCanonicalAgentReplyText(partText, daemonFinal);
+  }
+
+  if (textParts.length > 1) {
+    const joined = joinTextPartsFromParts(parts);
+    if (!daemonFinal) return joined;
+    if (daemonFinalDuplicatesTranscript(parts, daemonFinal)) return daemonFinal;
+    if (joined.includes(daemonFinal) || daemonFinal.includes(joined)) {
+      return pickCanonicalAgentReplyText(joined, daemonFinal);
+    }
+    // QoS0 may drop post-tool stream deltas; daemon final still carries that tail.
+    const hasTools = parts.some((part) => part.type === "tool-call");
+    if (hasTools) {
+      return joined ? `${joined}\n\n${daemonFinal}` : daemonFinal;
+    }
+    return pickCanonicalAgentReplyText(joined, daemonFinal);
   }
 
   return joinTextPartsFromParts(parts);

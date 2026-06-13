@@ -63,7 +63,11 @@ export async function listenForEnvelopes(
 ): Promise<UnlistenFn> {
   return listen<RawBatchedEnvelope[]>("mqtt:envelopes", (msg) => {
     for (const raw of msg.payload) {
-      handler({ topic: raw.topic, bytes: b64ToBytes(raw.b64) });
+      try {
+        handler({ topic: raw.topic, bytes: b64ToBytes(raw.b64) });
+      } catch (e) {
+        console.warn("[mqtt-bridge] skipping bad envelope b64:", raw.topic, e);
+      }
     }
   });
 }
