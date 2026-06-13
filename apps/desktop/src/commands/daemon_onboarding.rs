@@ -123,10 +123,7 @@ async fn start_installed_amuxd_detached<R: Runtime>(app: &AppHandle<R>) -> Resul
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
     let exe = home.join(".amuxd").join("bin").join("amuxd.exe");
     if !exe.exists() {
-        return Err(format!(
-            "amuxd binary not found at {}",
-            exe.display()
-        ));
+        return Err(format!("amuxd binary not found at {}", exe.display()));
     }
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const DETACHED_PROCESS: u32 = 0x0000_0008;

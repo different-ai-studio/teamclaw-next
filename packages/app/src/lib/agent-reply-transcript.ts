@@ -125,7 +125,7 @@ export function deriveAgentReplyContent(
   if (textParts.length > 1) {
     const joined = joinTextPartsFromParts(parts);
     if (!daemonFinal) return joined;
-    if (daemonFinalDuplicatesTranscript(parts, daemonFinal)) return daemonFinal;
+    if (daemonFinalDuplicatesTranscript(parts as MessagePart[], daemonFinal)) return daemonFinal;
     if (joined.includes(daemonFinal) || daemonFinal.includes(joined)) {
       return pickCanonicalAgentReplyText(joined, daemonFinal);
     }
