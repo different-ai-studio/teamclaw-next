@@ -112,6 +112,11 @@ pub fn remove_pidfile() {
 }
 
 /// Read the recorded pid, or `Ok(None)` if no pidfile exists.
+pub(crate) fn read_pidfile_for_service() -> anyhow::Result<Option<(i32, PathBuf)>> {
+    read_pidfile()
+}
+
+/// Read the recorded pid, or `Ok(None)` if no pidfile exists.
 fn read_pidfile() -> anyhow::Result<Option<(i32, PathBuf)>> {
     let path = DaemonConfig::pid_path();
     if !path.exists() {
@@ -129,6 +134,18 @@ fn read_pidfile() -> anyhow::Result<Option<(i32, PathBuf)>> {
 #[cfg(unix)]
 fn is_alive(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
+}
+
+/// OpenProcess + GetExitCodeProcess == STILL_ACTIVE. PROCESS_QUERY_LIMITED_INFORMATION
+/// succeeds across elevation boundaries that full query rights would not.
+#[cfg(windows)]
+pub(crate) fn pid_is_alive(pid: i32) -> bool {
+    is_alive(pid)
+}
+
+#[cfg(unix)]
+pub(crate) fn pid_is_alive(pid: i32) -> bool {
+    is_alive(pid)
 }
 
 /// OpenProcess + GetExitCodeProcess == STILL_ACTIVE. PROCESS_QUERY_LIMITED_INFORMATION
